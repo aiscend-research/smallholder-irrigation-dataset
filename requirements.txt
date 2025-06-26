@@ -7,3 +7,6 @@ ipykernel
 geopy>=2.4.1
 matplotlib
 seaborn
+earthengine-api
+gcsfs
+scikit-image>=0.25.2
