@@ -1,5 +1,6 @@
 from geopy.distance import distance
 from shapely.geometry import Polygon
+import ee
 
 def bounding_box(center_lat, center_lon, half_side_km=0.5):
     """
@@ -76,3 +77,10 @@ if __name__ == "__main__":
         print(f"{label}: computed={comp}, truth={truth}, diff={diff}") 
 
     # This is also about 3 cm off. 
+
+def get_bounding_box(lat, lon, half_side_km=0.5):
+    """
+    Returns an Earth Engine Rectangle geometry (~1km x 1km) centered on lat, lon.
+    """
+    min_lat, min_lon, max_lat, max_lon = bounding_box(lat, lon, half_side_km)
+    return ee.Geometry.Rectangle([min_lon, min_lat, max_lon, max_lat])
