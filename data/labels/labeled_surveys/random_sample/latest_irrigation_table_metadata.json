@@ -1,0 +1,1 @@
+{"date": "2025-07-04T09:58:49.032600", "file": "latest_irrigation_table.csv", "description": "The latest labeled irrigation data", "file_format": "csv", "source": "src/processing/pool_latest_labels.py"}

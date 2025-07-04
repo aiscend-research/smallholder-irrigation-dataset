@@ -1,1 +1,0 @@
-{"date": "2025-05-27T15:00:42.436169", "file": "irrigation_data.geojson", "description": "The latest labeled irrigation data", "file_format": "json", "source": "src/targeting/generate_irrigation_gdf.py"}

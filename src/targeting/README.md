@@ -10,14 +10,6 @@ To do so, we train the following models on verious geospatial data layers:
 
 ### Contents
 
-#### Irrigation data
-`generate_irrigation_gdf.py` generates a GeoJson file with, among other features: 
-1. `irrigation`: Irrigation certainty. Anything >=3 can be considered as having irrigation.
-1. `percent_coverage_high_certainty`: The percent of the region that is covered with irrigation polygons of 3 or more. 
-1. `geometry`: The lat/lon bounding box of the annotated region
-
-This file is saved under `data/targeting/irrigation_data.geojson`. 
-
 #### Features
 The regressions are run using geospatial data downloaded and manipulated using code in this module. 
 
