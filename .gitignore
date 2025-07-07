@@ -174,4 +174,8 @@ data/sampling/samples/*
 
 *.sh
 
+multi-temporal-crop-classification-subset.tar.gz
+install.log
+multi-temporal-crop-classification-subset
+
 irr-venv/*
