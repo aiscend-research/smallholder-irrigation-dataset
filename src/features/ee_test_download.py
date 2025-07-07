@@ -6,6 +6,10 @@ import time
 import logging
 import gcsfs
 
+# Set up proxy if needed (adjust protocol if necessary)
+os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
+os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
+
 # Add the project root to the system path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -16,6 +20,10 @@ from src.features.earthengine.mosaic_utils import initialize_earthengine, downlo
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
+
+def gcs_file_exists(fs, bucket, output_prefix):
+    path = f"{bucket}/{output_prefix}.tif"
+    return fs.exists(path)
 
 # -------- Time Window Generator --------
 def get_time_windows(target_date):
@@ -71,6 +79,11 @@ for idx, row in labels.iterrows():
     windows = get_time_windows(target_date)
     for widx, (start_date, end_date, offset) in enumerate(windows):
         output_prefix = f"s2_{lat:.4f}_{lon:.4f}_{start_date}_{end_date}_off{offset:+d}"
+
+        if gcs_file_exists(fs, bucket, output_prefix):
+            logging.info(f"  [SKIP] File already exists in GCS: gs://{bucket}/{output_prefix}.tif")
+            continue
+
         logging.info(f"[{idx+1}/{len(labels)}-{widx+1}/{len(windows)}] Exporting: ({lat}, {lon}) {start_date}–{end_date}")
 
         # 5. Export mosaic to GCS
