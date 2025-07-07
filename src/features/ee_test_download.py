@@ -6,10 +6,6 @@ import time
 import logging
 import gcsfs
 
-# Set up proxy if needed (adjust protocol if necessary)
-os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
-
 # Add the project root to the system path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
