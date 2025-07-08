@@ -1,15 +1,17 @@
 # Feature Downloading with Google Earth Engine
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Google Cloud Setup](#google-cloud-setup)
-    - [Create a GCP Project](#create-a-gcp-project)
-    - [Create a GCS Bucket](#create-a-gcs-bucket)
-    - [Create a Service Account](#create-a-service-account)
-4. [Configuration](#configuration)
-5. [Downloading Features](#downloading-features)
-6. [Notes](#notes)
+- [Feature Downloading with Google Earth Engine](#feature-downloading-with-google-earth-engine)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Prerequisites](#prerequisites)
+  - [Google Cloud Setup](#google-cloud-setup)
+    - [1. Create a GCP Project](#1-create-a-gcp-project)
+    - [2. Create a GCS Bucket](#2-create-a-gcs-bucket)
+    - [3. Create a Service Account](#3-create-a-service-account)
+  - [Service account and GCS configuration](#service-account-and-gcs-configuration)
+  - [Downloading Features](#downloading-features)
+  - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
 
@@ -81,3 +83,14 @@ earthengine:
 ## Downloading Features
 
 
+## Creating Pixel-Level Labels
+
+After downloading the Sentinel-2 images, we then create labels for each pixel. To do this, we first iterate through all the `.tif` mosaic files, which are assumed to be located at `data/dataset/images`.
+
+For each file, we extract the file data using (latitude, longitude, offset, start date, and end date) from the filename to retrieve the survey date. Then, we extract the `.tif` metadata, such that we can create labels at the resolution of the original `.tif`.
+
+Then, we must link the (latitude, longitude, survey date) to its corresponding labelled polygons (`.geojson` file). Note: This is a work in progress (I'm trying to find a more efficient way to do this).
+
+Then, we retrieve the polygons from the corresponding `.geojson` file, only retrieving polygons greater than a specified certainty (default is 4+). We store these polygons in a `geopandas.geodataframe.GeoDataFrame`, and rasterize these polygons at the same resolution of the original image, as a binary mask – a given pixel is 1 if the polygon overlaps with it, 0 otherwise. Note that if a polygon only partially overlaps with a pixel, it will count as 1 only if the it overlaps with the center of the pixel.
+
+Then, we save the binary mask into a new file, located in `data/dataset/labels`, with the filename the same as the original image.
