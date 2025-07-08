@@ -26,6 +26,9 @@ if project_root not in sys.path:
 # import utils.utils
 from utils.utils import *
 
+# CSV to determine source polygon file.
+IRRIGATION_TABLE = None
+
 '''
 Small class definition to be able to pass in data object
 into utils.py's save_data function.
@@ -52,17 +55,27 @@ def create_all_labels(tif_path):
     # Retrieve list of all .tif files
     files = [f for f in os.listdir(tif_path) 
                  if os.path.isfile(os.path.join(tif_path, f)) and f.lower().endswith('.tif')]
+    
+    # Retrieve irrigation table (need location, time, and source)
+    global IRRIGATION_TABLE
+    IRRIGATION_TABLE = pd.read_csv(get_data_root() + 
+                                "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv",
+                                usecols=['internal_id', 'x', 'y', 'source_file'])
+
+    # Format so we can query for lat/lon without rounding issue
+    IRRIGATION_TABLE['x'] = (IRRIGATION_TABLE['x'] * 1000).astype(int) / 1000
+    IRRIGATION_TABLE['y'] = (IRRIGATION_TABLE['y'] * 1000).astype(int) / 1000
+    IRRIGATION_TABLE['x'] = IRRIGATION_TABLE['x'].astype(str)
+    IRRIGATION_TABLE['y'] = IRRIGATION_TABLE['y'].astype(str)
 
     for file in files:
         input_image_path = path + "/" + file
         image_meta = get_image_meta(input_image_path)
 
-        # Retrieve time of labeled image (from file name)
-        timestamp = get_survey_date(file)
+        # Retrieve data labeled image (from file name)
+        lat, lon, timestamp = get_survey_data(file)
 
-        # Retrieve corresponding polygon file
-        # would be nice if we could have the corr. source file in the metadata.
-        irrigation_geojson = get_polygon_file(file)
+        irrigation_geojson = get_polygon_file(lat, lon)
         gdf = retrieve_polygons(irrigation_geojson, image_meta, timestamp)
 
         # Retrieve labels
@@ -72,11 +85,31 @@ def create_all_labels(tif_path):
         output_label_path = "dataset/labels/" + file[:-4] + ".tif"
         save_label_raster(label_array, image_meta, output_label_path)
 
-def get_polygon_file(file):
-    # Todo – Retrieve polygon file that corresponds with this .tif
-    return "../data/labels/labeled_surveys/random_sample/processed/AB_JL_101-125.geojson"
+def get_polygon_file(lat, lon):
+    '''
+    Retrieves the corresponding polygon file for a particular location
+    and time, by querying IRRIGATION_TABLE by location.
 
-def get_survey_date(input_image_path):
+    Parameters: 
+        - lat (str): Location latitude
+        - lon (str): Location longitude
+
+    Output:
+        - source_file (str): The .geojson file that contains labelled
+         polygons that corresponds with this location.
+    '''
+    lon = lon[:-1]
+    lat = lat[:-1]
+    # Todo – Retrieve polygon file that corresponds with this .tif
+    source_file = IRRIGATION_TABLE[ (IRRIGATION_TABLE['x'] == lon) & (IRRIGATION_TABLE['y'] == lat) ]
+
+    if (source_file.empty):
+        raise RuntimeError(f"Unable to find polygon file for location ({lat},{lon})")
+
+    source_file = get_data_root() + "/labels/labeled_surveys/random_sample/processed/" + source_file.iloc[0].source_file + ".geojson"
+    return source_file
+
+def get_survey_data(input_image_path):
     """
     Retrieves the survey date for a particular .tif image.
     
@@ -85,13 +118,20 @@ def get_survey_date(input_image_path):
         Example: s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif
 
     Parameters:
-        input_image_path (str): The input path of the .tif image of interest.
+        - input_image_path (str): The input path of the .tif image of interest.
+
+    Output:
+        - lat (str): Location latitute
+        - lon (str): Location longitude
+        - survey_date (Date): Date of corresponding survey.
     """
 
     # Retrieve tokens
     tokens = input_image_path[:-4].split("_")
     
     # Start, end date
+    lat = tokens[1]
+    lon = tokens[2]
     start_date = datetime.strptime(tokens[3], "%Y-%m-%d").date()
     end_date = datetime.strptime(tokens[4], "%Y-%m-%d").date()
 
@@ -99,7 +139,7 @@ def get_survey_date(input_image_path):
     middle_date = start_date + (end_date - start_date) / 2
     offset = int(tokens[-1][4:])
     survey_date = middle_date + timedelta(days=offset)
-    return survey_date
+    return lat, lon, survey_date
 
 def get_image_meta(input_image_path):
     """
@@ -134,13 +174,12 @@ def retrieve_polygons(irrigation_geojson, image_meta, timestamp, certainty_thres
     gdf = gpd.read_file(irrigation_geojson)
     gdf = gdf.set_crs(image_meta['crs'], allow_override=True)
 
-    # Filter out low certainty polygons
-    gdf = gdf[gdf['certainty'] >  certainty_thresh]
-
-    # Filter out times that do not correspond to this particular time.
-    # This is actually really slow, so it would be great if we could cache this somehow.
+    # Filter by times
     gdf = gdf[ (gdf['year'] == timestamp.year) & (gdf['month'] == timestamp.month) & (gdf['day'] == timestamp.day)]
-    
+
+    # Filter out low certainty polygons
+    gdf = gdf[gdf['certainty'] >=  certainty_thresh]      
+
     return gdf
 
 def rasterize_polygons(gdf, image_meta):
