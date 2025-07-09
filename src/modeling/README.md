@@ -15,5 +15,27 @@
         * H is height, W is width 
     * We want each pixel to be a row essentially, so we flatten the tensors by multiplying (H * W, T * C). Going from 4D to 2D
     * Since we flattened, each pixel is now a row, but we lost spatial information(location of the pixel)
- * Ran randomForest on 1000 pixels, since it was taking too long when I tried running it on everything and made predictions
-    * Can maybe downsample if needed
+ * Ran randomForest on 1000 pixels, since it was taking too long when I tried running it on everything and made predictions.
+    * Can maybe downsample the pixel dimensions if needed
+
+
+
+
+`build_features.py`
+ """
+    Flattens a TerraTorch-style dataset into a tabular format suitable for classical ML models.
+
+    Parameters:
+    ----------
+    dataset : torch.utils.data.Dataset
+        The dataset where each sample is a dict with keys 'image' and 'mask'.
+    ignore_index : int, optional
+        The label value to ignore (e.g., -1), by default -1.
+
+    Returns:
+    -------
+    X : np.ndarray
+        The flattened feature matrix of shape (num_pixels_total, T*C).
+    y : np.ndarray
+        The corresponding label vector of shape (num_pixels_total,).
+"""    
