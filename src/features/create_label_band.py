@@ -60,7 +60,9 @@ def create_all_labels(tif_path):
     global IRRIGATION_TABLE
     IRRIGATION_TABLE = pd.read_csv(get_data_root() + 
                                 "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv",
-                                usecols=['internal_id', 'x', 'y', 'source_file'])
+                                usecols=['internal_id', 'site_id', 'x', 'y', 'source_file'])
+
+    IRRIGATION_TABLE['site_id'] = IRRIGATION_TABLE['site_id'].apply(lambda id: id[3:])
 
     # Format so we can query for lat/lon without rounding issue
     IRRIGATION_TABLE['x'] = (IRRIGATION_TABLE['x'] * 1000).astype(int) / 1000
@@ -75,8 +77,8 @@ def create_all_labels(tif_path):
         # Retrieve data labeled image (from file name)
         lat, lon, timestamp = get_survey_data(file)
 
-        irrigation_geojson = get_polygon_file(lat, lon)
-        gdf = retrieve_polygons(irrigation_geojson, image_meta, timestamp)
+        survey_id, internal_id, irrigation_geojson = get_polygon_file(lat, lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
         # Retrieve labels
         label_array = rasterize_polygons(gdf, image_meta)
@@ -88,13 +90,17 @@ def create_all_labels(tif_path):
 def get_polygon_file(lat, lon):
     '''
     Retrieves the corresponding polygon file for a particular location
-    and time, by querying IRRIGATION_TABLE by location.
+    and time, by querying IRRIGATION_TABLE by location. Also retrieves 
+    survey_id and internal_id, such that we can find the correct location
+    within the source_file
 
     Parameters: 
         - lat (str): Location latitude
         - lon (str): Location longitude
 
     Output:
+        - survey_id (int): Full id for the survey
+        - internal_id (int): Internal id for the survey
         - source_file (str): The .geojson file that contains labelled
          polygons that corresponds with this location.
     '''
@@ -106,8 +112,11 @@ def get_polygon_file(lat, lon):
     if (source_file.empty):
         raise RuntimeError(f"Unable to find polygon file for location ({lat},{lon})")
 
+    internal_id = source_file.iloc[0].internal_id
+    survey_id = int(source_file.iloc[0].site_id)
     source_file = get_data_root() + "/labels/labeled_surveys/random_sample/processed/" + source_file.iloc[0].source_file + ".geojson"
-    return source_file
+
+    return survey_id, internal_id, source_file
 
 def get_survey_data(input_image_path):
     """
@@ -156,13 +165,15 @@ def get_image_meta(input_image_path):
 
     return image_meta
 
-def retrieve_polygons(irrigation_geojson, image_meta, timestamp, certainty_thresh=4):
+def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=4):
     """
     Retrieve polygons corresponding to a particular .tif image.
 
     Parameters:
         - irrigation_geojson (str): Path of GeoJSON file that corresponds to the particular image 
         we are working with.
+        - survey_id (int): Full survey id to retrieve polygons at the correct location
+        - internal_id (int): Internal survey id to retrieve polygons at the correct location
         - image_meta (dict): Metadata of particular .tif image we are working with.
         - timestamp (Date): Date
         - certainty_thresh (int): Minimum certainty for a polygon to be considered irrigated.
@@ -173,6 +184,10 @@ def retrieve_polygons(irrigation_geojson, image_meta, timestamp, certainty_thres
     """
     gdf = gpd.read_file(irrigation_geojson)
     gdf = gdf.set_crs(image_meta['crs'], allow_override=True)
+
+    # Retrieve correct location. Note some polygons' internal_id is actually
+    # its survey id, so we must check both ids.
+    gdf = gdf[ (gdf['internal_id'] == survey_id) | (gdf['internal_id'] == internal_id)]
 
     # Filter by times
     gdf = gdf[ (gdf['year'] == timestamp.year) & (gdf['month'] == timestamp.month) & (gdf['day'] == timestamp.day)]
