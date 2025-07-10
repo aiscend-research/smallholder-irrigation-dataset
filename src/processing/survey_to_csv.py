@@ -53,7 +53,7 @@ def parse_xml(file_path, original_location_file=None):
         ids_cross = pd.read_csv(original_location_file)
         ids_cross = ids_cross[ids_cross["id"] == site_id]
         if ids_cross.empty:
-            print(f"Warning: {site_id} not found in original location file. Removing this line from the output.")
+            # print(f"Warning: {site_id} not found in original location file. Removing this line from the output.")
             return []
         else:
             internal_id = ids_cross.index[0] + 1
@@ -149,7 +149,7 @@ if __name__ == '__main__':
 
     # Example usage/test code
 
-    # xml_zip = "data/labels/labeled_surveys/random_sample/raw/JL_26-50.zip"
+    # xml_zip = "data/labels/labeled_surveys/random_sample/raw/JL_400-424.zip"
     # df = process_xml_zip(xml_zip)
 
     # CLI argument parsing

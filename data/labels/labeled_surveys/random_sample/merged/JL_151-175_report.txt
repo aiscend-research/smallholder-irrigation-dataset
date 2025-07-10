@@ -1,29 +1,8 @@
-Outlier Warning: Row 0 (internal_id 8, site_id id_5160031, 27/7/2019): coverage outlier (> 0.35 %) with 0.85% coverage.
 Row 3 (internal_id 21, 29/7/2023): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Outlier Warning: Row 5 (internal_id 21, site_id id_5087637, 16/6/2021): coverage outlier (> 0.35 %) with 0.75% coverage.
-Outlier Warning: Row 6 (internal_id 21, site_id id_5087637, 14/8/2019): coverage outlier (> 0.35 %) with 0.41% coverage.
-Outlier Warning: Row 7 (internal_id 21, site_id id_5087637, 16/6/2018): coverage outlier (> 0.35 %) with 0.36% coverage.
-Outlier Warning: Row 8 (internal_id 21, site_id id_5087637, 31/7/2017): coverage outlier (> 0.35 %) with 0.35% coverage.
-Outlier Warning: Row 13 (internal_id 19, site_id id_5098939, 5/10/2022): coverage outlier (> 0.35 %) with 0.57% coverage.
-Outlier Warning: Row 14 (internal_id 19, site_id id_5098939, 20/9/2022): coverage outlier (> 0.35 %) with 0.76% coverage.
 Row 15 (internal_id 19, 13/9/2021): survey marked irrigation 3 (possible irrigation) but no matching polygons found.
-Outlier Warning: Row 25 (internal_id 6, site_id id_5180920, 28/8/2020): coverage outlier (> 0.35 %) with 1.88% coverage.
-Outlier Warning: Row 26 (internal_id 6, site_id id_5180920, 15/9/2019): coverage outlier (> 0.35 %) with 1.90% coverage.
 Polygon 391 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
 Polygon 406 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
-Outlier Warning: Row 27 (internal_id 6, site_id id_5180920, 6/6/2019): coverage outlier (> 0.35 %) with 2.90% coverage.
-Outlier Warning: Row 28 (internal_id 6, site_id id_5180920, 18/8/2018): coverage outlier (> 0.35 %) with 2.24% coverage.
-Outlier Warning: Row 29 (internal_id 6, site_id id_5180920, 3/7/2018): coverage outlier (> 0.35 %) with 2.64% coverage.
-Outlier Warning: Row 30 (internal_id 6, site_id id_5180920, 20/10/2017): coverage outlier (> 0.35 %) with 3.48% coverage.
 Polygon 140 (internal_id 5180920, 31/8/2017) does not overlap the survey area.
-Outlier Warning: Row 31 (internal_id 6, site_id id_5180920, 31/8/2017): coverage outlier (> 0.35 %) with 2.12% coverage.
-Outlier Warning: Row 32 (internal_id 6, site_id id_5180920, 12/8/2017): coverage outlier (> 0.35 %) with 1.73% coverage.
-Outlier Warning: Row 33 (internal_id 6, site_id id_5180920, 5/9/2016): coverage outlier (> 0.35 %) with 2.32% coverage.
-Outlier Warning: Row 34 (internal_id 6, site_id id_5180920, 12/8/2016): coverage outlier (> 0.35 %) with 2.20% coverage.
 Row 36 (internal_id 16, 6/10/2023): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Outlier Warning: Row 58 (internal_id 24, site_id id_5036558, 18/6/2019): coverage outlier (> 0.35 %) with 1.43% coverage.
-Outlier Warning: Row 59 (internal_id 24, site_id id_5036558, 13/6/2019): coverage outlier (> 0.35 %) with 1.32% coverage.
-Outlier Warning: Row 60 (internal_id 24, site_id id_5036558, 7/6/2019): coverage outlier (> 0.35 %) with 1.31% coverage.
-Outlier Warning: Row 73 (internal_id 23, site_id id_3448011, 14/6/2023): coverage outlier (> 0.35 %) with 0.42% coverage.
 Polygon 195 (internal_id 5087637, 13/10/20212) has no matching survey row.
 Polygon 393 (internal_id 5180920, 6/6/201955) has no matching survey row.

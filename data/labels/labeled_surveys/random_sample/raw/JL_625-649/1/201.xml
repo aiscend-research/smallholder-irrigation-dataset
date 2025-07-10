@@ -1,0 +1,101 @@
+<?xml version='1.0' standalone='yes' ?>
+<plot step="1" created="2025-05-20T11:29:58.736-07:00" modified="2025-05-20T11:30:58.808-07:00">
+  <id>
+    <value>id_5128338</value>
+  </id>
+  <location>
+    <x>29.22285110770021</x>
+    <y>-13.710438532539344</y>
+    <srs>EPSG:4326</srs>
+  </location>
+  <operator />
+  <actively_saved>
+    <value>true</value>
+  </actively_saved>
+  <actively_saved_on>
+    <year>2025</year>
+    <month>5</month>
+    <day>20</day>
+  </actively_saved_on>
+  <plot_file>
+    <value>Zambia_0.05_n_400-424.csv</value>
+  </plot_file>
+  <year1>
+    <code>2023</code>
+  </year1>
+  <month1>
+    <code>7</code>
+  </month1>
+  <day1>
+    <value>26</value>
+  </day1>
+  <day1_mc />
+  <irrigation1>
+    <code>1</code>
+  </irrigation1>
+  <uncertainty_reason1 />
+  <year2>
+    <code>2020</code>
+  </year2>
+  <month2>
+    <code>7</code>
+  </month2>
+  <day2>
+    <value>14</value>
+  </day2>
+  <irrigation2>
+    <code>1</code>
+  </irrigation2>
+  <uncertainty_reason2 />
+  <year3>
+    <code>2019</code>
+  </year3>
+  <month3>
+    <code>7</code>
+  </month3>
+  <day3>
+    <value>27</value>
+  </day3>
+  <irrigation3>
+    <code>1</code>
+  </irrigation3>
+  <uncertainty_reason3 />
+  <year4 />
+  <month4 />
+  <day4 />
+  <irrigation4 />
+  <uncertainty_reason4 />
+  <year5 />
+  <month5 />
+  <day5 />
+  <irrigation5 />
+  <uncertainty_reason5 />
+  <year6 />
+  <month6 />
+  <day6 />
+  <irrigation6 />
+  <uncertainty_reason6 />
+  <year7 />
+  <month7 />
+  <day7 />
+  <irrigation7 />
+  <uncertainty_reason7 />
+  <year8 />
+  <month8 />
+  <day8 />
+  <irrigation8 />
+  <uncertainty_reason8 />
+  <natural_dicoloration>
+    <value>true</value>
+  </natural_dicoloration>
+  <year9 />
+  <month9 />
+  <day9 />
+  <irrigation9 />
+  <uncertainty_reason9 />
+  <year10 />
+  <month10 />
+  <day10 />
+  <irrigation10 />
+  <uncertainty_reason10 />
+</plot>

@@ -1,5 +1,1 @@
 Row 30 (internal_id 17, 27/7/2019): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
-Outlier Warning: Row 31 (internal_id 17, site_id id_3533713, 8/7/2019): coverage outlier (> 0.35 %) with 0.61% coverage.
-Outlier Warning: Row 35 (internal_id 22, site_id id_1051330, 4/9/2020): coverage outlier (> 0.35 %) with 1.02% coverage.
-Outlier Warning: Row 54 (internal_id 20, site_id id_5076517, 6/8/2017): coverage outlier (> 0.35 %) with 0.43% coverage.
-Outlier Warning: Row 59 (internal_id 3, site_id id_5187039, 24/7/2024): coverage outlier (> 0.35 %) with 0.52% coverage.

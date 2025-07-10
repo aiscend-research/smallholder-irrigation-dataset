@@ -1,0 +1,1 @@
+Row 22 (internal_id 11, 12/6/2021): survey marked irrigation 2 (possible irrigation) but no matching polygons found.

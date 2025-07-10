@@ -9,11 +9,6 @@ if project_root not in sys.path:
 
 from src.utils.utils import get_data_root, save_data
 
-# Add the project root to the system path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
 class SampleGenerator:
     """A class to manage sampling from a spatial grid while tracking unique IDs."""
 

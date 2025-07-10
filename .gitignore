@@ -171,11 +171,24 @@ data/sampling/*
 data/sampling/samples/*
 !data/sampling/samples/random_sample/
 !data/sampling/samples/random_sample/*
+!data/targeting/
+data/targeting/features/
 
 *.sh
 
+<<<<<<< HEAD
 multi-temporal-crop-classification-subset.tar.gz
 install.log
 multi-temporal-crop-classification-subset
 
 irr-venv/*
+=======
+irr-venv/*
+!src/processing/process_file_pair.sh
+.Rproj.user
+data/labels/unlabeled_surveys/random_sample/Zambia_0.05_n_*.csv
+secrets/earthengine-key.json
+
+.RData
+.Rhistory
+>>>>>>> origin/main

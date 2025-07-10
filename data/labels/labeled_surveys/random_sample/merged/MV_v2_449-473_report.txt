@@ -1,3 +1,1 @@
-Outlier Warning: Row 0 (internal_id 11, site_id id_5134131, 26/7/2023): coverage outlier (> 0.35 %) with 26.18% coverage.
-Outlier Warning: Row 1 (internal_id 11, site_id id_5134131, 14/7/2020): coverage outlier (> 0.35 %) with 25.32% coverage.
-Outlier Warning: Row 2 (internal_id 11, site_id id_5134131, 1/8/2016): coverage outlier (> 0.35 %) with 0.83% coverage.
+All checks passed successfully.

@@ -1,0 +1,1 @@
+Polygon 45 (internal_id nan, nan/nan/nan) has no matching survey row.

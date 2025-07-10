@@ -1,0 +1,1 @@
+Row 26 (internal_id 22, 23/8/2018): survey marked irrigation as 1 (no irrigation) but found 2 matching polygon(s).

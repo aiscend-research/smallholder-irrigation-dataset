@@ -1,0 +1,2 @@
+Polygon 380 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
+Polygon 395 (internal_id 5180920, 6/6/2019) does not overlap the survey area.

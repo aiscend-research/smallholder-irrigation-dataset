@@ -1,8 +1,1 @@
-Outlier Warning: Row 9 (internal_id 15, site_id id_5121300, 4/6/2017): coverage outlier (> 0.35 %) with 3.44% coverage.
-Outlier Warning: Row 21 (internal_id 21, site_id id_5062566, 14/6/2019): coverage outlier (> 0.35 %) with 0.42% coverage.
-Outlier Warning: Row 26 (internal_id 23, site_id id_5043172, 9/6/2023): coverage outlier (> 0.35 %) with 1.70% coverage.
 Row 29 (internal_id 18, 12/7/2024): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
-Outlier Warning: Row 29 (internal_id 18, site_id id_5092601, 12/7/2024): coverage outlier (> 0.35 %) with 1.89% coverage.
-Outlier Warning: Row 32 (internal_id 19, site_id id_3511469, 22/6/2021): coverage outlier (> 0.35 %) with 0.47% coverage.
-Outlier Warning: Row 33 (internal_id 19, site_id id_3511469, 16/6/2021): coverage outlier (> 0.35 %) with 0.45% coverage.
-Outlier Warning: Row 50 (internal_id 1, site_id id_5248727, 11/8/2023): coverage outlier (> 0.35 %) with 0.56% coverage.

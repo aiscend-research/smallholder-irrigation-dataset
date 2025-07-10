@@ -1,7 +1,7 @@
 from geopy.distance import distance
 from shapely.geometry import Polygon
 
-def bounding_box(center_lat, center_lon, half_side_km = 0.5):
+def bounding_box(center_lat, center_lon, half_side_km=0.5):
     """
     Returns a truly geodesic bounding box ~1 km wide/high,
     centered on (center_lat, center_lon).

@@ -2,7 +2,6 @@ Row 3 (internal_id 11, 7/6/2024): survey marked irrigation 4 (possible irrigatio
 Row 5 (internal_id 12, 1/8/2024): survey marked irrigation 5 (possible irrigation) but no matching polygons found.
 Row 5 (internal_id 12, 1/8/2024): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
 Row 9 (internal_id 6, 1/9/2023): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Outlier Warning: Row 11 (internal_id 17, site_id id_5104511, 28/10/2020): coverage outlier (> 0.35 %) with 1.88% coverage.
 Row 12 (internal_id 17, 23/8/2018): survey marked irrigation 4 (possible irrigation) but no matching polygons found.
 Row 16 (internal_id 25, 16/7/2024): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
 Row 20 (internal_id 14, 1/8/2020): survey marked irrigation 5 (possible irrigation) but no matching polygons found.

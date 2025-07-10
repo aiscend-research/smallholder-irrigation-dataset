@@ -12,10 +12,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -96,10 +93,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -156,10 +150,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -248,10 +239,7 @@
         "year": 2023,
         "certainty": 3,
         "uncertainty_explanation": "only slightly green",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -312,10 +300,7 @@
         "year": 2017,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -380,10 +365,7 @@
         "year": 2017,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -460,10 +442,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -520,10 +499,7 @@
         "year": 2018,
         "certainty": 3,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -616,10 +592,7 @@
         "year": 2017,
         "certainty": 3,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -700,10 +673,7 @@
         "year": 2017,
         "certainty": 3,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -808,10 +778,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -880,10 +847,7 @@
         "year": 2023,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -952,10 +916,7 @@
         "year": 2023,
         "certainty": 3,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",
@@ -1024,10 +985,7 @@
         "year": 2023,
         "certainty": 4,
         "uncertainty_explanation": "uneven",
-        "plantation": 0,
-        "commercial": 0,
-        "color": "fff400f4",
-        "color_im_num": null
+        "special_category": ""
       },
       "geometry": {
         "type": "Polygon",

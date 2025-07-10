@@ -38,6 +38,7 @@ Before using any scripts, follow these steps:
 | 2    | `polygons_to_geojson.py`       | Converts Google Earth Pro `.kml` files into `.geojson` format                     |
 | 3    | `merge_survey_and_polygons.py` | Merges processed survey data with labeled polygons and computes coverage stats    |
 | 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files and merges them automatically |
+| 5    | `pool_latest_labels.py`   | Pools the latest labeled irrigation data and outputs both a CSV and a GeoJSON file      |
 
 ---
 
@@ -49,6 +50,7 @@ Each script creates or saves new files as it runs:
 * `polygons_to_geojson.py` creates a `.geojson` file in the `processed/` folder with labeled polygons
 * `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder, **and also saves a log file** summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
 * `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`
+* `pool_latest_labels.py` pools the latest labeled irrigation data for the `random_sample` group and outputs both a CSV and a GeoJSON file with bounding box geometries for each label.
 
 You can either fully process a single pair of survey and polygon files, or batch process an entire folder.
 
@@ -66,6 +68,21 @@ python src/processing/polygons_to_geojson.py data/labels/labeled_surveys/random_
 # Merge survey and polygon data. 
 # This assumes the previous two steps were successful and there is a geojson with a matching name in the same folder as the csv to match it with. 
 python src/processing/merge_survey_and_polygons.py data/labels/labeled_surveys/random_sample/processed/JL_26-50.csv
+```
+
+Alternatively, to run all of this in one command, you can instead run `process_file_pair.sh`. To set this up on a Mac, run the following to make it an executable file
+```bash
+chmod +x src/processing/process_file_pair.sh
+```
+
+Then, run the following script, replacing "JL_26-50" with whichever set you want.
+```bash
+./src/processing/process_file_pair.sh JL_26-50
+```
+
+On Windows, open Git Bash and run 
+```bash
+./src/processing/process_file_pair.sh JL_26-50
 ```
 
 #### ✅ Option 2: Batch process an entire folder
