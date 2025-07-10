@@ -3,9 +3,7 @@
 This folder contains a modular pipeline for training and evaluating a Random Forest classifier on multi-temporal satellite imagery using datasets in the TerraTorch (TorchGeo-style) format.
 
 ## Warning
-This folder contains a modular pipeline for training and evaluating a Random Forest classifier on multi-temporal satellite imagery using datasets in the TerraTorch (TorchGeo-style) format.
-
-The pipeline is specifically designed for the multi-temporal-crop-dataset but can be adapted for other datasets with similar structure.
+The pipeline is specifically designed for the multi-temporal-crop-dataset as used by terratorch, so many things will need to changed for a different dataset.
 
 ## Structure
 ```
