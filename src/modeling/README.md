@@ -1,41 +1,36 @@
-# Current Contents
-1. A notebook to prototype running a tree-based model using dataset/datamodule
- * I was having a hard time connecting to the SSH remote, so I decided to download the terratorch multi-temporal-crop-dataset on my local machine. I will include these files in the .gitignore for now(Around 1GB). Using tutorial from terratorch, I downloaded the a sample of the dataset from a google drive folder. 
- * Converting the data from time-series format to tabular 
-    * The current format of the data in the dataset is 
-    ```
-    sample = {
-    'image': Tensor of shape (C, T, H, W),
-    'mask' : Tensor of shape (H, W)
-    }
-    ```
-        * Where the image is the pixel information and mask is the label (i.e. crop type)
-        * C is the spectral bands (color)
-        * T is time steps 
-        * H is height, W is width 
-    * We want each pixel to be a row essentially, so we flatten the tensors by multiplying (H * W, T * C). Going from 4D to 2D
-    * Since we flattened, each pixel is now a row, but we lost spatial information(location of the pixel)
- * Ran randomForest on 1000 pixels, since it was taking too long when I tried running it on everything and made predictions.
-    * Can maybe downsample the pixel dimensions if needed
+
+## Overview
+This folder contains a modular pipeline for training and evaluating a Random Forest classifier on multi-temporal satellite imagery using datasets in the TerraTorch (TorchGeo-style) format.
+
+## Warning
+This folder contains a modular pipeline for training and evaluating a Random Forest classifier on multi-temporal satellite imagery using datasets in the TerraTorch (TorchGeo-style) format.
+
+The pipeline is specifically designed for the multi-temporal-crop-dataset but can be adapted for other datasets with similar structure.
+
+## Structure
+```
+├── main.py                    # Entry point to run the full pipeline
+├── prototyping.ipynb          # Notebook for interactive experimentation
+├── README.md                  # This file
+├── rf_pipeline/               # Core ML pipeline modules
+│   ├── __init__.py            # Makes rf_pipeline a Python package
+│   ├── build_features.py      # Data loading and flattening
+│   ├── rf_model.py            # Model training
+│   ├── evaluation.py          # Model prediction and metrics
+│   └── visualization.py       # Plotting predictions and confusion matrix
+```
+
+#### `build_features.py`
+`get_datamodule(dataset_path)`: Loads a TerraTorch-style datamodule from the given path.
+`flatten_dataset(dataset)`: Converts multi-dimensional satellite imagery into a **tabular format** where each pixel becomes a row with multi-temporal features. This is so that you can run classical ML models like Random Forests. Flattening removes spatial context, so this is intended for pixel-wise classification only.
 
 
+ #### `rf_model.py`
+ Contains a `train_randomForest` function that uses sklearn to train a randomForest model on training data.
 
+ #### `evaluation.py`
+ Contains `predict` and `model_metrics` functions that use sklearn to predict and provide metrics such as the accuracy and the f1 score.
 
-`build_features.py`
- """
-    Flattens a TerraTorch-style dataset into a tabular format suitable for classical ML models.
-
-    Parameters:
-    ----------
-    dataset : torch.utils.data.Dataset
-        The dataset where each sample is a dict with keys 'image' and 'mask'.
-    ignore_index : int, optional
-        The label value to ignore (e.g., -1), by default -1.
-
-    Returns:
-    -------
-    X : np.ndarray
-        The flattened feature matrix of shape (num_pixels_total, T*C).
-    y : np.ndarray
-        The corresponding label vector of shape (num_pixels_total,).
-"""    
+ #### `visualization.py`
+ `print_confusion_matix(y_true, y_pred)`: Displays a confusion matrix using `matplotlib`.
+`plot_rf_predictions(dataset, clf, class_names, colors)`: Visualizes the model’s pixel-wise predictions vs ground truth masks for selected samples, using color-coded masks. Class colors and names are dataset-dependent and should be passed in as arguments. This function will have to changed depending on the dataset.

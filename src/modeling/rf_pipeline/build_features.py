@@ -12,30 +12,25 @@ import numpy as np
 from tqdm import tqdm
 
 
-#Using terratorch's MultiTemporalCropClassification dataset, will change this later
-dataset_path = "multi-temporal-crop-classification-subset"
-
-#Create a get datamodule function 
-
-#Using terratorch's MultiTemporalCropClassificationDataModule, will change this later
-datamodule = MultiTemporalCropClassificationDataModule(
-    batch_size=8,
-    num_workers=2,
-    data_root=dataset_path,
-    train_transform=[
-        terratorch.datasets.transforms.FlattenTemporalIntoChannels(),  # Required for temporal data
-        albumentations.D4(), # Random flips and rotation
-        albumentations.pytorch.transforms.ToTensorV2(),
-        terratorch.datasets.transforms.UnflattenTemporalFromChannels(n_timesteps=3),
-    ],
-    val_transform=None,  # Using ToTensor() by default
-    test_transform=None,
-    expand_temporal_dimension=True,
-    use_metadata=False, # The crop dataset has metadata for location and time
-    reduce_zero_label=True,
-)
-
-
+#get datamodule function 
+def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2, n_timesteps: int = 3):
+    datamodule = MultiTemporalCropClassificationDataModule(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        data_root=dataset_path,
+        train_transform=[
+            terratorch.datasets.transforms.FlattenTemporalIntoChannels(),  # Required for temporal data
+            albumentations.D4(), # Random flips and rotation
+            albumentations.pytorch.transforms.ToTensorV2(),
+            terratorch.datasets.transforms.UnflattenTemporalFromChannels(n_timesteps=3),
+        ],
+        val_transform=None,
+        test_transform=None,
+        expand_temporal_dimension=True,
+        use_metadata=False,
+        reduce_zero_label=True,
+    )
+    return datamodule
 
 
 #function to flatten tensors to a more "tabular" format
