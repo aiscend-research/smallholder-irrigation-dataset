@@ -97,6 +97,30 @@ This command runs all three steps on everything inside the `raw/` folder:
 python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
 ```
 
+This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
+
+---
+
+### 🛑 Checking for Warnings in Latest Surveys
+
+The script `check_for_warnings.sh` helps you quickly identify which of the most recent survey versions still have warnings or issues flagged during the merging/validation process.
+
+**What it does:**  
+- Scans the merged survey reports for your group (e.g., `random_sample`).
+- Compares them to the list of latest surveys in `latest_irrigation_table.csv`.
+- Prints the names of any surveys that are both the latest version **and** have warnings (i.e., their report does not say "All checks passed successfully.").
+
+**How to use:**
+1. Make sure you have run the full processing pipeline so that the merged reports and latest irrigation table are up to date.
+2. From the project root, run:
+   ```bash
+   ./src/processing/check_for_warnings.sh
+   ```
+   (You may need to make it executable first: `chmod +x src/processing/check_for_warnings.sh`)
+
+**Output:**  
+A list of survey file names that are the latest version and still have outstanding warnings.
+
 ---
 
 ### 📁 File Naming Guidelines
