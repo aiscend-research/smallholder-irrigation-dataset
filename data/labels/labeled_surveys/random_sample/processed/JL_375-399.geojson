@@ -357,8 +357,8 @@
         "day": 30,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "industrail irrigation; uneven",
-        "special_category": ""
+        "uncertainty_explanation": "uneven",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -2234,8 +2234,8 @@
         "day": 22,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "tree crops",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "plantation"
       },
       "geometry": {
         "type": "Polygon",

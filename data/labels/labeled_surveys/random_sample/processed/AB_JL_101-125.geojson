@@ -935,7 +935,7 @@
         "day": 3,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "only sligthly green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -2002,7 +2002,7 @@
         "day": 27,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "only sligthly green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -2379,7 +2379,7 @@
         "day": 17,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of irrigation",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -2460,7 +2460,7 @@
         "day": 22,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "brown",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2605,7 +2605,7 @@
         "day": 3,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "not very green",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2711,7 +2711,7 @@
         "day": 3,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "not very green",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -3022,7 +3022,7 @@
         "day": 30,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "not very green",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -3063,7 +3063,7 @@
         "day": 30,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "not very green",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {

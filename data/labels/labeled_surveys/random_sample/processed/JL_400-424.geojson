@@ -341,7 +341,7 @@
         "day": 27,
         "year": 2020,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriclture",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -976,8 +976,8 @@
         "day": 3,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": "indutrail irrigation",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1098,8 +1098,8 @@
         "day": 4,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "industrail irrigation",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1155,8 +1155,8 @@
         "day": 4,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "industrail irrigation",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
