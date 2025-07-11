@@ -260,6 +260,19 @@ class TestParseDescription(unittest.TestCase):
         msg=f"Single special category: Expected certainty 3, uncertainty_explanation 'may be a fishpond', special_category 'industrial', but got: {result}"
     )
 
+    text = "3 \n tree crops\n kinda looks like a tree?"
+    result = parse_description(text)
+    self.assertEqual(
+        {
+            "certainty": 3,
+            "uncertainty_explanation": "",
+            "special_category": "plantation"
+        },
+        result,
+        msg=f"Single special category: Expected certainty 3, uncertainty_explanation '', special_category 'plantation', but got: {result}"
+    )
+
+
   def test_no_special_category(self):
     text="2\n may b naturally grene"
     result = parse_description(text)
