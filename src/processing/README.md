@@ -37,8 +37,7 @@ Before using any scripts, follow these steps:
 | 1    | `survey_to_csv.py`             | Converts Earth Collect `.zip` survey files into usable `.csv` files               |
 | 2    | `polygons_to_geojson.py`       | Converts Google Earth Pro `.kml` files into `.geojson` format                     |
 | 3    | `merge_survey_and_polygons.py` | Merges processed survey data with labeled polygons and computes coverage stats    |
-| 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files and merges them automatically |
-| 5    | `pool_latest_labels.py`   | Pools the latest labeled irrigation data and outputs both a CSV and a GeoJSON file      |
+| 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files, merges them, and pools the latest labeled irrigation data (outputs both a CSV and a GeoJSON file) |
 
 ---
 
@@ -49,8 +48,13 @@ Each script creates or saves new files as it runs:
 * `survey_to_csv.py` creates a `.csv` file in the `processed/` folder with survey results
 * `polygons_to_geojson.py` creates a `.geojson` file in the `processed/` folder with labeled polygons
 * `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder, **and also saves a log file** summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
-* `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`
-* `pool_latest_labels.py` pools the latest labeled irrigation data for the `random_sample` group and outputs both a CSV and a GeoJSON file with bounding box geometries for each label.
+* `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`, and then pools the latest labeled irrigation data for the group:
+
+```bash
+python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
+```
+
+This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
 
 You can either fully process a single pair of survey and polygon files, or batch process an entire folder.
 
