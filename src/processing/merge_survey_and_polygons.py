@@ -34,16 +34,16 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
     """
     Processes a single survey row: matches polygons, computes coverage and stats, and returns results and report lines.
     Returns (result_dict, report_lines), where the results include: 
-        - percent_coverage: Percentage of the survey area covered by polygons.
-        - percent_coverage_hc: Percentage of the survey area covered by polygons with certainty >= certainty_cutoff.
-        - poly_avg_size: Average size of the polygons covering the survey area.
-        - poly_avg_size_hc: Average size of the polygons with certainty >= the certainty_cutoff.
-        - poly_min_size: Minimum size of the polygons covering the survey area.
-        - poly_min_size_hc: Minimum size of the polygons with certainty >= the certainty_cutoff.
-        - percent_coverage_hc_plantation: Percent coverage of high-certainty polygons with special_category containing 'plantation'.
-        - percent_coverage_hc_industrial: ... 'industrial'.
-        - percent_coverage_hc_lawn: ... 'lawn'.
-        - percent_coverage_hc_covered: ... 'covered'.
+        - percent_coverage: Percentage (%) of the survey area covered by polygons.
+        - percent_coverage_hc: Percentage (%) of the survey area covered by polygons with certainty >= certainty_cutoff.
+        - poly_avg_size: Average size of the polygons covering the survey area (square meters).
+        - poly_avg_size_hc: Average size of the polygons with certainty >= the certainty_cutoff (square meters).
+        - poly_min_size: Minimum size of the polygons covering the survey area (square meters).
+        - poly_min_size_hc: Minimum size of the polygons with certainty >= the certainty_cutoff (square meters).
+        - percent_coverage_hc_plantation: Percent (%) coverage of high-certainty polygons with special_category containing 'plantation'.
+        - percent_coverage_hc_industrial: Percent (%) coverage of high-certainty polygons with special_category containing 'industrial'.
+        - percent_coverage_hc_lawn: Percent (%) coverage of high-certainty polygons with special_category containing 'lawn'.
+        - percent_coverage_hc_covered: Percent (%) coverage of high-certainty polygons with special_category containing 'covered'.
     """
     # Initialize result dict with default values and consistent names
     result = {
