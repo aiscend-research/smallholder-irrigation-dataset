@@ -49,16 +49,15 @@ def parse_description(desc_text): # Note you will need to update to handle speci
     and the second line to be uncertainty_explanation.
     Adds a special_category field containing one or more flag group names separated by semicolons.
     """
-    # Split lines and remove empty lines
-    lines = [line.strip().lower() for line in desc_text.strip().splitlines() if line.strip()]
+    desc_text = desc_text.strip()
 
     # If there is nothing in the description, assume certainty 5
-    if not lines:
+    if len(desc_text) == 0:
         return {"certainty": 5, "uncertainty_explanation": "", "special_category": ""}
     
     # If the first line is not an integer, assume certainty 5
     try:
-        certainty = int(desc_text[0]) if len(desc_text) > 0 else 5
+        certainty = int(desc_text[0])
     except ValueError:
         # If conversion fails, default to 5
         certainty = 5
@@ -69,12 +68,6 @@ def parse_description(desc_text): # Note you will need to update to handle speci
         "lawn": ["lawn"],
         "covered": ["covered"]
     }
-
-    all_flag_keywords = [
-        keyword 
-        for flag_list in flag_groups.values() 
-        for keyword in flag_list
-    ]
 
     # Collect uncertainty categories from explanation
     uncertainty_categories = match_uncertainty_categories(desc_text)

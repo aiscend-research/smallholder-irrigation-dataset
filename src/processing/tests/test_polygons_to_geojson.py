@@ -197,6 +197,17 @@ class TestParseDescription(unittest.TestCase):
         result,
         msg=f"Blank text fail: Expected certainty 5, uncertainty_explanation blank, special_category blank, but got: {result}"
     )
+    text = "\n4\n\n\n"
+    result = parse_description(text)
+    self.assertEqual(
+        {
+            "certainty": 4,
+            "uncertainty_explanation": "",
+            "special_category": ""
+        },
+        result,
+        msg=f"Blank text fail: Expected certainty 4, uncertainty_explanation blank, special_category blank, but got: {result}"
+    )
 
   def test_no_description(self):
     text="4\n"
@@ -213,7 +224,7 @@ class TestParseDescription(unittest.TestCase):
 
 
   def test_single_special_category(self):
-    text="4 \nagroforstry only slightly geen"
+    text="\n4; \nagroforstry \n\n\nonly slightly geen"
     result = parse_description(text)
     self.assertEqual(
         {
