@@ -63,7 +63,7 @@ def parse_description(desc_text): # Note you will need to update to handle speci
         certainty = 5
 
     flag_groups = {
-        "plantation": ["agroforestry", "plantation"],
+        "plantation": ["agroforestry", "plantation", "tree crop"],
         "industrial": ["industrial", "commercial"],
         "lawn": ["lawn"],
         "covered": ["covered"]
