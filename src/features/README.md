@@ -88,7 +88,7 @@ earthengine:
 
 For each Sentinel-2 image, we need to classify each pixel within the image as irrigated or not irrigated, and if it is irrigated, specify the type of irrigation and if we are uncertain as to whether or not it is irrigation, we specify uncertainty, which is one of five categories. To do this, we take the labeled polygons corresponding to the image and generate a `.tif` files of six bands. 
 
-![band descriptions](readme_images/band_descriptions.png)
+![band descriptions](readme_figures/band_table.png)
 
 The first band specifies the type of irrigation, if any, and the next five bands indicate the uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation.
 
