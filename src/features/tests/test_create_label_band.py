@@ -1,0 +1,514 @@
+"""
+Contains tests for helper functions for creating label band
+"""
+
+import unittest
+from datetime import datetime, timedelta
+from unittest.mock import patch
+from create_label_band import create_irrigation_table, get_survey_data, get_polygon_file, retrieve_polygons, rasterize_polygons, save_label_raster, create_labels
+from utils.utils import get_data_root
+import rasterio
+import math
+import os
+
+def create_bounding_box(center_lat, center_lon):
+    """
+    Create a bounding box around a center point with a given size.
+    
+    Parameters:
+        - center_lat (float): Latitude of the center point.
+        - center_lon (float): Longitude of the center point.
+    
+    Returns:
+        - image_meta (dict): Dictionary which contains:
+            - height (int): Height of the bounding box in pixels.
+            - width (int): Width of the bounding box in pixels.
+            - crs (str): Coordinate reference system.
+            - transform (Affine): Affine transformation for the bounding box.
+    """
+    width = 108
+    height = 108
+
+    pixel_size_lat = 1 / 111.32 / 108
+    pixel_size_lon = 1 / (111.32 * math.cos(math.radians(center_lat))) / 108
+
+    top_left_lon = center_lon - (width / 2) * pixel_size_lon
+    top_left_lat = center_lat + (height / 2) * pixel_size_lat
+
+    # Define affine transform
+    transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
+
+    # Metadata
+    image_meta = {
+        'height': height,
+        'width': width,
+        'crs': 'EPSG:4326',
+        'transform': transform,
+        'dtype': 'uint8',
+    }
+
+    return image_meta
+
+# tests for helper functions in create_label_band.py
+class TestLabelBandFunctions(unittest.TestCase):
+    def setUp(self):
+        self.IRRIGATION_TABLE = create_irrigation_table()
+
+    # test for get_survey_data()
+    def test_get_survey_data(self):
+        """
+        Test the get_survey_data function to ensure it correctly extracts latitude, longitude,
+        and survey date from the filename.
+        """
+
+        img_path = "s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif"
+        (lat, lon, survey_date) = get_survey_data(img_path)
+
+        self.assertEqual(
+            "-10.4035", 
+            lat,
+            msg=f"test_get_survey_data fail: Expecteed lat -10.4035 but got {lat}"
+        )
+        self.assertEqual(
+            "29.1319", 
+            lon,
+            msg=f"test_get_survey_data fail: Expecteed lon 29.1319 but got {lon}"
+        )
+        self.assertEqual(
+            datetime.strptime("2023-05-25", "%Y-%m-%d").date() + timedelta(15), 
+            survey_date,
+            msg=f"test_get_survey_data fail: Expected survey date 2023-05-25 but got {survey_date}"
+        )
+        img_path = "s2_-12.0468_26.3789_2020-07-31_2020-08-10_off-30.tif"
+        (lat, lon, survey_date) = get_survey_data(img_path)
+
+        self.assertEqual(
+            "-12.0468",
+            lat,
+            msg=f"test_get_survey_data fail: Expecteed lat -10.4035 but got {lat}"
+        )
+        self.assertEqual(
+            "26.3789",
+            lon,
+            msg=f"test_get_survey_data fail: Expecteed lon 29.1319 but got {lon}"
+        )
+        self.assertEqual(
+            datetime.strptime("2020-08-05", "%Y-%m-%d").date() + timedelta(30),
+            survey_date,
+            msg=f"test_get_survey_data fail: Expected survey date 2020-08-05 but got {survey_date}"
+        )
+
+    # tests for get_polygon_file()
+    def test_get_polygon_file_with_match(self):
+        """
+        Test the get_polygon_file function to ensure it retrieves the correct source file
+        based on latitude and longitude.
+        """
+
+        lat = "-10.4035"
+        lon = "29.1319"
+        (survey_id, internal_id, source_files) = get_polygon_file(lat, lon, self.IRRIGATION_TABLE)
+
+        self.assertEqual(
+            2, 
+            len(source_files),
+            msg=f"test_get_polygon_file fail: Expected 2 source files but got {len(source_files)}"
+        )
+        self.assertEqual(
+            5043172,
+            survey_id,
+            msg=f"test_get_polygon_file fail: Expected survey_id 'id_5043172' but got {survey_id}"
+        )
+        self.assertEqual(
+            23,
+            internal_id,
+            msg=f"test_get_polygon_file fail: Expected internal_id 23 but got {internal_id}"
+        )
+        self.assertIn(
+            get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson",
+            source_files,
+            msg=f"test_get_polygon_file fail: Expected source file 'JL_KL_v2_101-125' but got {source_files}"
+        )
+        self.assertIn(
+            get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_JL_v2_101-125.geojson",
+            source_files,
+            msg=f"test_get_polygon_file fail: Expected source file 'MV_JL_v2_101-125' but got {source_files}"
+        )
+
+    def test_get_polygon_file_no_match(self):
+        """
+        Test the get_polygon_file function to ensure it raises an error
+        when no matching source file is found.
+        """
+
+        lat = "-99.9999"
+        lon = "99.9999"
+
+        with self.assertRaises(RuntimeError):
+            get_polygon_file(lat, lon, self.IRRIGATION_TABLE)
+
+    # tests for retrieve_polygons()
+    def test_retrieve_polygons_invalid_file(self):
+        """
+        Test the retrieve_polygons function to ensure it raises an error
+        when the irrigation geojson file does not exist.
+        """
+
+        irrigation_geojson = "non_existent_file.geojson"
+        survey_id = 5043172
+        internal_id = 23
+        timestamp = datetime.strptime("2023-05-25", "%Y-%m-%d").date() + timedelta(15)
+        image_meta = {
+            'crs': 'EPSG:4326'
+        }
+
+        with self.assertRaises(RuntimeError):
+            retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+
+    def test_retrieve_polygons_no_polygons(self):
+        """
+        Test the retrieve_polygons function to ensure it returns an empty GeoDataFrame
+        when no polygons match the criteria.
+        """
+
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5062566
+        internal_id = 21
+        timestamp = datetime.strptime("2019-06-11", "%Y-%m-%d").date()
+        image_meta = {
+            'crs': 'EPSG:4326'
+        }
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        self.assertTrue(gdf.empty, msg="test_retrieve_polygons_no_polygons fail: Expected empty GeoDataFrame but got non-empty")
+    
+    def test_retrieve_polygons_single_polygon(self):
+        """
+        Test the retrieve_polygons function to ensure it correctly retrieves polygons
+        from the source file, when there is only one such polygon.
+        """
+
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5043172
+        internal_id = 23
+        timestamp = datetime.strptime("2023-05-25", "%Y-%m-%d").date() + timedelta(15)
+        image_meta = {
+            'crs': 'EPSG:4326'
+        }
+
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+
+        self.assertEqual(
+            1,
+            len(gdf),
+            msg=f"test_retrieve_polygons fail: Expected 1 polygon but got {len(gdf)}"
+        )
+        self.assertEqual(
+            2023, gdf.iloc[0].year, msg=f"test_retrieve_polygons fail: Expected year 2023 but got {gdf['year'].values[0]}"
+        )
+        self.assertEqual(
+            3, gdf.iloc[0].certainty, msg=f"test_retrieve_polygons fail: Expected certainty 3 but got {gdf['certainty'].values[0]}"
+        )
+        self.assertEqual(
+            6, gdf.iloc[0].month, msg=f"test_retrieve_polygons fail: Expected month 6 but got {gdf['month'].values[0]}"
+        )
+        self.assertEqual(
+            9, gdf.iloc[0].day, msg=f"test_retrieve_polygons fail: Expected day 9 but got {gdf['day'].values[0]}"
+        )
+
+    def test_retrieve_polygons_multiple_polygons(self):
+        """
+        Test the retrieve_polygons function to ensure it correctly retrieves polygons
+        from the source file, when there are multiple polygons.
+        """
+
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5062566
+        internal_id = 21
+        timestamp = datetime.strptime("2019-06-14", "%Y-%m-%d").date()
+        image_meta = {
+            'crs': 'EPSG:4326'
+        }
+
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+
+        self.assertEqual(
+            3,
+            len(gdf),
+            msg=f"test_retrieve_polygons fail: Expected 1 polygon but got {len(gdf)}"
+        )
+
+        for i in range(3):
+            # All polygons certainty greater than threshold
+            self.assertGreaterEqual(
+                gdf.iloc[i].certainty, 3,
+                msg=f"test_retrieve_polygons fail: Expected certainty >= 3 but got {gdf['certainty'].values[i]}"
+            )
+            # All polygons correct date
+            self.assertEqual(
+                2019, gdf.iloc[0].year, msg=f"test_retrieve_polygons fail: Expected year 2023 but got {gdf['year'].values[0]}"
+            )
+            self.assertEqual(
+                6, gdf.iloc[i].month, msg=f"test_retrieve_polygons fail: Expected month 6 but got {gdf['month'].values[0]}"
+            )
+            self.assertEqual(
+                14, gdf.iloc[i].day, msg=f"test_retrieve_polygons fail: Expected day 9 but got {gdf['day'].values[0]}"
+            )
+
+    # tests for rasterize_polygons()
+    def test_rasterize_polygons_with_polygons(self):
+        """
+        Test the rasterize_polygons function to ensure it correctly rasterizes polygons
+        into a band, when there are polygons within the bounding box.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5062566
+        internal_id = 21
+        timestamp = datetime.strptime("2019-06-14", "%Y-%m-%d").date()
+
+        center_lon = 28.86255649573207
+        center_lat = -11.15545729747778
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        # Check that polygons show up in the band
+        self.assertTrue(
+            (band != 0).any(),
+            msg="test_rasterize_polygons fail: Expected band to have at least one pixel with value 1"
+        )
+
+        # Test another case
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2020-9-3", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta)
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(6, image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        self.assertIn(
+            1,
+            band,
+            msg="test_rasterize_polygons fail: Expected band to have at least one pixel with value 1"
+        )
+        self.assertIn(
+            4, # lawn
+            band,
+            msg="test_rasterize_polygons fail: Expected band to have at least one pixel with value 4"
+        )
+        self.assertIn(
+            0,
+            band,
+            msg="test_rasterize_polygons fail: Expected band to have at least one pixel with value 0"
+        )
+
+    def test_rasterize_polygons_no_polygons(self):
+        """
+        Test the rasterize_polygons function to ensure it returns a band of zeros
+        when no polygons are present.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2016-9-9", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta)
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(6, image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        self.assertTrue(
+            (band == 0).all(),
+            msg="test_rasterize_polygons fail: Expected band to be all zeros when no polygons are present"
+        )
+
+
+    # tests for save_label_raster() to ensure data is saved correctly
+    def test_save_label_raster_with_irrigation(self):
+        """
+        Test save_label_raster to ensure that it correctly saves the label raster
+        when there is irrigation in it.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5062566
+        internal_id = 21
+        timestamp = datetime.strptime("2019-06-14", "%Y-%m-%d").date()
+
+        center_lon = 28.86255649573207
+        center_lat = -11.15545729747778
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        band = rasterize_polygons(gdf, image_meta)
+
+        output_path = "test_label_band.tif"
+        save_label_raster(band, image_meta, output_path)
+
+        full_output_path = get_data_root() + "/" + output_path
+        full_metadata_path = get_data_root() + "/test_label_band_metadata.json"
+
+        with rasterio.open(full_output_path) as src:
+            self.assertEqual(
+                src.meta['count'],
+                6,
+                msg=f"test_save_label_raster fail: Expected 6 bands but got {src.count}"
+            )
+            self.assertEqual(
+                src.meta['width'],
+                image_meta['width'],
+                msg=f"test_save_label_raster fail: Expected width {image_meta['width']} but got {src.width}"
+            )
+            self.assertEqual(
+                src.meta['height'],
+                image_meta['height'],
+                msg=f"test_save_label_raster fail: Expected height {image_meta['height']} but got {src.height}"
+            )
+            self.assertEqual(
+                src.meta['crs'],
+                image_meta['crs'],
+                msg=f"test_save_label_raster fail: Expected CRS {image_meta['crs']} but got {src.crs}"
+            )
+            self.assertEqual(
+                band.tolist(), 
+                src.read().tolist(),
+                msg="test_save_label_raster fail: Expected band to match saved raster band"
+            )
+        
+        # Clean up
+        if os.path.exists(full_output_path):
+            os.remove(full_output_path)
+
+        if os.path.exists(full_metadata_path):
+            os.remove(full_metadata_path)
+
+    def test_save_label_raster_no_irrigation(self):
+        """
+        Test save_label_raster to ensure that it correctly saves the label raster
+        when there is no irrigation in it.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        survey_id = 5062566
+        internal_id = 21
+        timestamp = datetime.strptime("2019-06-19", "%Y-%m-%d").date()
+
+        center_lon = 28.86255649573207
+        center_lat = -11.15545729747778
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        band = rasterize_polygons(gdf, image_meta)
+
+        output_path = "test_label_band.tif"
+        save_label_raster(band, image_meta, output_path)
+
+        full_output_path = get_data_root() + "/" + output_path
+        full_metadata_path = get_data_root() + "/test_label_band_metadata.json"
+
+        with rasterio.open(full_output_path) as src:
+            self.assertEqual(
+                src.meta['count'],
+                6,
+                msg=f"test_save_label_raster fail: Expected 6 bands but got {src.count}"
+            )
+            self.assertEqual(
+                src.meta['width'],
+                image_meta['width'],
+                msg=f"test_save_label_raster fail: Expected width {image_meta['width']} but got {src.width}"
+            )
+            self.assertEqual(
+                src.meta['height'],
+                image_meta['height'],
+                msg=f"test_save_label_raster fail: Expected height {image_meta['height']} but got {src.height}"
+            )
+            self.assertEqual(
+                src.meta['crs'],
+                image_meta['crs'],
+                msg=f"test_save_label_raster fail: Expected CRS {image_meta['crs']} but got {src.crs}"
+            )
+            self.assertEqual(
+                band.tolist(), 
+                src.read().tolist(),
+                msg="test_save_label_raster fail: Expected band to match saved raster band"
+            )
+        
+        # Clean up
+        if os.path.exists(full_output_path):
+            os.remove(full_output_path)
+
+        if os.path.exists(full_metadata_path):
+            os.remove(full_metadata_path)
+
+# tests for create_labels()
+class TestCreateLabels(unittest.TestCase):
+    def test_create_labels_single_polygon_file(self):
+        """
+        Test create_labels to ensure it creates the proper output label .tif file
+        for a .tif input image corresponding to a single polygon file.
+        """
+        tif_path = get_data_root() + "/dataset/images/s2_-11.8262_31.4344_2022-06-03_2022-06-13_off-15.tif"
+        create_labels(tif_path)
+
+        output_label_path = get_data_root() + "/dataset/labels/s2_-11.8262_31.4344_2022-06-03_2022-06-13_off-15_MV.tif"
+        self.assertTrue(
+            os.path.exists(output_label_path),
+            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
+        )
+        
+        # Clean up
+        if os.path.exists(output_label_path):
+            os.remove(output_label_path)
+
+    def test_create_labels_multiple_polygon_files(self):
+        """
+        Test create_labels to ensure it creates the proper output label .tif files
+        for a .tif input image corresponding to multiple polygon files.
+        """
+        tif_path = get_data_root() + "/dataset/images/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30.tif"
+
+        create_labels(tif_path)
+
+        output_label_path = get_data_root() + "/dataset/labels/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30_MV.tif"
+
+        self.assertTrue(
+            os.path.exists(output_label_path),
+            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
+        )
+        
+        # Clean up
+        if os.path.exists(output_label_path):
+            os.remove(output_label_path)
+
+        output_label_path = get_data_root() + "/dataset/labels/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30_JL.tif"
+
+        self.assertTrue(
+            os.path.exists(output_label_path),
+            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
+        )
+        
+        # Clean up
+        if os.path.exists(output_label_path):
+            os.remove(output_label_path)
