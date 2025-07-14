@@ -227,7 +227,7 @@ def rasterize_polygons(gdf, image_meta):
     }
 
     # Create a label array with 6 bands, band 1 for each type of irrigation, bands 2-6 for uncertainty explanations
-    labels = np.zeros((6, image_meta['height'], image_meta['width']), dtype=np.uint8)
+    labels = np.zeros((7, image_meta['height'], image_meta['width']), dtype=np.uint8)
 
     # Retrieve irrigation band (1)
     shapes = []
@@ -267,6 +267,17 @@ def rasterize_polygons(gdf, image_meta):
         ) 
         labels[i + 1] = mask
 
+    # Add certainty score band
+    shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
+    certainty_array = rasterize(
+        shapes=shapes,
+        out_shape=(image_meta['height'], image_meta['width']),
+        transform=image_meta['transform'],
+        fill=0,
+        dtype='uint8'
+    )
+    labels[6] = certainty_array
+
     return labels
 
 def save_label_raster(label_array, image_meta, output_label_path):
@@ -281,7 +292,7 @@ def save_label_raster(label_array, image_meta, output_label_path):
     """
     label_meta = image_meta.copy()
     label_meta.update({
-        "count": 6
+        "count": 7
     })
 
     data = LabelTif(label_array, label_meta)

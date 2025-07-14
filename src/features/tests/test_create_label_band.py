@@ -9,6 +9,7 @@ from create_label_band import create_irrigation_table, get_survey_data, get_poly
 from utils.utils import get_data_root
 import rasterio
 import math
+import numpy as np
 import os
 
 def create_bounding_box(center_lat, center_lon):
@@ -275,7 +276,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         band = rasterize_polygons(gdf, image_meta)
 
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
             msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
@@ -299,9 +300,9 @@ class TestLabelBandFunctions(unittest.TestCase):
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
         band = rasterize_polygons(gdf, image_meta)
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
-            msg=f"test_rasterize_polygons fail: Expected band shape {(6, image_meta['height'], image_meta['width'])} but got {band.shape}"
+            msg=f"test_rasterize_polygons fail: Expected band shape {(7, image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
 
         self.assertIn(
@@ -337,9 +338,9 @@ class TestLabelBandFunctions(unittest.TestCase):
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
         band = rasterize_polygons(gdf, image_meta)
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
-            msg=f"test_rasterize_polygons fail: Expected band shape {(6, image_meta['height'], image_meta['width'])} but got {band.shape}"
+            msg=f"test_rasterize_polygons fail: Expected band shape {(7, image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
 
         self.assertTrue(
@@ -366,7 +367,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         band = rasterize_polygons(gdf, image_meta)
 
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
             msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
@@ -396,7 +397,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         band = rasterize_polygons(gdf, image_meta)
 
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
             msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
@@ -440,7 +441,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         band = rasterize_polygons(gdf, image_meta)
 
         self.assertEqual(
-            (6, image_meta['height'], image_meta['width']),
+            (7, image_meta['height'], image_meta['width']),
             band.shape,
             msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
@@ -487,6 +488,77 @@ class TestLabelBandFunctions(unittest.TestCase):
             msg="test_rasterize_polygons fail: Expected uncertainty band 4 to have same non-zero vals as irrigation band"
         )
 
+    # test certainty score band is being created correctly
+    def test_rasterize_polygons_certainty_band(self):
+        """
+        Test rasterize_polygons to ensure that it correctly creates a certainty band
+        when there are polygons with varying certainty scores.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=1)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (7, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        # Check that the certainty band is correct
+        self.assertTrue(
+            (band[6] == 4).any(),
+            msg="test_rasterize_polygons fail: Expected certainty band to have at least one pixel with value 4"
+        )
+        self.assertTrue(
+            (band[6] == 2).any(),
+            msg="test_rasterize_polygons fail: Expected certainty band to have at least one pixel with value 2"
+        )
+        # check certainty band pixels match the certainty of the polygons
+        self.assertTrue(
+            (band[0][band[6] == 4] != 0).all(),
+            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty band is 4"
+        )
+        self.assertTrue(
+            (band[0][band[6] == 2] != 0).all(),
+            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty band is 2"
+        )
+
+    def test_rasterize_polygons_certainty_band_no_polygons(self):
+        """
+        Test rasterize_polygons to ensure that it correctly creates a certainty band
+        when there are no polygons.
+        """
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2016-9-9", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (7, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        # Check that the certainty band is all zeros
+        self.assertTrue(
+            (band[6] == 0).all(),
+            msg="test_rasterize_polygons fail: Expected certainty band to be all zeros when no polygons are present"
+        )
 
     # tests for save_label_raster() to ensure data is saved correctly
     def test_save_label_raster_with_irrigation(self):
@@ -515,7 +587,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         with rasterio.open(full_output_path) as src:
             self.assertEqual(
                 src.meta['count'],
-                6,
+                7,
                 msg=f"test_save_label_raster fail: Expected 6 bands but got {src.count}"
             )
             self.assertEqual(
@@ -572,7 +644,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         with rasterio.open(full_output_path) as src:
             self.assertEqual(
                 src.meta['count'],
-                6,
+                7,
                 msg=f"test_save_label_raster fail: Expected 6 bands but got {src.count}"
             )
             self.assertEqual(
