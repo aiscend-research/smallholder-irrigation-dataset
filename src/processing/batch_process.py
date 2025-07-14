@@ -2,12 +2,21 @@ import os
 import sys
 import pandas as pd
 from survey_to_csv import process_xml_zip
-from polygons_to_geojson import kml_to_geojson
-from merge_survey_and_polygons import merge_and_check
-from src.utils.utils import generate_latest_irrigation_data, save_data
-from src.utils.geometries import bounding_box
 import geopandas as gpd
 from shapely.geometry import box
+from polygons_to_geojson import kml_to_geojson
+from merge_survey_and_polygons import merge_and_check
+
+import sys
+import os
+
+# Add the project root to the system path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from src.utils.utils import generate_latest_irrigation_data, save_data
+from src.utils.geometries import bounding_box
 
 
 def process_and_merge_folder(folder_path):

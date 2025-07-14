@@ -11,7 +11,7 @@
         "day": 15,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -96,7 +96,7 @@
         "day": 15,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -161,7 +161,7 @@
         "day": 15,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -270,7 +270,7 @@
         "day": 15,
         "year": 2016,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -379,7 +379,7 @@
         "day": 15,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -420,7 +420,7 @@
         "day": 15,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture; only slightly green",
+        "uncertainty_explanation": "unclear signs of agriculture;only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -473,7 +473,7 @@
         "day": 15,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture; only slightly green",
+        "uncertainty_explanation": "unclear signs of agriculture;only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -555,7 +555,7 @@
         "day": 6,
         "year": 2020,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green; unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -641,7 +641,7 @@
         "day": 6,
         "year": 2020,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green; unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -723,7 +723,7 @@
         "day": 14,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green; unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -854,7 +854,7 @@
         "day": 14,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green; unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1164,7 +1164,7 @@
         "day": 23,
         "year": 2016,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1217,7 +1217,7 @@
         "day": 27,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1262,7 +1262,7 @@
         "day": 27,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1458,7 +1458,7 @@
         "day": 26,
         "year": 2024,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1639,7 +1639,7 @@
         "day": 26,
         "year": 2024,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1756,7 +1756,7 @@
         "day": 26,
         "year": 2024,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1922,7 +1922,7 @@
         "day": 26,
         "year": 2024,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1983,7 +1983,7 @@
         "day": 4,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2040,7 +2040,7 @@
         "day": 29,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2121,7 +2121,7 @@
         "day": 29,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2162,7 +2162,7 @@
         "day": 29,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2345,7 +2345,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2386,7 +2386,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2451,7 +2451,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2500,7 +2500,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2549,7 +2549,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2602,7 +2602,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2663,7 +2663,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2704,7 +2704,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2761,7 +2761,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2802,7 +2802,7 @@
         "day": 11,
         "year": 2021,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2899,7 +2899,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2964,7 +2964,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3061,7 +3061,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3110,7 +3110,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3179,7 +3179,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3256,7 +3256,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3357,7 +3357,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3402,7 +3402,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3467,7 +3467,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3556,7 +3556,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3625,7 +3625,7 @@
         "day": 20,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3726,7 +3726,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3851,7 +3851,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3924,7 +3924,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3969,7 +3969,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -4058,7 +4058,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -4123,7 +4123,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -4200,7 +4200,7 @@
         "day": 12,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {

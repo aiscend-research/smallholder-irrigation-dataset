@@ -1,2 +1,1 @@
-Row 9 (internal_id 11, 17/6/2016): survey marked irrigation 5 (possible irrigation) but no matching polygons found.
-Row 9 (internal_id 11, 17/6/2016): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
+All checks passed successfully.

@@ -568,8 +568,8 @@
         "day": 27,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "tree crops",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "plantation"
       },
       "geometry": {
         "type": "Polygon",
@@ -682,7 +682,7 @@
         "day": 10,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -723,7 +723,7 @@
         "day": 11,
         "year": 2016,
         "certainty": 5,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -3144,7 +3144,7 @@
         "day": 16,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {

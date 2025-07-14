@@ -283,7 +283,7 @@
         "day": 27,
         "year": 2024,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally green",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2300,7 +2300,7 @@
         "day": 16,
         "year": 2021,
         "certainty": 4,
-        "uncertainty_explanation": "uenven",
+        "uncertainty_explanation": "uneven",
         "special_category": ""
       },
       "geometry": {

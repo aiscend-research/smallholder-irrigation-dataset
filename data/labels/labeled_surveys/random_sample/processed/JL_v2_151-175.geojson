@@ -3341,7 +3341,7 @@
         "day": 5,
         "year": 2016,
         "certainty": 3,
-        "uncertainty_explanation": "ibk slightly green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -4570,7 +4570,7 @@
         "day": 12,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -6617,7 +6617,7 @@
         "day": 31,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -10275,7 +10275,7 @@
         "day": 14,
         "year": 2019,
         "certainty": 4,
-        "uncertainty_explanation": "only slighlty green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -11919,7 +11919,7 @@
         "day": 27,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -14939,7 +14939,7 @@
         "day": 28,
         "year": 2020,
         "certainty": 4,
-        "uncertainty_explanation": "only sligthly green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -15515,7 +15515,7 @@
         "day": 28,
         "year": 2020,
         "certainty": 4,
-        "uncertainty_explanation": "only sligtly green",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -15727,7 +15727,7 @@
         "day": 22,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs fo agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -16541,7 +16541,7 @@
         "day": 15,
         "year": 2019,
         "certainty": 5,
-        "uncertainty_explanation": "",
+        "uncertainty_explanation": "only slightly green",
         "special_category": ""
       },
       "geometry": {
@@ -17672,7 +17672,7 @@
         "year": 2019,
         "certainty": 4,
         "uncertainty_explanation": "",
-        "special_category": "plantation"
+        "special_category": "lawn;plantation"
       },
       "geometry": {
         "type": "Polygon",
@@ -18557,55 +18557,6 @@
         "coordinates": [
           [
             [
-              28.24744322660392,
-              -15.3426149612894
-            ],
-            [
-              28.2473389214563,
-              -15.34278873453205
-            ],
-            [
-              28.24738979562975,
-              -15.34282443633172
-            ],
-            [
-              28.24747540767179,
-              -15.34275436854972
-            ],
-            [
-              28.2475212517111,
-              -15.34278887961494
-            ],
-            [
-              28.24759482503599,
-              -15.34277207457662
-            ],
-            [
-              28.24744322660392,
-              -15.3426149612894
-            ]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "JL_5180920_6.6.2019",
-        "operator_initials": "JL",
-        "internal_id": 5180920,
-        "month": 6,
-        "day": 6,
-        "year": 2019,
-        "certainty": 5,
-        "uncertainty_explanation": "",
-        "special_category": ""
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [
               28.24683359033651,
               -15.34242445482714
             ],
@@ -18862,26 +18813,6 @@
               -15.34163025643849
             ]
           ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "JL_5180920_6.6.2019",
-        "operator_initials": "JL",
-        "internal_id": 5180920,
-        "month": 6,
-        "day": 6,
-        "year": 2019,
-        "certainty": 3,
-        "uncertainty_explanation": "only slightly green",
-        "special_category": ""
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          []
         ]
       }
     },
@@ -19642,47 +19573,6 @@
             [
               28.2423039494266,
               -15.33997524950896
-            ]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "JL_5180920_6.6.2019",
-        "operator_initials": "JL",
-        "internal_id": 5180920,
-        "month": 6,
-        "day": 6,
-        "year": 2019,
-        "certainty": 3,
-        "uncertainty_explanation": "only slightly green",
-        "special_category": ""
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [
-              28.24145472821858,
-              -15.3398407126093
-            ],
-            [
-              28.24143239169871,
-              -15.33991593520125
-            ],
-            [
-              28.24147965988275,
-              -15.33993966377214
-            ],
-            [
-              28.24150596102961,
-              -15.33986613400721
-            ],
-            [
-              28.24145472821858,
-              -15.3398407126093
             ]
           ]
         ]
@@ -25318,7 +25208,7 @@
         "day": 20,
         "year": 2017,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -27474,7 +27364,7 @@
         "day": 12,
         "year": 2017,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agricultrue",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {
@@ -29266,7 +29156,7 @@
         "day": 12,
         "year": 2016,
         "certainty": 3,
-        "uncertainty_explanation": "unevevn",
+        "uncertainty_explanation": "uneven",
         "special_category": ""
       },
       "geometry": {
@@ -31037,7 +30927,7 @@
         "day": 23,
         "year": 2019,
         "certainty": 2,
-        "uncertainty_explanation": "uncler signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture",
         "special_category": ""
       },
       "geometry": {

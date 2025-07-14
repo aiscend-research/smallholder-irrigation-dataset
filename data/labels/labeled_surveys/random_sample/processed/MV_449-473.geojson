@@ -11,8 +11,8 @@
         "day": 26,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": "commerical agriculture",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -148,8 +148,8 @@
         "day": 26,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": "commerical agriculture",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1801,8 +1801,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 5,
-        "uncertainty_explanation": "tree crops",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "plantation"
       },
       "geometry": {
         "type": "Polygon",

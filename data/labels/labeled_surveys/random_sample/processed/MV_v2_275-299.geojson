@@ -52,8 +52,8 @@
         "day": 17,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "tree crops",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "plantation"
       },
       "geometry": {
         "type": "Polygon",
@@ -469,8 +469,8 @@
         "day": 12,
         "year": 2016,
         "certainty": 5,
-        "uncertainty_explanation": "commerical agriculture",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -732,8 +732,8 @@
         "day": 18,
         "year": 2018,
         "certainty": 5,
-        "uncertainty_explanation": "commerical agriculture",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -890,7 +890,7 @@
         "day": 23,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be discolored",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -947,8 +947,8 @@
         "day": 12,
         "year": 2016,
         "certainty": 5,
-        "uncertainty_explanation": "commerical agriculture",
-        "special_category": ""
+        "uncertainty_explanation": "",
+        "special_category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1140,7 +1140,7 @@
         "day": 23,
         "year": 2016,
         "certainty": 2,
-        "uncertainty_explanation": "may naturally be discolored",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -1988,7 +1988,7 @@
         "day": 23,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may be natureally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2363,7 +2363,7 @@
         "day": 5,
         "year": 2020,
         "certainty": 3,
-        "uncertainty_explanation": "cassava",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2412,7 +2412,7 @@
         "day": 5,
         "year": 2020,
         "certainty": 2,
-        "uncertainty_explanation": "cassava",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2453,7 +2453,7 @@
         "day": 26,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "cassava",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2510,7 +2510,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2551,7 +2551,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2596,7 +2596,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally be discolored",
+        "uncertainty_explanation": "may naturally be green",
         "special_category": ""
       },
       "geometry": {
@@ -2657,7 +2657,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2698,7 +2698,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2747,7 +2747,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
@@ -2796,7 +2796,7 @@
         "day": 13,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "may be naturally discolored",
+        "uncertainty_explanation": "",
         "special_category": ""
       },
       "geometry": {
