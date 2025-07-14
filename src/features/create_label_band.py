@@ -220,8 +220,8 @@ def rasterize_polygons(gdf, image_meta):
         1's representing irrigated pixels, 0's representing unirrigated pixels.
     """
     IRRIGATION_TYPES = {
-        "": 1, # smallholder
-        "plantation": 2,
+        "small-scale": 1,
+        "tree_crop": 2,
         "industrial": 3,
         "lawn": 4,
         "covered": 5
@@ -232,9 +232,9 @@ def rasterize_polygons(gdf, image_meta):
 
     # Retrieve irrigation band (1)
     shapes = []
-    for geom, cat in zip(gdf.geometry, gdf.special_category):
+    for geom, cat in zip(gdf.geometry, gdf.category):
         if cat not in IRRIGATION_TYPES:
-            raise ValueError(f"Unknown special_category: '{cat}'")
+            raise ValueError(f"Unknown category: '{cat}'")
         shapes.append((geom, IRRIGATION_TYPES[cat]))
 
 
