@@ -7,6 +7,7 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # Add src to the path so utils can be found
 from utils.geometries import survey_polygon
+from polygons_to_geojson import CATEGORIES
 
 def check_irrigation_polygon_consistency(row, matching_polys, irrigation, idx):
     """
@@ -40,10 +41,7 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
         - poly_avg_size_hc: Average size of the polygons with certainty >= the certainty_cutoff (square meters).
         - poly_min_size: Minimum size of the polygons covering the survey area (square meters).
         - poly_min_size_hc: Minimum size of the polygons with certainty >= the certainty_cutoff (square meters).
-        - percent_coverage_hc_plantation: Percent (%) coverage of high-certainty polygons with special_category containing 'plantation'.
-        - percent_coverage_hc_industrial: Percent (%) coverage of high-certainty polygons with special_category containing 'industrial'.
-        - percent_coverage_hc_lawn: Percent (%) coverage of high-certainty polygons with special_category containing 'lawn'.
-        - percent_coverage_hc_covered: Percent (%) coverage of high-certainty polygons with special_category containing 'covered'.
+        - percent_coverage_hc_{category}: Percent (%) coverage of high-certainty polygons with a specific category.
     """
     # Initialize result dict with default values and consistent names
     result = {
@@ -53,11 +51,9 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
         "poly_avg_size_hc": None,
         "poly_min_size": None,
         "poly_min_size_hc": None,
-        "percent_coverage_hc_plantation": 0.0,
-        "percent_coverage_hc_industrial": 0.0,
-        "percent_coverage_hc_lawn": 0.0,
-        "percent_coverage_hc_covered": 0.0,
     }
+    for category in CATEGORIES:
+        result[f"percent_coverage_hc_{category}"] = 0.0
 
     # Find polygons that match by internal_id (or site_id if the labeler accidentally used that), year, month, and day.
     condition = (
@@ -112,12 +108,12 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
             result["percent_coverage_hc"] = (intersection_high.area / survey_area) * 100 if survey_area > 0 else 0.0
 
             # For each special category, calculate percent coverage
-            for special in ["plantation", "industrial", "lawn", "covered"]:
-                special_polys = high_polys[high_polys["special_category"].astype(str).str.contains(special, case=False, na=False)]
+            for category in CATEGORIES:
+                special_polys = high_polys[high_polys["category"].astype(str).str.contains(category, case=False, na=False)]
                 if not special_polys.empty:
                     union_special = unary_union(special_polys.geometry.tolist())
                     intersection_special = row["geometry"].intersection(union_special)
-                    result[f"percent_coverage_hc_{special}"] = (intersection_special.area / survey_area) * 100 if survey_area > 0 else 0.0
+                    result[f"percent_coverage_hc_{category}"] = (intersection_special.area / survey_area) * 100 if survey_area > 0 else 0.0
 
     return result, report_lines
 

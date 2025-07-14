@@ -7,3 +7,4 @@ ipykernel
 geopy>=2.4.1
 matplotlib
 seaborn
+rapidfuzz>=3.13.0
