@@ -1,7 +1,7 @@
-from rf_pipeline.build_features import *
-from rf_pipeline.rf_model import *
-from rf_pipeline.evaluation import *
-from rf_pipeline.visualization import *
+from ml_pipeline.build_features import *
+from ml_pipeline.ml_model import *
+from ml_pipeline.evaluation import *
+from ml_pipeline.visualization import *
 
 
 def main():
@@ -30,12 +30,12 @@ def main():
     clf = train_randomForest(X_train[:1000], y_train[:1000])
 
     # 5. Predict and evaluate
-    y_pred = predict(clf, X_test[:1000])
+    y_pred = clf.predict(X_test[:1000])
     print(model_metrics(y_pred, y_test[:1000])) #accuracy & f1 score
 
     # 6. Visualize results
     print_confusion_matix(y_test[:1000], y_pred)
-    plot_rf_predictions(test_dataset, clf, class_names, colors, num_samples=2)
+    plot_ml_predictions(test_dataset, clf, class_names, colors, num_samples=2)
 
 if __name__ == "__main__":
     main()

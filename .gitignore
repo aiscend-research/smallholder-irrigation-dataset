@@ -176,13 +176,19 @@ data/targeting/features/
 
 *.sh
 
-<<<<<<< HEAD
 multi-temporal-crop-classification-subset.tar.gz
 install.log
 multi-temporal-crop-classification-subset
+src/modeling/prototyping.ipynb
+.ipynb_checkpoints/
+*.tar.gz
+*.zip
+*.pkl
+models/
+experiments/
+outputs/
 
 irr-venv/*
-=======
 irr-venv/*
 !src/processing/process_file_pair.sh
 .Rproj.user
@@ -191,4 +197,3 @@ secrets/earthengine-key.json
 
 .RData
 .Rhistory
->>>>>>> origin/main

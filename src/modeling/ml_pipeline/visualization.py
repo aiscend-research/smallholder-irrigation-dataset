@@ -22,7 +22,7 @@ def create_colormap_and_legend(class_names, colors):
     legend_elements = [Patch(facecolor=colors[i], edgecolor='k', label=class_names[i]) for i in range(len(class_names))]
     return cmap, norm, legend_elements
 
-def plot_rf_predictions(dataset, clf, class_names, colors, num_samples=5):
+def plot_ml_predictions(dataset, clf, class_names, colors, num_samples=5):
     """
     Predicts and visualizes RF results for a dataset using custom class labels and colors.
     
