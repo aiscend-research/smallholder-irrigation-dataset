@@ -12,7 +12,6 @@
   - [Service account and GCS configuration](#service-account-and-gcs-configuration)
   - [Downloading Features](#downloading-features)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
-    - [Label Process Overview](#label-process-overview)
 
 ---
 
@@ -88,9 +87,16 @@ earthengine:
 
 For each Sentinel-2 image, we need to classify each pixel within the image as irrigated or not irrigated, and if it is irrigated, specify the type of irrigation and if we are uncertain as to whether or not it is irrigation, we specify uncertainty, which is one of five categories. To do this, we take the labeled polygons corresponding to the image and generate a `.tif` files of six bands. 
 
-<img src="readme_figures/band_table.png" alt="table showing band information" width="500"/>
+<img src="readme_figures/band_table.png" alt="table showing band information" width="500" />
 
 The first band specifies the type of irrigation, if any, and the next five bands indicate the uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation.
+
+This script assumes that you have already downloaded the Sentinel-2 images and have them stored in `data/dataset/images`. Additionally, this script assumes that images are mosaic images titled in format `s2_{lat}_{lon}_{windowStartDate}_{windowEndDate}_off-{offset}.tif`, where 
+- `lat` and `lon` are the latitude and longitude of the image center
+- `windowStartDate` and `windowEndDate` are the start and end dates of the image mosaic
+- `offset` is the offset in days from the window start date to the date where the image was labelled with irrigation information.
+
+The script will then create a folder `~/data/dataset/labels` with all corresponding labels. For each input image, it will create a label file with the same name in the label directory, but with the labeler's initials appended, e.g., `s2_{lat}_{lon}_{windowStartDate}_{windowEndDate}_off-{offset}_labels_{initials}.tif`.
 
 To run this script, navigate to the `src` directory and run
 
@@ -100,14 +106,8 @@ python3 features/create_label_band.py
 
 This will create a folder `~/data/dataset/labels` with all corresponding labels.
 
-### Label Process Overview
+To run tests for this script, run the following command from this directory:
 
-After downloading the Sentinel-2 images, we then create labels for each pixel. To do this, we first iterate through all the `.tif` mosaic files, which are assumed to be located at `data/dataset/images`.
-
-For each file, we extract the file data using (latitude, longitude, offset, start date, and end date) from the filename to retrieve the survey date. Then, we extract the `.tif` metadata, such that we can create labels at the resolution of the original `.tif`.
-
-Then, we must link the (latitude, longitude, survey date) to its corresponding labelled polygons (`.geojson` file). 
-
-Then, we retrieve the polygons from the corresponding `.geojson` file, only retrieving polygons greater than a specified certainty (default is 4+). We store these polygons in a `geopandas.geodataframe.GeoDataFrame`, and rasterize these polygons at the same resolution of the original image, as a binary mask – a given pixel is 1 if the polygon overlaps with it, 0 otherwise. Note that if a polygon only partially overlaps with a pixel, it will count as 1 only if the it overlaps with the center of the pixel.
-
-Then, we save the binary mask into a new file, located in `data/dataset/labels`, with the filename the same as the original image.
+```{bash}
+python -m unittest tests/test_create_label_band.py
+```

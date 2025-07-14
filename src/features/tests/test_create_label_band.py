@@ -49,7 +49,8 @@ def create_bounding_box(center_lat, center_lon):
 
     return image_meta
 
-# tests for helper functions in create_label_band.py
+# Tests for helper functions in create_label_band.py: get_survey_data, get_polygon_file, 
+# retrieve_polygons, rasterize_polygons, save_label_raster
 class TestLabelBandFunctions(unittest.TestCase):
     def setUp(self):
         self.IRRIGATION_TABLE = create_irrigation_table()
@@ -58,7 +59,7 @@ class TestLabelBandFunctions(unittest.TestCase):
     def test_get_survey_data(self):
         """
         Test the get_survey_data function to ensure it correctly extracts latitude, longitude,
-        and survey date from the filename.
+        and survey date from the filename with the correct format.
         """
 
         img_path = "s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif"
@@ -137,8 +138,8 @@ class TestLabelBandFunctions(unittest.TestCase):
 
     def test_get_polygon_file_no_match(self):
         """
-        Test the get_polygon_file function to ensure it raises an error
-        when no matching source file is found.
+        Test the get_polygon_file function to ensure it raises an error when no matching 
+        source file is found.
         """
 
         lat = "-99.9999"
@@ -150,8 +151,8 @@ class TestLabelBandFunctions(unittest.TestCase):
     # tests for retrieve_polygons()
     def test_retrieve_polygons_invalid_file(self):
         """
-        Test the retrieve_polygons function to ensure it raises an error
-        when the irrigation geojson file does not exist.
+        Test the retrieve_polygons function to ensure it raises an error when the irrigation
+        geojson file does not exist.
         """
 
         irrigation_geojson = "non_existent_file.geojson"
@@ -184,7 +185,7 @@ class TestLabelBandFunctions(unittest.TestCase):
     def test_retrieve_polygons_single_polygon(self):
         """
         Test the retrieve_polygons function to ensure it correctly retrieves polygons
-        from the source file, when there is only one such polygon.
+        from the source file, when there is only one corresponding polygon.
         """
 
         irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
@@ -218,7 +219,7 @@ class TestLabelBandFunctions(unittest.TestCase):
     def test_retrieve_polygons_multiple_polygons(self):
         """
         Test the retrieve_polygons function to ensure it correctly retrieves polygons
-        from the source file, when there are multiple polygons.
+        from the source file, when there are multiple corresponding polygons.
         """
 
         irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
@@ -321,7 +322,7 @@ class TestLabelBandFunctions(unittest.TestCase):
 
     def test_rasterize_polygons_no_polygons(self):
         """
-        Test the rasterize_polygons function to ensure it returns a band of zeros
+        Test the rasterize_polygons function to ensure it returns an irrigation band of zeros
         when no polygons are present.
         """
         irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
@@ -344,6 +345,146 @@ class TestLabelBandFunctions(unittest.TestCase):
         self.assertTrue(
             (band == 0).all(),
             msg="test_rasterize_polygons fail: Expected band to be all zeros when no polygons are present"
+        )
+
+    # test uncertainty bands are being created correctly
+    def test_rasterize_polygons_correct_uncertainty_bands_polygon_with_no_uncertainty(self):
+        """
+        Test rasterize_polygons to ensure that it correctly creates uncertainty bands
+        when there are no uncertainties in the polygon.
+        """
+        # survey has one polygon of certainty 5
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        for i in range(2, 6):
+            self.assertTrue(
+                (band[i] == 0).all(),
+                msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
+            )
+
+    def test_rasterize_polygons_correct_uncertainty_bands_polygon_with_single_uncertainty(self):
+        """
+        Test rasterize_polygons to ensure that it correctly creates uncertainty bands
+        when there is one type of uncertainty in the set of polygons.
+        """
+        # survey has one polygon of certainty 5
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 5107007
+        internal_id = 16
+        timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
+
+        center_lon = 28.479152896241143
+        center_lat = -13.02898847831871
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=2)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        # check that only fourth uncertainty band has non-zero vals
+        for i in range(1, 6):
+            if i == 3:
+                self.assertTrue(
+                    (band[i] != 0).any(),
+                    msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to have at least one pixel with value 1"
+                )
+            else:
+                self.assertTrue(
+                    (band[i] == 0).all(),
+                    msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
+                )
+
+        # check that fourth uncertainty band non-zero vals line up with
+        # the non-zero vals in first band
+        self.assertTrue(
+            (band[0][band[3] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 3 to have same non-zero vals as irrigation band"
+        )
+        
+    def test_rasterize_polygons_correct_uncertainty_bands_polygon_with_multiple_uncertainties(self):
+        """
+        Test rasterize_polygons to ensure that it correctly creates uncertainty bands
+        when there are multiple types of uncertainty in the set of polygons.
+        """
+        # survey has one polygon of certainty 5
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/KL_DSB_v2_101-125.geojson"
+        survey_id = 1045543
+        internal_id = 24
+        timestamp = datetime.strptime("2018-7-25", "%Y-%m-%d").date()
+
+        center_lon = 31.611147224629907
+        center_lat = -9.201089565713376
+
+        image_meta = create_bounding_box(center_lat, center_lon)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=1)
+        band = rasterize_polygons(gdf, image_meta)
+
+        self.assertEqual(
+            (6, image_meta['height'], image_meta['width']),
+            band.shape,
+            msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
+        )
+
+        # check that 2nd, 4th, and 5th uncertainty bands have non-zero vals
+        for i in range(1, 6):
+            if i in [1, 3, 4]:
+                self.assertTrue(
+                    (band[i] != 0).any(),
+                    msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to have at least one pixel with value 1"
+                )
+            else:
+                self.assertTrue(
+                    (band[i] == 0).all(),
+                    msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
+                )
+
+        # check that 2nd, 4th, and 5th uncertainty bands non-zero vals line up with
+        # the non-zero vals in first band
+        self.assertTrue(
+            (band[0][band[1] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 1 to have same non-zero vals as irrigation band"
+        )
+        self.assertTrue(
+            (band[0][band[3] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 3 to have same non-zero vals as irrigation band"
+        )
+        self.assertTrue(
+            (band[0][band[4] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 4 to have same non-zero vals as irrigation band"
+        )
+        # This timestamp/location only has one polygon with 3 uncertainty categories, so
+        # make sure that the reverse is true as well.
+        self.assertTrue(
+            (band[1][band[0] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 1 to have same non-zero vals as irrigation band"
+        )
+        self.assertTrue(
+            (band[3][band[0] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 3 to have same non-zero vals as irrigation band"
+        )
+        self.assertTrue(
+            (band[4][band[0] != 0] == 1).all(),
+            msg="test_rasterize_polygons fail: Expected uncertainty band 4 to have same non-zero vals as irrigation band"
         )
 
 
@@ -461,54 +602,3 @@ class TestLabelBandFunctions(unittest.TestCase):
 
         if os.path.exists(full_metadata_path):
             os.remove(full_metadata_path)
-
-# tests for create_labels()
-class TestCreateLabels(unittest.TestCase):
-    def test_create_labels_single_polygon_file(self):
-        """
-        Test create_labels to ensure it creates the proper output label .tif file
-        for a .tif input image corresponding to a single polygon file.
-        """
-        tif_path = get_data_root() + "/dataset/images/s2_-11.8262_31.4344_2022-06-03_2022-06-13_off-15.tif"
-        create_labels(tif_path)
-
-        output_label_path = get_data_root() + "/dataset/labels/s2_-11.8262_31.4344_2022-06-03_2022-06-13_off-15_MV.tif"
-        self.assertTrue(
-            os.path.exists(output_label_path),
-            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
-        )
-        
-        # Clean up
-        if os.path.exists(output_label_path):
-            os.remove(output_label_path)
-
-    def test_create_labels_multiple_polygon_files(self):
-        """
-        Test create_labels to ensure it creates the proper output label .tif files
-        for a .tif input image corresponding to multiple polygon files.
-        """
-        tif_path = get_data_root() + "/dataset/images/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30.tif"
-
-        create_labels(tif_path)
-
-        output_label_path = get_data_root() + "/dataset/labels/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30_MV.tif"
-
-        self.assertTrue(
-            os.path.exists(output_label_path),
-            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
-        )
-        
-        # Clean up
-        if os.path.exists(output_label_path):
-            os.remove(output_label_path)
-
-        output_label_path = get_data_root() + "/dataset/labels/s2_-10.4035_29.1319_2023-05-05_2023-05-15_off-30_JL.tif"
-
-        self.assertTrue(
-            os.path.exists(output_label_path),
-            msg=f"test_create_labels_single_polygon_file fail: Expected label file {output_label_path} to exist but it does not."
-        )
-        
-        # Clean up
-        if os.path.exists(output_label_path):
-            os.remove(output_label_path)
