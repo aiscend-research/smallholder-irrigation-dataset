@@ -170,3 +170,17 @@ To help everyone work smoothly together on this project:
 These habits will help keep the project organized, make collaboration easier, and ensure that we don't lose or overwrite each other's work.
 
 ---
+
+## Running Tests
+
+To run all unit tests:
+
+```{bash}
+python -m unittest discover tests
+```
+
+Or, to run a specific test file:
+
+```{bash}
+python -m unittest tests/test_polygons_to_geojson.py
+```
