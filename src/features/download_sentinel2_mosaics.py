@@ -8,10 +8,6 @@ import json
 import shutil
 from datetime import datetime, timedelta
 
-# Set up proxy if needed (adjust protocol if necessary)
-os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
-
 # Add the project root to the system path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -21,11 +17,6 @@ from src.utils.utils import load_config
 from src.features.earthengine.mosaic_download_utils import initialize_earthengine, download_sentinel2_mosaic
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
-
-def gcs_file_exists(fs, bucket, rel_site_folder, output_prefix):
-    # Checks for file in bucket/subfolders
-    path = f"{bucket}/{rel_site_folder}/{output_prefix}.tif"
-    return fs.exists(path)
 
 def get_dense_time_windows(center_date):
     year_start = datetime(center_date.year, 1, 1)
@@ -50,6 +41,12 @@ def wait_for_task(task, poll_interval=30):
         logging.error(f"  EE export failed with error: {status.get('error_message', 'Unknown error')}")
     return status
 
+def gcs_object_path(rel_site_folder, output_prefix):
+    return f"{rel_site_folder}/{output_prefix}.tif"
+
+def gcs_meta_object_path(rel_site_folder, output_prefix):
+    return f"{rel_site_folder}/{output_prefix}.json"
+
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/")
 GCS_PROJECT = "smallholder-irr"
@@ -72,19 +69,18 @@ for idx, row in labels.iterrows():
 
     for widx, (start_date, end_date) in enumerate(windows):
         output_prefix = f"s2_{lat:.4f}_{lon:.4f}_{start_date}_{end_date}"
-        # Create a folder for each site-year (or your preferred logic)
         site_folder = os.path.join(DOWNLOAD_DIR, f"site_{lat:.4f}_{lon:.4f}_{target_date.year}")
         os.makedirs(site_folder, exist_ok=True)
 
         tif_path = os.path.join(site_folder, f"{output_prefix}.tif")
         meta_path = os.path.join(site_folder, f"{output_prefix}.json")
-        # Relative folder for GCS
         rel_site_folder = os.path.relpath(site_folder, DOWNLOAD_DIR)
-        gcs_target = f"{bucket}/{rel_site_folder}/{output_prefix}.tif"
-        gcs_meta_target = f"{bucket}/{rel_site_folder}/{output_prefix}.json"
+        gcs_tif = gcs_object_path(rel_site_folder, output_prefix)
+        gcs_json = gcs_meta_object_path(rel_site_folder, output_prefix)
 
-        if fs.exists(gcs_target):
-            logging.info(f"  [SKIP] File already exists in GCS: gs://{gcs_target}")
+        # Check if file exists in GCS
+        if fs.exists(gcs_tif, bucket=bucket):
+            logging.info(f"  [SKIP] File already exists in GCS: gs://{bucket}/{gcs_tif}")
             continue
 
         logging.info(f"[{idx+1}/{len(labels)}-{widx+1}/{len(windows)}] Exporting: ({lat}, {lon}) {start_date}–{end_date}")
@@ -97,9 +93,7 @@ for idx, row in labels.iterrows():
             )
             if task is None:
                 logging.warning(f"[MISSING] No S2 images found for ({lat}, {lon}) {start_date}–{end_date}. Writing missing placeholder.")
-                # Copy the blank image to the target tif path
                 shutil.copy("data/features/blank.tif", tif_path)
-                # Write the metadata
                 meta = {
                     "filename": os.path.basename(tif_path),
                     "location": {"lat": lat, "lon": lon},
@@ -112,10 +106,9 @@ for idx, row in labels.iterrows():
                 }
                 with open(meta_path, "w") as f:
                     json.dump(meta, f, indent=2)
-                # Upload blank .tif and .json to GCS
-                fs.put(tif_path, gcs_target)
-                fs.put(meta_path, gcs_meta_target)
-                logging.info(f"Uploaded blank placeholder and metadata to GCS: gs://{gcs_target}")
+                fs.put(tif_path, gcs_tif, bucket=bucket)
+                fs.put(meta_path, gcs_json, bucket=bucket)
+                logging.info(f"Uploaded blank placeholder and metadata to GCS: gs://{bucket}/{gcs_tif}")
                 continue
             logging.info(f"  Started export for {output_prefix}")
             wait_for_task(task, poll_interval=30)
@@ -126,11 +119,11 @@ for idx, row in labels.iterrows():
 
         # After successful export, download from GCS to local
         try:
-            logging.info(f"Downloading from gs://{gcs_target} to {tif_path} ...")
-            fs.get(gcs_target, tif_path)
+            logging.info(f"Downloading from gs://{bucket}/{gcs_tif} to {tif_path} ...")
+            fs.get(gcs_tif, tif_path, bucket=bucket)
             logging.info(f"Download complete: {tif_path}")
         except Exception as e:
-            logging.error(f"Failed to download {gcs_target}: {e}")
+            logging.error(f"Failed to download {gcs_tif}: {e}")
             continue
 
         # NODATA/Cloud mask check (basic)
@@ -155,7 +148,7 @@ for idx, row in labels.iterrows():
         }
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
-        fs.put(meta_path, gcs_meta_target)
-        logging.info(f"Metadata written and uploaded: {meta_path} (gs://{gcs_meta_target})")
+        fs.put(meta_path, gcs_json, bucket=bucket)
+        logging.info(f"Metadata written and uploaded: {meta_path} (gs://{bucket}/{gcs_json})")
 
 logging.info("All mosaics processed!")
