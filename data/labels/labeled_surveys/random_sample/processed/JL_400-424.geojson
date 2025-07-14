@@ -11,7 +11,8 @@
         "day": 21,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -51,7 +52,8 @@
         "day": 21,
         "year": 2023,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -99,7 +101,8 @@
         "day": 6,
         "year": 2022,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -143,7 +146,8 @@
         "day": 6,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -183,7 +187,8 @@
         "day": 5,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -259,7 +264,8 @@
         "day": 27,
         "year": 2020,
         "certainty": 3,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -335,7 +341,8 @@
         "day": 27,
         "year": 2020,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriclture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -423,7 +430,8 @@
         "day": 27,
         "year": 2020,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -467,7 +475,8 @@
         "day": 17,
         "year": 2023,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -519,7 +528,8 @@
         "day": 17,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -559,7 +569,8 @@
         "day": 17,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -599,7 +610,8 @@
         "day": 8,
         "year": 2024,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -643,7 +655,8 @@
         "day": 8,
         "year": 2024,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -703,7 +716,8 @@
         "day": 16,
         "year": 2018,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -759,7 +773,8 @@
         "day": 11,
         "year": 2016,
         "certainty": 3,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -800,7 +815,7 @@
         "year": 2023,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "industrial": 1
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -881,7 +896,7 @@
         "year": 2023,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "industrial": 1
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -961,7 +976,8 @@
         "day": 3,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": "indutrail irrigation"
+        "uncertainty_explanation": "",
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1014,7 +1030,7 @@
         "year": 2017,
         "certainty": 5,
         "uncertainty_explanation": "",
-        "industrial": 1
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1082,7 +1098,8 @@
         "day": 4,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "industrail irrigation"
+        "uncertainty_explanation": "",
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1138,7 +1155,8 @@
         "day": 4,
         "year": 2017,
         "certainty": 5,
-        "uncertainty_explanation": "industrail irrigation"
+        "uncertainty_explanation": "",
+        "category": "industrial"
       },
       "geometry": {
         "type": "Polygon",
@@ -1214,7 +1232,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "uneven"
+        "uncertainty_explanation": "uneven",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1294,7 +1313,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": ""
+        "uncertainty_explanation": "",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1370,7 +1390,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1430,7 +1451,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 5,
-        "uncertainty_explanation": ""
+        "uncertainty_explanation": "",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1482,7 +1504,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1542,7 +1565,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1590,7 +1614,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1642,7 +1667,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1686,7 +1712,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 1,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1730,7 +1757,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1770,7 +1798,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1826,7 +1855,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1866,7 +1896,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -1938,7 +1969,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2014,7 +2046,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 1,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2058,7 +2091,8 @@
         "day": 8,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2182,7 +2216,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2290,7 +2325,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2330,7 +2366,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2386,7 +2423,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2470,7 +2508,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2582,7 +2621,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2622,7 +2662,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green"
+        "uncertainty_explanation": "may naturally be green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2670,7 +2711,8 @@
         "day": 3,
         "year": 2018,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2726,7 +2768,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2822,7 +2865,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2866,7 +2910,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2906,7 +2951,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "only slightly green"
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -2954,7 +3000,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
@@ -3006,7 +3053,8 @@
         "day": 1,
         "year": 2016,
         "certainty": 1,
-        "uncertainty_explanation": "unclear signs of agriculture"
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
       },
       "geometry": {
         "type": "Polygon",
