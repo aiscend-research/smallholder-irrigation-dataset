@@ -11,10 +11,12 @@ import rasterio
 import math
 import numpy as np
 import os
+from utils.geometries import bounding_box
 
 def create_bounding_box(center_lat, center_lon):
     """
-    Create a bounding box around a center point with a given size.
+    Helper function for tests that creates a bounding box around a center point with a given size. 
+    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
     
     Parameters:
         - center_lat (float): Latitude of the center point.
@@ -27,19 +29,21 @@ def create_bounding_box(center_lat, center_lon):
             - crs (str): Coordinate reference system.
             - transform (Affine): Affine transformation for the bounding box.
     """
+
+    # Get lat/lon bounds
+    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
+
+    # Image dimensions
     width = 108
     height = 108
 
-    pixel_size_lat = 1 / 111.32 / 108
-    pixel_size_lon = 1 / (111.32 * math.cos(math.radians(center_lat))) / 108
+    pixel_size_lon = (max_lon - min_lon) / width
+    pixel_size_lat = (max_lat - min_lat) / height
+    top_left_lon = min_lon
+    top_left_lat = max_lat
 
-    top_left_lon = center_lon - (width / 2) * pixel_size_lon
-    top_left_lat = center_lat + (height / 2) * pixel_size_lat
-
-    # Define affine transform
     transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
 
-    # Metadata
     image_meta = {
         'height': height,
         'width': width,
