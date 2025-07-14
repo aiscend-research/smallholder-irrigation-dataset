@@ -108,7 +108,6 @@ def get_polygon_file(lat, lon, IRRIGATION_TABLE):
     '''
     lon = lon[:-1]
     lat = lat[:-1]
-    # Todo – Retrieve polygon file that corresponds with this .tif
     source_file = IRRIGATION_TABLE[ (IRRIGATION_TABLE['x'] == lon) & (IRRIGATION_TABLE['y'] == lat) ]
 
     if (source_file.empty):
