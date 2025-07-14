@@ -82,21 +82,33 @@ earthengine:
 
 ## Downloading Features
 
-**Note:** This section describes the workflow and usage for exporting dense Sentinel-2 mosaics for all label points using the Earth Engine API and Google Cloud Storage. The workflow is designed for dense time series sampling—producing a 10-day interval sequence for each site and each year.
+> **Note:** This section describes the workflow for exporting dense Sentinel-2 mosaics for all label points using the Earth Engine API and Google Cloud Storage. The pipeline is designed for time series sampling at 10-day intervals across each year, with robust handling for missing or cloudy images.
 
 ### How it works
 
-- For every point in `latest_irrigation_table.csv`, the script generates ~36 time windows of 10 days for the full year (relative to the label date).
+- For every point in `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, the script generates ~36 time windows (10-day intervals) spanning the full year, referenced to the site’s label date.
 
-- For each window, it checks if a mosaic already exists in the GCS bucket. If yes, it skips to the next.
+- For each time window:
+  - Checks if the corresponding `.tif` file already exists in the Google Cloud Storage (GCS) bucket (matching the folder structure used locally). If so, it skips to the next.
 
-- If no data is available for a window (e.g. all cloudy), it skips and logs the window.
+  - If no valid Sentinel-2 image is found (e.g., due to clouds), a blank placeholder TIF is generated and stored (see below).
 
-- Each valid window triggers an Earth Engine export of a Sentinel-2 surface reflectance mosaic,including the QA60 cloud mask band.
+  - Otherwise, an Earth Engine export task generates a Sentinel-2 surface reflectance mosaic (including the QA60 cloud mask band), which is then downloaded from GCS.
 
-- Downloads all resulting .tif files to the `data/features/` folder.
+- Each time window always produces a `.tif` file (either actual data or a blank placeholder) and a corresponding `.json` metadata file.
 
-- Writes out a .json metadata file for each image, recording key info like location, date window, band list, and nodata/cloud flags.
+### Handling missing data (blank images)
+
+- If no data is available for a window (e.g., persistent clouds), a blank placeholder image is copied into place using `generate_blank_tif.py`.
+
+- Metadata for missing data windows includes `"missing_data": true`.
+### Viewing/Exporting
+
+- Command-line utility to visualize Sentinel-2 .tif images (including blank ones) as RGB composites, with warnings for all-blank/placeholder.
+
+- Use `visualize_tif.py` to view downloaded TIFs as RGB images.
+
+- `python src/features/visualize_tif.py data/features/site_xxx_xxx_2023/s2_xxx_xxx_2023-01-01_2023-01-11.tif --bands 4 3 2 --title "My RGB Plot"`
 
 ### File location
 
@@ -104,8 +116,11 @@ earthengine:
 `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`
 
 - Downloaded features & metadata:
-`data/features/s2_{lat}_{lon}_{start}_{end}_off{offset}.tif`
-`data/features/s2_{lat}_{lon}_{start}_{end}_off{offset}.json`
+`data/features/site_{lat}_{lon}_{year}/s2_{lat}_{lon}_{start}_{end}.tif`
+`data/features/site_{lat}_{lon}_{year}/s2_{lat}_{lon}_{start}_{end}.json`
+
+- Blank images:
+`data/features/blank.tif`
 
 ## Creating Pixel-Level Labels
 
