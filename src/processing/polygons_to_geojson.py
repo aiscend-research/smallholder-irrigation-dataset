@@ -8,6 +8,8 @@ from rapidfuzz import fuzz
 # Define the KML namespace
 ns = {'kml': 'http://www.opengis.net/kml/2.2'}
 
+CATEGORIES = ["tree_crop", "industrial", "lawn", "covered", "small-scale"]
+
 def parse_name(name_text):
     """
     Parse the name string (e.g., "AB_3_9.6.2021") into its parts.
@@ -44,16 +46,16 @@ def parse_name(name_text):
 
 def parse_description(desc_text): # Note you will need to update to handle special classes (agroforestry etc.)
     """
-    Parse the description text into certainty, uncertainty_explanation, and special_category.
+    Parse the description text into certainty, uncertainty_explanation, and category.
     Expects the first line to be certainty (default to 5 if empty)
     and the second line to be uncertainty_explanation.
-    Adds a special_category field containing one or more flag group names separated by semicolons.
+    Adds a category field containing one or more flag group names separated by semicolons.
     """
     desc_text = desc_text.strip()
 
     # If there is nothing in the description, assume certainty 5
     if len(desc_text) == 0:
-        return {"certainty": 5, "uncertainty_explanation": "", "special_category": ""}
+        return {"certainty": 5, "uncertainty_explanation": "", "category": "small-scale"}
     
     # If the first line is not an integer, assume certainty 5
     try:
@@ -63,7 +65,7 @@ def parse_description(desc_text): # Note you will need to update to handle speci
         certainty = 5
 
     flag_groups = {
-        "plantation": ["agroforestry", "plantation", "tree crop"],
+        "tree_crop": ["agroforestry", "plantation", "tree crop"],
         "industrial": ["industrial", "commercial"],
         "lawn": ["lawn"],
         "covered": ["covered"]
@@ -77,10 +79,13 @@ def parse_description(desc_text): # Note you will need to update to handle speci
     special_categories = get_special_categories(desc_text, flag_groups)
     special_category_str = ";".join(special_categories)
 
+    # If there is no special category, the category defaults to small-scale
+    category_str = special_category_str if special_category_str else "small-scale"
+
     return {
         "certainty": certainty,
         "uncertainty_explanation": uncertainty_categories_str,
-        "special_category": special_category_str
+        "category": category_str
     }
 
 def normalize(text):
