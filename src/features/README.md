@@ -82,6 +82,30 @@ earthengine:
 
 ## Downloading Features
 
+**Note:** This section describes the workflow and usage for exporting dense Sentinel-2 mosaics for all label points using the Earth Engine API and Google Cloud Storage. The workflow is designed for dense time series sampling—producing a 10-day interval sequence for each site and each year.
+
+### How it works
+
+- For every point in `latest_irrigation_table.csv`, the script generates ~36 time windows of 10 days for the full year (relative to the label date).
+
+- For each window, it checks if a mosaic already exists in the GCS bucket. If yes, it skips to the next.
+
+- If no data is available for a window (e.g. all cloudy), it skips and logs the window.
+
+- Each valid window triggers an Earth Engine export of a Sentinel-2 surface reflectance mosaic,including the QA60 cloud mask band.
+
+- Downloads all resulting .tif files to the `data/features/` folder.
+
+- Writes out a .json metadata file for each image, recording key info like location, date window, band list, and nodata/cloud flags.
+
+### File location
+
+- Input labels:
+`data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`
+
+- Downloaded features & metadata:
+`data/features/s2_{lat}_{lon}_{start}_{end}_off{offset}.tif`
+`data/features/s2_{lat}_{lon}_{start}_{end}_off{offset}.json`
 
 ## Creating Pixel-Level Labels
 
