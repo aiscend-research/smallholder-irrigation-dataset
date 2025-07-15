@@ -2445,7 +2445,12 @@
     {
       "type": "Feature",
       "properties": {
-        "name": "MV_9.18.2017",
+        "name": "MV_5_9.18.2017",
+        "operator_initials": "MV",
+        "internal_id": 5,
+        "month": 9,
+        "day": 18,
+        "year": 2017,
         "certainty": 5,
         "uncertainty_explanation": "",
         "category": "small-scale"
