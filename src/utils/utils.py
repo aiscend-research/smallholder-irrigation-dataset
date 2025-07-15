@@ -182,13 +182,15 @@ def generate_latest_irrigation_data(group_name="random_sample"):
         axis=1
     )
 
-    # Manually mark 'AB_JL_101-125' as the most recent survey
-    df.loc[df['source_file'] == 'AB_JL_101-125', 'most_recent'] = 1
+    # Manually mark 'AB_JL_101-125' and 'PS_101-125' as the most recent survey 
+    # (these don't follow the logic above but we still want them since they are the most recent for these labelers)
+    df.loc[df['source_file'].isin(['AB_JL_101-125', 'PS_101-125']), 'most_recent'] = 1
 
     # Filter the DataFrame to keep only the most recent surveys
     df = df[df['most_recent'] == 1]
 
     # Exclude surveys with 'MV_76-100' in the source file name
+    # This survey was never corrected due to a read issue
     df = df[~df['source_file'].str.contains('MV_76-100')]
 
     return df

@@ -385,7 +385,7 @@
       "type": "Feature",
       "properties": {
         "name": "Mv_5_6.17.2021",
-        "operator_initials": "Mv",
+        "operator_initials": "MV",
         "internal_id": 5,
         "month": 6,
         "day": 17,
@@ -483,7 +483,7 @@
       "type": "Feature",
       "properties": {
         "name": "Mv_5_9.5.2021",
-        "operator_initials": "Mv",
+        "operator_initials": "MV",
         "internal_id": 5,
         "month": 9,
         "day": 5,
@@ -2039,7 +2039,7 @@
         "day": 16,
         "year": 2018,
         "certainty": 2,
-        "uncertainty_explanation": "uneven;only slightly green",
+        "uncertainty_explanation": "only slightly green;uneven",
         "category": "small-scale"
       },
       "geometry": {

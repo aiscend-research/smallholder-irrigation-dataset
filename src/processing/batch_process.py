@@ -16,7 +16,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from src.utils.utils import generate_latest_irrigation_data, save_data
-from src.utils.geometries import bounding_box
+from src.utils.geometries import bounding_box, survey_polygon
 
 
 def process_and_merge_folder(folder_path):
@@ -71,9 +71,7 @@ def pool_latest_labels_and_save(group_name="random_sample"):
     save_data(latest_irrigation_data, csv_path, description=description, file_format="csv")
     
     # Generate bounding boxes as Shapely geometries for each row
-    latest_irrigation_data['geometry'] = latest_irrigation_data.apply(
-        lambda row: box(*bounding_box(row['y'], row['x'], half_side_km=0.5)), axis=1
-    )
+    latest_irrigation_data['geometry'] = latest_irrigation_data.apply(survey_polygon, axis=1)
     
     # Convert the DataFrame to a GeoDataFrame
     latest_irrigation_data_gdf = gpd.GeoDataFrame(latest_irrigation_data, geometry='geometry', crs="EPSG:4326")

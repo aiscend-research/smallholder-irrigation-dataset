@@ -848,7 +848,7 @@
         "day": 18,
         "year": 2023,
         "certainty": 2,
-        "uncertainty_explanation": "may naturally be green;unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
