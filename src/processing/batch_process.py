@@ -6,6 +6,7 @@ import geopandas as gpd
 from shapely.geometry import box
 from polygons_to_geojson import kml_to_geojson
 from merge_survey_and_polygons import merge_and_check
+import glob
 
 import sys
 import os
@@ -82,17 +83,62 @@ def pool_latest_labels_and_save(group_name="random_sample"):
     save_data(latest_irrigation_data_gdf, geojson_path, description=description, file_format="json")
 
 
+def pool_latest_polygons_and_save(group_name="random_sample"):
+    """
+    Merges all enriched polygon GeoJSONs in the merged folder, filters to only those with 'source_file' in the latest irrigation table,
+    and saves as a single CSV and GeoJSON.
+    """
+    # 1. Load the latest irrigation table to get the unique source_file values
+    latest_irrigation_table_path = f"data/labels/labeled_surveys/{group_name}/latest_irrigation_table.csv"
+    latest_irrigation_df = pd.read_csv(latest_irrigation_table_path)
+    latest_source_files = set(latest_irrigation_df['source_file'])
+
+    # 2. Find all merged polygon GeoJSONs in the merged folder
+    merged_folder = f"data/labels/labeled_surveys/{group_name}/merged"
+    polygon_files = glob.glob(f"{merged_folder}/*_polygons.geojson")
+
+    # 3. Read and concatenate all polygon GeoJSONs
+    all_polygons = gpd.GeoDataFrame(pd.concat(
+        [gpd.read_file(f) for f in polygon_files],
+        ignore_index=True
+    ), crs="EPSG:4326")
+
+    # 4. Filter to only polygons from the most recent surveys (by source_file)
+    filtered_polygons = all_polygons[all_polygons['source_file'].isin(list(latest_source_files))]
+
+    # 5. Save as CSV and GeoJSON using save_data
+    csv_path = f"labels/labeled_surveys/{group_name}/latest_polygons_table.csv"
+    geojson_path = f"labels/labeled_surveys/{group_name}/latest_polygons.geojson"
+    description_csv = "The latest labeled irrigation polygons (CSV) for the most recent surveys."
+    description_geojson = "The latest labeled irrigation polygons (GeoJSON) for the most recent surveys."
+    save_data(filtered_polygons.drop(columns='geometry'), csv_path, description=description_csv, file_format="csv")
+    save_data(filtered_polygons, geojson_path, description=description_geojson, file_format="json")
+    print(f"Saved merged latest polygons CSV at {csv_path}")
+    print(f"Saved merged latest polygons GeoJSON at {geojson_path}")
+
+
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description="Process and merge all survey files in a folder, then pool the latest labeled irrigation data and output both a CSV and a GeoJSON file with bounding boxes.")
-    parser.add_argument("folder_path", type=str, help="Path to the folder containing survey files.")
-    parser.add_argument("--group_name", type=str, default="random_sample", help="Name of the group/sample set (default: random_sample)")
-    args = parser.parse_args()
-    folder_path = args.folder_path
-    group_name = args.group_name
 
-    merged_result = process_and_merge_folder(folder_path)
-    print(f"Merged result has {len(merged_result)} rows")
+    # test code
+    # folder_path = "data/labels/labeled_surveys/random_sample/raw/"
+    # process_and_merge_folder(folder_path)
+    group_name = "random_sample"
+    # pool_latest_labels_and_save(group_name)
+    pool_latest_polygons_and_save(group_name)
 
-    pool_latest_labels_and_save(group_name)
-    print(f"Pooled latest labeled irrigation data for group '{group_name}' and saved CSV and GeoJSON.")
+    # import argparse
+    # parser = argparse.ArgumentParser(description="Process and merge all survey files in a folder, then pool the latest labeled irrigation data and output both a CSV and a GeoJSON file with bounding boxes.")
+    # parser.add_argument("folder_path", type=str, help="Path to the folder containing survey files.")
+    # parser.add_argument("--group_name", type=str, default="random_sample", help="Name of the group/sample set (default: random_sample)")
+    # args = parser.parse_args()
+    # folder_path = args.folder_path
+    # group_name = args.group_name
+
+    # merged_result = process_and_merge_folder(folder_path)
+    # print(f"Merged result has {len(merged_result)} rows")
+
+    # pool_latest_labels_and_save(group_name)
+    # print(f"Pooled latest labeled irrigation data for group '{group_name}' and saved CSV and GeoJSON.")
+
+    # pool_latest_polygons_and_save(group_name)
+    # print(f"Merged latest polygons for group '{group_name}' and saved CSV and GeoJSON.")
