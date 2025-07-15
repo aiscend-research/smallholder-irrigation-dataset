@@ -1,4 +1,0 @@
-Row 44 (internal_id 5, 10/10/2018): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
-Polygon 48 (internal_id 5, 10/8/2018) has no matching survey row.
-Polygon 49 (internal_id 5, 10/8/2018) has no matching survey row.
-Polygon 62 (internal_id 5, 10/8/2018) has no matching survey row.

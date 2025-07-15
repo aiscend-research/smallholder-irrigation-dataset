@@ -1,3 +1,0 @@
-Row 22 (internal_id 7, 26/8/2018): survey marked irrigation 5 (possible irrigation) but no matching polygons found.
-Row 22 (internal_id 7, 26/8/2018): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Polygon 13 (internal_id 7, 26/8/2023) has no matching survey row.

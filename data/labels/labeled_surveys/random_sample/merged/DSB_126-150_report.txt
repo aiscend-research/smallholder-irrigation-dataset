@@ -1,2 +1,0 @@
-Row 26 (internal_id 20, 26/6/2019): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
-Row 27 (internal_id 22, 20/7/2023): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).

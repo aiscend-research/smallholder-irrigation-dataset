@@ -1,1 +1,0 @@
-Row 28 (internal_id 18, 12/7/2024): survey marked irrigation 2 (uncertain) but found a polygon with certainty 5 (certain).

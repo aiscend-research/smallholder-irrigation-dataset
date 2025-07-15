@@ -1,5 +1,0 @@
-Row 2 (internal_id 23, 9/6/2023): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
-Polygon 20 (internal_id nan, nan/nan/nan) has no matching survey row.
-Polygon 21 (internal_id nan, nan/nan/nan) has no matching survey row.
-Polygon 50 (internal_id nan, nan/nan/nan) has no matching survey row.
-Polygon 51 (internal_id nan, nan/nan/nan) has no matching survey row.

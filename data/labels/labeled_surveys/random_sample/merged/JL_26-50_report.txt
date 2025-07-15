@@ -1,1 +1,0 @@
-Row 30 (internal_id 17, 27/7/2019): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
