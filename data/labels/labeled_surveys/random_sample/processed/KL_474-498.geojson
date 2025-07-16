@@ -1145,7 +1145,7 @@
       "type": "Feature",
       "properties": {
         "name": "kl_23_9.22.2022",
-        "operator_initials": "kl",
+        "operator_initials": "KL",
         "internal_id": 23,
         "month": 9,
         "day": 22,
@@ -6049,7 +6049,7 @@
         "day": 11,
         "year": 2018,
         "certainty": 2,
-        "uncertainty_explanation": "unclear signs of agriculture;only slightly green",
+        "uncertainty_explanation": "only slightly green;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {

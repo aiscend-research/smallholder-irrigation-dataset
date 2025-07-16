@@ -212,6 +212,29 @@ def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certa
     survey_results.drop(columns="geometry").to_csv(results_path, index=False)
     print(f"Saved merged dataset at {results_path}")
 
+    # Enrich and save polygons GeoJSON with polygon size and site level info ---
+    # Calculate polygon area (in m^2)
+    polygons['polygon_area_m2'] = polygons.to_crs("EPSG:32735").geometry.area
+
+    # Select relevant site-level columns from survey_gdf
+    survey_info_cols = ['site_id', 'internal_id', 'plot_file', 'x', 'y', 'water_source', 'year', 'month', 'day', 'source_file']
+    survey_info = survey_gdf[survey_info_cols].drop_duplicates()
+
+    # Merge polygons with survey info on site_id, internal_id, year, month, day
+    polygons_merged = polygons.merge(
+        survey_info,
+        on=['site_id', 'internal_id', 'year', 'month', 'day'],
+        how='left'
+    )
+
+    # Save enriched polygons GeoJSON
+    polygons_path_out = os.path.join(
+        merged_folder,
+        os.path.basename(survey_path).replace('.csv', '_polygons.geojson')
+    )
+    polygons_merged.to_file(polygons_path_out, driver='GeoJSON')
+    print(f"Saved merged polygons at {polygons_path_out}")
+
     # Return the survey results GeoDataFrame (with added percent coverage columns)
     return survey_gdf
 
@@ -220,22 +243,22 @@ if __name__ == "__main__":
     
     # Example usage/test code
 
-    # survey = "data/labels/labeled_surveys/random_sample/processed/MV_76-100.csv"
-    # survey_results = merge_and_check(survey)
-    # print(survey_results.head())
+    survey = "data/labels/labeled_surveys/random_sample/processed/MV_v2_425-449.csv"
+    survey_results = merge_and_check(survey)
+    print(survey_results.head())
 
     # CLI argument parsing
 
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
-    parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
-    parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
+    # parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
+    # parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
+    # args = parser.parse_args()
     
-    survey_path = args.survey_path
-    polygons_path = args.polygons_path if args.polygons_path else None
+    # survey_path = args.survey_path
+    # polygons_path = args.polygons_path if args.polygons_path else None
     
-    survey_results = merge_and_check(survey_path, polygons_path)
+    # survey_results = merge_and_check(survey_path, polygons_path)
     
-    print(f"Merged results have {len(survey_results)} rows.")
+    # print(f"Merged results have {len(survey_results)} rows.")

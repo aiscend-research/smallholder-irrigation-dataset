@@ -1,8 +1,0 @@
-Row 3 (internal_id 21, 29/7/2023): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Row 15 (internal_id 19, 13/9/2021): survey marked irrigation 3 (possible irrigation) but no matching polygons found.
-Polygon 391 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
-Polygon 406 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
-Polygon 140 (internal_id 5180920, 31/8/2017) does not overlap the survey area.
-Row 36 (internal_id 16, 6/10/2023): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Polygon 195 (internal_id 5087637, 13/10/20212) has no matching survey row.
-Polygon 393 (internal_id 5180920, 6/6/201955) has no matching survey row.

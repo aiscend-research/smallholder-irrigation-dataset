@@ -35,7 +35,7 @@ def parse_name(name_text):
                 else:
                     print(f"Warning: internal_id {internal_id}; Year '{year}' is not 2 or four digits. Please manually fix")
         return {
-            "operator_initials": operator_initials,
+            "operator_initials": operator_initials.upper(), # Enforce upper case
             "internal_id": internal_id,
             "month": month,
             "day": day,

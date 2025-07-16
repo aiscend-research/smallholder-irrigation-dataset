@@ -121,6 +121,12 @@ The script `check_for_warnings.sh` helps you quickly identify which of the most 
 **Output:**  
 A list of survey file names that are the latest version and still have outstanding warnings.
 
+We additionally eventually wrote a script that removes obsolete surveys (keeps only the latest, corrected ones) from the raw folder to keep them from being constantly processed:
+   ```bash
+   ./src/processing/remove_obsolete_surveys.sh
+   ```
+   (You may need to make it executable first: `chmod +x src/processing/remove_obsolete_surveys.sh`)
+
 ---
 
 ### 📁 File Naming Guidelines
