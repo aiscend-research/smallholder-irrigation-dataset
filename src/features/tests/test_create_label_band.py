@@ -116,7 +116,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         (survey_id, internal_id, source_files) = get_polygon_file(lat, lon, self.IRRIGATION_TABLE)
 
         self.assertEqual(
-            2, 
+            3, 
             len(source_files),
             msg=f"test_get_polygon_file fail: Expected 2 source files but got {len(source_files)}"
         )
@@ -376,7 +376,7 @@ class TestLabelBandFunctions(unittest.TestCase):
             msg=f"test_rasterize_polygons fail: Expected band shape {(image_meta['height'], image_meta['width'])} but got {band.shape}"
         )
 
-        for i in range(2, 6):
+        for i in range(1, 5):
             self.assertTrue(
                 (band[i] == 0).all(),
                 msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
@@ -493,7 +493,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         )
 
     # test certainty score band is being created correctly
-    def test_rasterize_polygons_certainty_band(self):
+    def test_rasterize_polygons_certainty_score_band(self):
         """
         Test rasterize_polygons to ensure that it correctly creates a certainty band
         when there are polygons with varying certainty scores.
@@ -528,11 +528,17 @@ class TestLabelBandFunctions(unittest.TestCase):
         # check certainty band pixels match the certainty of the polygons
         self.assertTrue(
             (band[0][band[6] == 4] != 0).all(),
-            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty band is 4"
+            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty score is 4"
         )
         self.assertTrue(
             (band[0][band[6] == 2] != 0).all(),
-            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty band is 2"
+            msg="test_rasterize_polygons fail: Expected irrigation band to have non-zero value where certainty score is 2"
+        )
+
+        # check that where there are no polygons, certainty band is zero
+        self.assertTrue(
+            (band[6][band[0] == 0] == 0).all(),
+            msg="test_rasterize_polygons fail: Expect certainty score to be 0 where there are no polygons"
         )
 
     def test_rasterize_polygons_certainty_band_no_polygons(self):
