@@ -1,0 +1,71 @@
+experiments:
+  - name: "rf_baseline"
+    data:
+      dataset_path: "multi-temporal-crop-classification-subset"
+      flatten: true
+      train_subset_size: 1000 #subseting a 1000 pixels
+      test_subset_size: 1000
+
+    model:
+      type: "random_forest"
+      hyperparameters:
+        n_estimators: 100
+        random_state: 42
+
+    visualization:
+      colors:
+        - "#0000FF"
+        - "#000088"
+        - "#00FF00"
+        - "#00FFFF"
+        - "#006600"
+        - "#A9A9A9"
+        - "#3399FF"
+        - "#FFFF00"
+        - "#FFCC00"
+        - "#FFA500"
+        - "#FF0000"
+        - "#990000"
+        - "#800000"
+      num_samples: 2
+
+    output:
+      base_dir: "./experiments"
+
+  - name: "gb_baseline"
+    data:
+      dataset_path: "multi-temporal-crop-classification-subset"
+      flatten: true
+      train_subset_size: 1000
+      test_subset_size: 1000
+
+    model:
+      type: "gradient_boosting"
+      hyperparameters:
+        n_estimators: 200
+        learning_rate: 0.05
+        max_depth: 4
+        subsample: 0.8
+        min_samples_split: 5
+        min_samples_leaf: 3
+        random_state: 42
+
+    visualization:
+      colors:
+        - "#0000FF"
+        - "#000088"
+        - "#00FF00"
+        - "#00FFFF"
+        - "#006600"
+        - "#A9A9A9"
+        - "#3399FF"
+        - "#FFFF00"
+        - "#FFCC00"
+        - "#FFA500"
+        - "#FF0000"
+        - "#990000"
+        - "#800000"
+      num_samples: 2
+
+    output:
+      base_dir: "./experiments"

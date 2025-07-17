@@ -22,7 +22,7 @@ def create_colormap_and_legend(class_names, colors):
     legend_elements = [Patch(facecolor=colors[i], edgecolor='k', label=class_names[i]) for i in range(len(class_names))]
     return cmap, norm, legend_elements
 
-def plot_ml_predictions(dataset, clf, class_names, colors, num_samples=5):
+def plot_ml_predictions(dataset, clf, class_names, colors, num_samples=5, save_path=None):
     """
     Predicts and visualizes RF results for a dataset using custom class labels and colors.
     
@@ -32,6 +32,7 @@ def plot_ml_predictions(dataset, clf, class_names, colors, num_samples=5):
         class_names: list of class names
         colors: list of color hex codes (same length as class_names)
         num_samples: number of samples to visualize
+        save_path: optional file path to save the resulting plot (e.g., 'outputs/predictions.png')
     """
     cmap, norm, legend_elements = create_colormap_and_legend(class_names, colors)
     plt.figure(figsize=(12, 4 * num_samples))
@@ -72,4 +73,10 @@ def plot_ml_predictions(dataset, clf, class_names, colors, num_samples=5):
 
     plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', title="Classes")
     plt.tight_layout()
-    plt.show()
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        print(f"Saved visualization to {save_path}")
+        plt.close()
+    else:
+        plt.show()
