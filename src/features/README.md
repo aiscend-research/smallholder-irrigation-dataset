@@ -11,7 +11,10 @@
     - [3. Create a Service Account](#3-create-a-service-account)
   - [Service account and GCS configuration](#service-account-and-gcs-configuration)
   - [Downloading Features](#downloading-features)
-  - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
+    - [How it works](#how-it-works)
+    - [Handling missing data (blank images)](#handling-missing-data-blank-images)
+    - [Viewing/Exporting](#viewingexporting)
+    - [File location](#file-location)
 
 ---
 
@@ -121,32 +124,3 @@ earthengine:
 
 - Blank images:
 `data/features/blank.tif`
-
-## Creating Pixel-Level Labels
-
-For each Sentinel-2 image, we need to classify each pixel within the image as irrigated or not irrigated. To do this, we take the labeled polygons corresponding to the image and classify pixels as irrigated if a polygon overlaps with the center of a pixel, otherwise, we label it as not irrigated.
-
-Here is an example of an input image location and its corresponding labeled polygons:
-
-![Input image location](readme_figures/input_image.png)
-
-Then, the label image would be a binary mask like the following
-![Label image example](readme_figures/label_image.png)
-
-To run this script, navigate to the `src` directory and run
-
-```{bash}
-python3 features/create_label_band.py
-```
-
-This will create a folder `~/data/dataset/labels` with all corresponding labels.
-
-After downloading the Sentinel-2 images, we then create labels for each pixel. To do this, we first iterate through all the `.tif` mosaic files, which are assumed to be located at `data/dataset/images`.
-
-For each file, we extract the file data using (latitude, longitude, offset, start date, and end date) from the filename to retrieve the survey date. Then, we extract the `.tif` metadata, such that we can create labels at the resolution of the original `.tif`.
-
-Then, we must link the (latitude, longitude, survey date) to its corresponding labelled polygons (`.geojson` file). 
-
-Then, we retrieve the polygons from the corresponding `.geojson` file, only retrieving polygons greater than a specified certainty (default is 4+). We store these polygons in a `geopandas.geodataframe.GeoDataFrame`, and rasterize these polygons at the same resolution of the original image, as a binary mask – a given pixel is 1 if the polygon overlaps with it, 0 otherwise. Note that if a polygon only partially overlaps with a pixel, it will count as 1 only if the it overlaps with the center of the pixel.
-
-Then, we save the binary mask into a new file, located in `data/dataset/labels`, with the filename the same as the original image.
