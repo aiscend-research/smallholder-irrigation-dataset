@@ -25,6 +25,8 @@ if project_root not in sys.path:
 
 # import utils.utils
 from utils.utils import *
+from utils.geometries import bounding_box
+IMAGE_CRS = 'EPSG:32633'  # Coordinate reference system for the images
 
 '''
 Small class definition to be able to pass in data object
@@ -38,7 +40,48 @@ class LabelTif:
     def read(self):
         return self.array
 
-def create_labels(tif_path):
+def create_bounding_box(center_lat, center_lon):
+    """
+    Helper function for tests that creates a bounding box around a center point with a given size. 
+    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
+    
+    Parameters:
+        - center_lat (float): Latitude of the center point.
+        - center_lon (float): Longitude of the center point.
+    
+    Returns:
+        - image_meta (dict): Dictionary which contains:
+            - height (int): Height of the bounding box in pixels.
+            - width (int): Width of the bounding box in pixels.
+            - crs (str): Coordinate reference system.
+            - transform (Affine): Affine transformation for the bounding box.
+    """
+
+    # Get lat/lon bounds
+    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
+
+    # Image dimensions
+    width = 100
+    height = 100
+
+    pixel_size_lon = (max_lon - min_lon) / width
+    pixel_size_lat = (max_lat - min_lat) / height
+    top_left_lon = min_lon
+    top_left_lat = max_lat
+
+    transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
+
+    image_meta = {
+        'height': height,
+        'width': width,
+        'crs': IMAGE_CRS,
+        'transform': transform,
+        'dtype': 'uint8',
+    }
+
+    return image_meta
+
+def create_labels():
     """
     Creates labels the .tif images with corresponding labelled polygons.
     Note: For a particular .tif image, we may have more than one polygon file.
@@ -51,17 +94,20 @@ def create_labels(tif_path):
     # Retrieve irrigation table
     IRRIGATION_TABLE = create_irrigation_table()
     
-    image_meta = get_image_meta(tif_path)
+    # Create a label .tif for each location/time/source combination
+    for row in IRRIGATION_TABLE.itertuples():
+        irrigation_geojson = row.source_file
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/" + irrigation_geojson + ".geojson" 
+        
+        if not os.path.isfile(irrigation_geojson):
+            raise RuntimeError(f"Unable to find irrigation geojson file: {irrigation_geojson}")
 
-    # Retrieve data labeled image (from file name)
-    file = tif_path.split("/")[-1]
-    lat, lon, timestamp = get_survey_data(file)
-
-    # Retrieve survey_id, internal_id, and irrigation_geojsons
-    survey_id, internal_id, irrigation_geojsons = get_polygon_file(lat, lon, IRRIGATION_TABLE)
-
-    # Create a label .tif for each polygon file
-    for irrigation_geojson in irrigation_geojsons:
+        internal_id = row.internal_id
+        unique_id = row.unique_id
+        survey_id = int(row.site_id)
+        lon, lat = row.x, row.y
+        image_meta = create_bounding_box(lat, lon)
+        timestamp = date(row.year, row.month, row.day)
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
         # Retrieve labels
@@ -69,57 +115,19 @@ def create_labels(tif_path):
 
         # Save labels – to data/dataset/labels
         operator_initials = irrigation_geojson.split("/")[-1].split("_")[0]
-        output_label_path = f"dataset/labels/{file[:-4]}_{operator_initials}.tif"
-        save_label_raster(label_array, image_meta, output_label_path)
+        output_label_path = f"dataset/labels/{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_{operator_initials}.tif"
+        save_label_raster(label_array, image_meta, output_label_path, 
+                          description=f"Row {unique_id} of irrigation table: Label for site {survey_id} at {timestamp.strftime('%Y.%m.%d')} by {operator_initials}")
 
 def create_irrigation_table():
     '''
     Creates irrigation table with location, time, and source.
     '''
     IRRIGATION_TABLE = pd.read_csv(get_data_root() + 
-                                "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv",
-                                usecols=['internal_id', 'site_id', 'x', 'y', 'source_file', 'operator_initials'])
+                                "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 
     IRRIGATION_TABLE['site_id'] = IRRIGATION_TABLE['site_id'].apply(lambda id: id[3:])
-
-    # Format so we can query for lat/lon without rounding issue
-    IRRIGATION_TABLE['x'] = (IRRIGATION_TABLE['x'] * 1000).astype(int) / 1000
-    IRRIGATION_TABLE['y'] = (IRRIGATION_TABLE['y'] * 1000).astype(int) / 1000
-    IRRIGATION_TABLE['x'] = IRRIGATION_TABLE['x'].astype(str)
-    IRRIGATION_TABLE['y'] = IRRIGATION_TABLE['y'].astype(str)
     return IRRIGATION_TABLE
-
-def get_polygon_file(lat, lon, IRRIGATION_TABLE):
-    '''
-    Retrieves the corresponding polygon file for a particular location
-    by querying IRRIGATION_TABLE by location. Also retrieves 
-    survey_id and internal_id, such that we can find the correct location
-    within the source_file
-
-    Parameters: 
-        - lat (str): Location latitude
-        - lon (str): Location longitude
-
-    Output:
-        - survey_id (int): Full id for the survey
-        - internal_id (int): Internal id for the survey
-        - source_files (list of str): The .geojson file(s) that contains labelled
-         polygons that corresponds with this location.
-    '''
-    lon = lon[:-1]
-    lat = lat[:-1]
-    source_file = IRRIGATION_TABLE[ (IRRIGATION_TABLE['x'] == lon) & (IRRIGATION_TABLE['y'] == lat) ]
-
-    if (source_file.empty):
-        raise RuntimeError(f"Unable to find polygon file for location ({lat},{lon})")
-    
-    internal_id = source_file.iloc[0].internal_id
-    survey_id = int(source_file.iloc[0].site_id)
-    source_files =  [ get_data_root() + "/labels/labeled_surveys/random_sample/processed/" + 
-                     source_file.iloc[i].source_file + ".geojson" for i in range(len(source_file)) ]
-
-
-    return survey_id, internal_id, source_files
 
 def get_survey_data(input_image_path):
     """
@@ -232,6 +240,9 @@ def rasterize_polygons(gdf, image_meta):
     # Retrieve irrigation bands (first and second bands)
     shapes = []
     for geom, cat in zip(gdf.geometry, gdf.category):
+        if cat is None or cat == "":
+            cat = "small-scale"  # Default category
+        cat = cat.split(";")[0]
         if cat not in IRRIGATION_TYPES:
             raise ValueError(f"Unknown category: '{cat}'")
         shapes.append((geom, IRRIGATION_TYPES[cat]))
@@ -282,7 +293,7 @@ def rasterize_polygons(gdf, image_meta):
 
     return labels
 
-def save_label_raster(label_array, image_meta, output_label_path):
+def save_label_raster(label_array, image_meta, output_label_path, description="Label for irrigation data"):
     """
     Saves the rasterized labels.
 
@@ -298,13 +309,7 @@ def save_label_raster(label_array, image_meta, output_label_path):
     })
 
     data = LabelTif(label_array, label_meta)
-    save_data(data, output_label_path)
-
-if __name__ == "__main__":
-    path = get_data_root() + "/dataset/images"
-    files = [f for f in os.listdir(path) 
-                 if os.path.isfile(os.path.join(path, f)) and f.lower().endswith('.tif')]
+    save_data(data, output_label_path, description=description)
     
-    for file in files:
-        file = os.path.join(path, file)
-        create_labels(file)
+if __name__ == "__main__":
+    create_labels()

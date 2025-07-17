@@ -4,57 +4,12 @@ Contains tests for helper functions for creating label band
 
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
-from create_label_band import create_irrigation_table, get_survey_data, get_polygon_file, retrieve_polygons, rasterize_polygons, save_label_raster, create_labels
+from create_label_band import create_irrigation_table, get_survey_data, retrieve_polygons, rasterize_polygons, save_label_raster, create_labels, create_bounding_box
 from utils.utils import get_data_root
 import rasterio
-import math
-import numpy as np
 import os
-from utils.geometries import bounding_box
 
-def create_bounding_box(center_lat, center_lon):
-    """
-    Helper function for tests that creates a bounding box around a center point with a given size. 
-    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
-    
-    Parameters:
-        - center_lat (float): Latitude of the center point.
-        - center_lon (float): Longitude of the center point.
-    
-    Returns:
-        - image_meta (dict): Dictionary which contains:
-            - height (int): Height of the bounding box in pixels.
-            - width (int): Width of the bounding box in pixels.
-            - crs (str): Coordinate reference system.
-            - transform (Affine): Affine transformation for the bounding box.
-    """
-
-    # Get lat/lon bounds
-    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
-
-    # Image dimensions
-    width = 100
-    height = 100
-
-    pixel_size_lon = (max_lon - min_lon) / width
-    pixel_size_lat = (max_lat - min_lat) / height
-    top_left_lon = min_lon
-    top_left_lat = max_lat
-
-    transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
-
-    image_meta = {
-        'height': height,
-        'width': width,
-        'crs': 'EPSG:4326',
-        'transform': transform,
-        'dtype': 'uint8',
-    }
-
-    return image_meta
-
-# Tests for helper functions in create_label_band.py: get_survey_data, get_polygon_file, 
+# Tests for helper functions in create_label_band.py: get_survey_data, 
 # retrieve_polygons, rasterize_polygons, save_label_raster
 class TestLabelBandFunctions(unittest.TestCase):
     def setUp(self):
@@ -103,55 +58,6 @@ class TestLabelBandFunctions(unittest.TestCase):
             survey_date,
             msg=f"test_get_survey_data fail: Expected survey date 2020-08-05 but got {survey_date}"
         )
-
-    # tests for get_polygon_file()
-    def test_get_polygon_file_with_match(self):
-        """
-        Test the get_polygon_file function to ensure it retrieves the correct source file
-        based on latitude and longitude.
-        """
-
-        lat = "-10.4035"
-        lon = "29.1319"
-        (survey_id, internal_id, source_files) = get_polygon_file(lat, lon, self.IRRIGATION_TABLE)
-
-        self.assertEqual(
-            3, 
-            len(source_files),
-            msg=f"test_get_polygon_file fail: Expected 2 source files but got {len(source_files)}"
-        )
-        self.assertEqual(
-            5043172,
-            survey_id,
-            msg=f"test_get_polygon_file fail: Expected survey_id 'id_5043172' but got {survey_id}"
-        )
-        self.assertEqual(
-            23,
-            internal_id,
-            msg=f"test_get_polygon_file fail: Expected internal_id 23 but got {internal_id}"
-        )
-        self.assertIn(
-            get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson",
-            source_files,
-            msg=f"test_get_polygon_file fail: Expected source file 'JL_KL_v2_101-125' but got {source_files}"
-        )
-        self.assertIn(
-            get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_JL_v2_101-125.geojson",
-            source_files,
-            msg=f"test_get_polygon_file fail: Expected source file 'MV_JL_v2_101-125' but got {source_files}"
-        )
-
-    def test_get_polygon_file_no_match(self):
-        """
-        Test the get_polygon_file function to ensure it raises an error when no matching 
-        source file is found.
-        """
-
-        lat = "-99.9999"
-        lon = "99.9999"
-
-        with self.assertRaises(RuntimeError):
-            get_polygon_file(lat, lon, self.IRRIGATION_TABLE)
 
     # tests for retrieve_polygons()
     def test_retrieve_polygons_invalid_file(self):
@@ -398,6 +304,7 @@ class TestLabelBandFunctions(unittest.TestCase):
                 (band[i] == 0).all(),
                 msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
             )
+
     def test_rasterize_polygons_correct_uncertainty_bands_polygon_with_single_uncertainty(self):
         """
         Test rasterize_polygons to ensure that it correctly creates uncertainty bands
