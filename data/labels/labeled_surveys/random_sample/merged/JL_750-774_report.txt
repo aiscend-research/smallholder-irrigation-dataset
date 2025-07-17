@@ -1,9 +1,1 @@
-Outlier Warning: Row 52 (internal_id 20, site_id id_3498104, 9/6/2018): coverage outlier (> 0.35 %) with 0.42% coverage.
-Outlier Warning: Row 53 (internal_id 21, site_id id_3447651, 3/8/2024): coverage outlier (> 0.35 %) with 1.00% coverage.
-Outlier Warning: Row 54 (internal_id 21, site_id id_3447651, 6/8/2022): coverage outlier (> 0.35 %) with 1.01% coverage.
-Outlier Warning: Row 55 (internal_id 21, site_id id_3447651, 1/9/2020): coverage outlier (> 0.35 %) with 0.61% coverage.
-Outlier Warning: Row 57 (internal_id 21, site_id id_3447651, 6/6/2020): coverage outlier (> 0.35 %) with 0.69% coverage.
-Outlier Warning: Row 58 (internal_id 21, site_id id_3447651, 1/6/2020): coverage outlier (> 0.35 %) with 0.63% coverage.
-Outlier Warning: Row 59 (internal_id 21, site_id id_3447651, 19/8/2019): coverage outlier (> 0.35 %) with 0.42% coverage.
-Outlier Warning: Row 60 (internal_id 21, site_id id_3447651, 23/6/2019): coverage outlier (> 0.35 %) with 0.40% coverage.
-Outlier Warning: Row 62 (internal_id 21, site_id id_3447651, 15/6/2016): coverage outlier (> 0.35 %) with 0.44% coverage.
+All checks passed successfully.

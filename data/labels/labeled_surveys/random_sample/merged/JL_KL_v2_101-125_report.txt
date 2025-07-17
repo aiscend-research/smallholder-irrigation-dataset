@@ -1,1 +1,1 @@
-Outlier Warning: Row 43 (internal_id 21, site_id id_5062566, 14/6/2019): coverage outlier (> 0.35 %) with 0.44% coverage.
+All checks passed successfully.

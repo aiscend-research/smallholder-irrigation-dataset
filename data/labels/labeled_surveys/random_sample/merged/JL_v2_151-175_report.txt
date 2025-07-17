@@ -1,16 +1,1 @@
-Outlier Warning: Row 5 (internal_id 21, site_id id_5087637, 16/6/2021): coverage outlier (> 0.35 %) with 0.75% coverage.
-Outlier Warning: Row 6 (internal_id 21, site_id id_5087637, 14/8/2019): coverage outlier (> 0.35 %) with 0.41% coverage.
-Outlier Warning: Row 13 (internal_id 19, site_id id_5098939, 5/10/2022): coverage outlier (> 0.35 %) with 0.57% coverage.
-Outlier Warning: Row 14 (internal_id 19, site_id id_5098939, 20/9/2022): coverage outlier (> 0.35 %) with 0.76% coverage.
-Outlier Warning: Row 25 (internal_id 6, site_id id_5180920, 28/8/2020): coverage outlier (> 0.35 %) with 1.88% coverage.
-Outlier Warning: Row 26 (internal_id 6, site_id id_5180920, 15/9/2019): coverage outlier (> 0.35 %) with 1.90% coverage.
-Polygon 380 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
-Polygon 395 (internal_id 5180920, 6/6/2019) does not overlap the survey area.
-Outlier Warning: Row 27 (internal_id 6, site_id id_5180920, 6/6/2019): coverage outlier (> 0.35 %) with 2.90% coverage.
-Outlier Warning: Row 28 (internal_id 6, site_id id_5180920, 18/8/2018): coverage outlier (> 0.35 %) with 2.24% coverage.
-Outlier Warning: Row 29 (internal_id 6, site_id id_5180920, 3/7/2018): coverage outlier (> 0.35 %) with 2.64% coverage.
-Outlier Warning: Row 30 (internal_id 6, site_id id_5180920, 20/10/2017): coverage outlier (> 0.35 %) with 3.48% coverage.
-Outlier Warning: Row 31 (internal_id 6, site_id id_5180920, 31/8/2017): coverage outlier (> 0.35 %) with 2.12% coverage.
-Outlier Warning: Row 32 (internal_id 6, site_id id_5180920, 12/8/2017): coverage outlier (> 0.35 %) with 1.73% coverage.
-Outlier Warning: Row 33 (internal_id 6, site_id id_5180920, 5/9/2016): coverage outlier (> 0.35 %) with 2.32% coverage.
-Outlier Warning: Row 34 (internal_id 6, site_id id_5180920, 12/8/2016): coverage outlier (> 0.35 %) with 2.20% coverage.
+All checks passed successfully.

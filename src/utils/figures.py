@@ -52,7 +52,7 @@ def plot_irrigation_distribution(df, title):
 def plot_percent_coverage(df, title, certain_only=False, ymax=None):
     plt.figure(figsize=(10, 6))
     if certain_only == True:
-        yvar = "percent_coverage_high_certainty"
+        yvar = "percent_coverage_hc"
     else:
         yvar = "percent_coverage"
     sns.boxplot(data=df, x="operator_initials", y=yvar)
@@ -66,7 +66,7 @@ def plot_percent_coverage(df, title, certain_only=False, ymax=None):
 def plot_polygon_size(df, title, stat="avg", certain_only=False, ymax=None):
     plt.figure(figsize=(10, 6))
     if certain_only == True:
-        yvar = df[f"poly_{stat}_size_high_certainty"].apply(np.sqrt)
+        yvar = df[f"poly_{stat}_size_hc"].apply(np.sqrt)
     else:
         yvar = df[f"poly_{stat}_size"].apply(np.sqrt)
     sns.boxplot(data=df, x="operator_initials", y=yvar)
@@ -80,7 +80,7 @@ def plot_polygon_size(df, title, stat="avg", certain_only=False, ymax=None):
 def plot_coverage_outliers(df, title, threshold=.35, certain_only=False):
     
     if certain_only == True:
-        yvar = df["percent_coverage_high_certainty"]
+        yvar = df["percent_coverage_hc"]
     else:
         yvar = df["percent_coverage"]
 

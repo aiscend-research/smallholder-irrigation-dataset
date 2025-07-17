@@ -1,6 +1,0 @@
-Row 14 (internal_id 18, 29/7/2023): survey marked irrigation 4 (possible irrigation) but no matching polygons found.
-Outlier Warning: Row 16 (internal_id 14, site_id id_3587739, 6/6/2023): coverage outlier (> 0.35 %) with 0.78% coverage.
-Row 18 (internal_id 10, 22/9/2018): survey marked irrigation 4 (possible irrigation) but no matching polygons found.
-Outlier Warning: Row 37 (internal_id 6, site_id id_5186178, 1/7/2019): coverage outlier (> 0.35 %) with 0.49% coverage.
-Polygon 20 (internal_id 10, 22/8/2018) has no matching survey row.
-Polygon 21 (internal_id 10, 13/10/2017) has no matching survey row.

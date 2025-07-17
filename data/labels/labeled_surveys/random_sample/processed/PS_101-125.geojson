@@ -1,0 +1,918 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_10.4.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 10,
+        "day": 4,
+        "year": 2018,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53691074430934,
+              -13.89485769414237
+            ],
+            [
+              28.53704000929596,
+              -13.89470558532361
+            ],
+            [
+              28.53682066533962,
+              -13.89454648999913
+            ],
+            [
+              28.53673149095266,
+              -13.89463146617159
+            ],
+            [
+              28.53691074430934,
+              -13.89485769414237
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_10.4.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 10,
+        "day": 4,
+        "year": 2018,
+        "certainty": 4,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53748243857885,
+              -13.89742962802633
+            ],
+            [
+              28.53750112651193,
+              -13.89725282282389
+            ],
+            [
+              28.53729191886574,
+              -13.89727049130542
+            ],
+            [
+              28.53731418688999,
+              -13.89744843831717
+            ],
+            [
+              28.53748243857885,
+              -13.89742962802633
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.17.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 17,
+        "year": 2018,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53754999404681,
+              -13.89685235426144
+            ],
+            [
+              28.53767780476366,
+              -13.89683618718742
+            ],
+            [
+              28.53757918751735,
+              -13.89647782237888
+            ],
+            [
+              28.53744032721067,
+              -13.89650515295421
+            ],
+            [
+              28.53754999404681,
+              -13.89685235426144
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.17.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 17,
+        "year": 2018,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53703937296203,
+              -13.89581452515218
+            ],
+            [
+              28.5372347762273,
+              -13.8957278215845
+            ],
+            [
+              28.53717208678558,
+              -13.89547344619685
+            ],
+            [
+              28.53701496117056,
+              -13.89549162137797
+            ],
+            [
+              28.53703937296203,
+              -13.89581452515218
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.17.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 17,
+        "year": 2018,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53691860926083,
+              -13.89483151103725
+            ],
+            [
+              28.5371414057678,
+              -13.89460018874202
+            ],
+            [
+              28.53707440449367,
+              -13.89452288373742
+            ],
+            [
+              28.53695924712037,
+              -13.89459324573756
+            ],
+            [
+              28.53683816093887,
+              -13.89453684781061
+            ],
+            [
+              28.53675450227791,
+              -13.89461475780232
+            ],
+            [
+              28.53691860926083,
+              -13.89483151103725
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.17.2018",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 17,
+        "year": 2018,
+        "certainty": 3,
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53753973522424,
+              -13.89722706985191
+            ],
+            [
+              28.53732299538278,
+              -13.89724771622215
+            ],
+            [
+              28.53731750007179,
+              -13.89732560467145
+            ],
+            [
+              28.53736282912405,
+              -13.89738441036298
+            ],
+            [
+              28.5375190545332,
+              -13.89737489957586
+            ],
+            [
+              28.53753973522424,
+              -13.89722706985191
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.2.2016",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 2,
+        "year": 2016,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.5360995238656,
+              -13.89679121839142
+            ],
+            [
+              28.53636590529718,
+              -13.89678079005774
+            ],
+            [
+              28.53643425858455,
+              -13.89655104897142
+            ],
+            [
+              28.53612596282446,
+              -13.89652711936662
+            ],
+            [
+              28.5360995238656,
+              -13.89679121839142
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.2.2016",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 2,
+        "year": 2016,
+        "certainty": 4,
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53745051222477,
+              -13.89650253640524
+            ],
+            [
+              28.53748936775816,
+              -13.89670017489698
+            ],
+            [
+              28.53761993603479,
+              -13.89667181908821
+            ],
+            [
+              28.53757395269537,
+              -13.89646190193757
+            ],
+            [
+              28.53745051222477,
+              -13.89650253640524
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_12_9.2.2016",
+        "operator_initials": "PS",
+        "internal_id": 12,
+        "month": 9,
+        "day": 2,
+        "year": 2016,
+        "certainty": 3,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              28.53686772666853,
+              -13.89545890576377
+            ],
+            [
+              28.537116467334,
+              -13.89539742998745
+            ],
+            [
+              28.53711205074848,
+              -13.89535290576348
+            ],
+            [
+              28.53707989787915,
+              -13.89535303731402
+            ],
+            [
+              28.53701844147537,
+              -13.89530207892694
+            ],
+            [
+              28.53681511267697,
+              -13.89529345857594
+            ],
+            [
+              28.53686772666853,
+              -13.89545890576377
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_17_7.17.2023",
+        "operator_initials": "PS",
+        "internal_id": 17,
+        "month": 7,
+        "day": 17,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.31884853455645,
+              -13.01269404985344
+            ],
+            [
+              27.31894818272922,
+              -13.01265284136393
+            ],
+            [
+              27.31889029114847,
+              -13.01251234396501
+            ],
+            [
+              27.31877951583255,
+              -13.0125357575231
+            ],
+            [
+              27.31884853455645,
+              -13.01269404985344
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_17_7.17.2023",
+        "operator_initials": "PS",
+        "internal_id": 17,
+        "month": 7,
+        "day": 17,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "unclear signs of agriculture",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.3190896618249,
+              -13.01178762194125
+            ],
+            [
+              27.31912662052476,
+              -13.0118344193755
+            ],
+            [
+              27.31942205017177,
+              -13.01213327963577
+            ],
+            [
+              27.31945297471745,
+              -13.01202615511772
+            ],
+            [
+              27.31918617418972,
+              -13.01174472540375
+            ],
+            [
+              27.3190896618249,
+              -13.01178762194125
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_19_10.19.2019",
+        "operator_initials": "PS",
+        "internal_id": 19,
+        "month": 10,
+        "day": 19,
+        "year": 2019,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              33.24694375810844,
+              -12.3065011074089
+            ],
+            [
+              33.2471662104359,
+              -12.30649216706938
+            ],
+            [
+              33.2471615842308,
+              -12.30633782427437
+            ],
+            [
+              33.24699751817693,
+              -12.30633692626917
+            ],
+            [
+              33.2469320952247,
+              -12.30638096917048
+            ],
+            [
+              33.24692608678861,
+              -12.30644752799455
+            ],
+            [
+              33.24694375810844,
+              -12.3065011074089
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_24_7.26.2018",
+        "operator_initials": "PS",
+        "internal_id": 24,
+        "month": 7,
+        "day": 26,
+        "year": 2018,
+        "certainty": 3,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              31.60657196668518,
+              -9.202488515389406
+            ],
+            [
+              31.60666678874666,
+              -9.202616025045641
+            ],
+            [
+              31.60674800547846,
+              -9.202559573192218
+            ],
+            [
+              31.60665982627214,
+              -9.202404577912988
+            ],
+            [
+              31.60666165696706,
+              -9.202318743684842
+            ],
+            [
+              31.6065663623965,
+              -9.202250426688455
+            ],
+            [
+              31.60648698588528,
+              -9.202297496495483
+            ],
+            [
+              31.60657196668518,
+              -9.202488515389406
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2023",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.6951035741439,
+              -16.28383280478208
+            ],
+            [
+              27.69513747759593,
+              -16.283897638917
+            ],
+            [
+              27.69518311538598,
+              -16.28392033484945
+            ],
+            [
+              27.69524156620446,
+              -16.28382144654684
+            ],
+            [
+              27.69519254768877,
+              -16.28377915941043
+            ],
+            [
+              27.6951035741439,
+              -16.28383280478208
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2023",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69533294995767,
+              -16.28392408399175
+            ],
+            [
+              27.69544395041709,
+              -16.28392033574105
+            ],
+            [
+              27.69547561983524,
+              -16.28379442517307
+            ],
+            [
+              27.69536129652831,
+              -16.28375999527027
+            ],
+            [
+              27.69533294995767,
+              -16.28392408399175
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2023",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "uneven",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69645995197046,
+              -16.28341158877611
+            ],
+            [
+              27.69660377545578,
+              -16.2835669324819
+            ],
+            [
+              27.69669689455923,
+              -16.28346852658374
+            ],
+            [
+              27.69654297562633,
+              -16.28331866013354
+            ],
+            [
+              27.69645995197046,
+              -16.28341158877611
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2023",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "",
+        "category": "tree_crop"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69418896072122,
+              -16.29137753224823
+            ],
+            [
+              27.69433088907523,
+              -16.29147073888029
+            ],
+            [
+              27.69434607634975,
+              -16.29128856294686
+            ],
+            [
+              27.69422512668961,
+              -16.2912687679723
+            ],
+            [
+              27.69418896072122,
+              -16.29137753224823
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2023",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2023,
+        "certainty": 4,
+        "uncertainty_explanation": "",
+        "category": "tree_crop"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69589141953247,
+              -16.29136906104085
+            ],
+            [
+              27.69593232189906,
+              -16.29147978540305
+            ],
+            [
+              27.6960576770797,
+              -16.29146271594489
+            ],
+            [
+              27.69609345356623,
+              -16.29132805991284
+            ],
+            [
+              27.69597861559262,
+              -16.29126778641258
+            ],
+            [
+              27.69589141953247,
+              -16.29136906104085
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_9.6.2021",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 9,
+        "day": 6,
+        "year": 2021,
+        "certainty": 5,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69597343177171,
+              -16.2833688727729
+            ],
+            [
+              27.6959791698135,
+              -16.28341624676002
+            ],
+            [
+              27.69608714296471,
+              -16.28341719447694
+            ],
+            [
+              27.69607564750123,
+              -16.28336164661465
+            ],
+            [
+              27.69597343177171,
+              -16.2833688727729
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2021",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2021,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69517679450146,
+              -16.28392406722507
+            ],
+            [
+              27.69522865377092,
+              -16.28383212872153
+            ],
+            [
+              27.6951807594839,
+              -16.28380225039343
+            ],
+            [
+              27.69509717164533,
+              -16.28386778526053
+            ],
+            [
+              27.69517679450146,
+              -16.28392406722507
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "ps_5_6.18.2021",
+        "operator_initials": "PS",
+        "internal_id": 5,
+        "month": 6,
+        "day": 18,
+        "year": 2021,
+        "certainty": 5,
+        "uncertainty_explanation": "",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.69524189838804,
+              -16.28389989545095
+            ],
+            [
+              27.69535057422285,
+              -16.28392426307173
+            ],
+            [
+              27.69537347235352,
+              -16.28376222836452
+            ],
+            [
+              27.69527536369798,
+              -16.28375171672617
+            ],
+            [
+              27.69524189838804,
+              -16.28389989545095
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

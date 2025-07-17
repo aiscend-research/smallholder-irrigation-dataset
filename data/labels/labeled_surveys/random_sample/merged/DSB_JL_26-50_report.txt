@@ -1,4 +1,0 @@
-Outlier Warning: Row 35 (internal_id 22, site_id id_1051330, 4/9/2020): coverage outlier (> 0.35 %) with 0.43% coverage.
-Row 51 (internal_id 6, 12/6/2021): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
-Outlier Warning: Row 57 (internal_id 3, site_id id_5187039, 24/7/2024): coverage outlier (> 0.35 %) with 0.52% coverage.
-Polygon 0 (internal_id 5159743, 12/6/2021) has no matching survey row.

@@ -2,9 +2,13 @@ import xml.etree.ElementTree as ET
 import json
 import geopandas as gpd
 import os
+import re
+from rapidfuzz import fuzz
 
 # Define the KML namespace
 ns = {'kml': 'http://www.opengis.net/kml/2.2'}
+
+CATEGORIES = ["tree_crop", "industrial", "lawn", "covered", "small-scale"]
 
 def parse_name(name_text):
     """
@@ -31,7 +35,7 @@ def parse_name(name_text):
                 else:
                     print(f"Warning: internal_id {internal_id}; Year '{year}' is not 2 or four digits. Please manually fix")
         return {
-            "operator_initials": operator_initials,
+            "operator_initials": operator_initials.upper(), # Enforce upper case
             "internal_id": internal_id,
             "month": month,
             "day": day,
@@ -42,119 +46,116 @@ def parse_name(name_text):
 
 def parse_description(desc_text): # Note you will need to update to handle special classes (agroforestry etc.)
     """
-    Parse the description text into certainty and uncertainty_explanation.
+    Parse the description text into certainty, uncertainty_explanation, and category.
     Expects the first line to be certainty (default to 5 if empty)
     and the second line to be uncertainty_explanation.
+    Adds a category field containing one or more flag group names separated by semicolons.
     """
-    # Split lines and remove empty lines
-    lines = [line.strip().lower() for line in desc_text.strip().splitlines() if line.strip()]
+    desc_text = desc_text.strip()
 
     # If there is nothing in the description, assume certainty 5
-    if not lines:
-        return {"certainty": 5, "uncertainty_explanation": ""}
+    if len(desc_text) == 0:
+        return {"certainty": 5, "uncertainty_explanation": "", "category": "small-scale"}
     
     # If the first line is not an integer, assume certainty 5
     try:
-        certainty = int(lines[0]) if lines[0] else 5
+        certainty = int(desc_text[0])
     except ValueError:
         # If conversion fails, default to 5
         certainty = 5
 
-    # Add the certainty explanation. If it is absent, set to empty string.
-    # Start by assuming the explanation is on the second line
-    explanation = lines[1] if len(lines) > 1 else "" 
-    # If this line was actually special classes try the third line
-    plantation_flags = ["agroforestry", "plantation"]
-    commercial_flags = ["commercial", "commercial irrigation"]
-    if any(flag in explanation for flag in plantation_flags + commercial_flags):
-        explanation = lines[2] if len(lines) > 2 else ""
+    flag_groups = {
+        "tree_crop": ["agroforestry", "plantation", "tree crop"],
+        "industrial": ["industrial", "commercial"],
+        "lawn": ["lawn"],
+        "covered": ["covered"]
+    }
 
-    # Check for special classes on any line
-    plantation = 1 if any(plantation_flag in lines for plantation_flag in plantation_flags) else 0
-    commercial = 1 if any(commercial_flag in lines for commercial_flag in commercial_flags) else 0
+    # Collect uncertainty categories from explanation
+    uncertainty_categories = match_uncertainty_categories(desc_text)
+    uncertainty_categories_str = ";".join(uncertainty_categories)
 
-    return {"certainty": certainty, "uncertainty_explanation": explanation, "plantation": plantation, "commercial": commercial}
+    # Collect special categories present in any line
+    special_categories = get_special_categories(desc_text, flag_groups)
+    special_category_str = ";".join(special_categories)
 
-def get_color_for_placemark(placemark, root):
-    """
-    Extracts the color associated with a given KML Placemark element.
-    This function navigates through the KML structure to find the color
-    defined in the corresponding Style or StyleMap for the provided Placemark.
-    It first resolves the styleUrl of the Placemark, then looks up the
-    associated StyleMap or Style element, and finally retrieves the color
-    from either the LineStyle or PolyStyle.
-    Args:
-        placemark (xml.etree.ElementTree.Element): The Placemark element from which
-            the color is to be extracted.
-        root (xml.etree.ElementTree.Element): The root element of the KML document,
-            used to search for StyleMap and Style elements.
-    Returns:
-        str or None: The color value as a string (in KML color format, e.g., "ff0000ff"),
-        or None if no color is found.
-    """
+    # If there is no special category, the category defaults to small-scale
+    category_str = special_category_str if special_category_str else "small-scale"
 
-    # Get the styleUrl from the Placemark
-    styleUrl_elem = placemark.find("kml:styleUrl", ns)
-    if styleUrl_elem is None or not styleUrl_elem.text:
-        return None
-    style_id = styleUrl_elem.text.strip().lstrip('#')
+    return {
+        "certainty": certainty,
+        "uncertainty_explanation": uncertainty_categories_str,
+        "category": category_str
+    }
+
+def normalize(text):
+    '''
+    Converts text to lowercase, removes leading and trailing whitespace,
+    and removes characters that are not a-z or a whitespace.
+    '''
+    return re.sub(r'[^a-z\s]', '', text.lower().strip())
+
+def match_uncertainty_categories(text, threshold=75):
+    '''
+    Matches polygon descriptions with their uncertainty categories, if
+    there is a corresponding uncertainty category. Uses rapidfuzz to 
+    determine similarity scores between known categories and text in order
+    to match descriptions with categories.
+
+    Parameters
+        - text (str): The polygon description text.
+        - threshold (int, default 75): The similarity score, generated by rapidfuzz.
+
+    Return
+        - matches (array): An array of categories corresponding to the description
+        text.
+    '''
     
-    # Find the StyleMap element with the corresponding id
-    styleMap = root.find(".//kml:StyleMap[@id='" + style_id + "']", ns)
-    if styleMap is not None:
-        # Look for the <Pair> with key 'normal'
-        pair = styleMap.find("kml:Pair[kml:key='normal']", ns)
-        if pair is not None:
-            normal_styleUrl_elem = pair.find("kml:styleUrl", ns)
-            if normal_styleUrl_elem is not None and normal_styleUrl_elem.text:
-                normal_style_id = normal_styleUrl_elem.text.strip().lstrip('#')
-                # Find the actual Style element with this id
-                style_elem = root.find(".//kml:Style[@id='" + normal_style_id + "']", ns)
-                if style_elem is not None:
-                    # Try to get the color from the LineStyle first; if not available, try PolyStyle
-                    color_elem = style_elem.find("kml:LineStyle/kml:color", ns)
-                    if color_elem is None or not color_elem.text:
-                        color_elem = style_elem.find("kml:PolyStyle/kml:color", ns)
-                    if color_elem is not None and color_elem.text:
-                        return color_elem.text.strip()
-    return None
-
-def convert_color_to_im_num(color):
-    """
-    Converts a hexadecimal color code from the format 'aabbggrr' to 'bbggrr' 
-    and maps it to a corresponding integer identifier representing which number image is being mapped.
-    Parameters:
-    color (str): A hexadecimal color code in the format 'aabbggrr'.
-    Returns:
-    int: The integer identifier corresponding to the color if it matches 
-         one of the predefined colors in the mapping.
-    None: If the color does not match any of the predefined colors.
-    Notes:
-    - The function assumes the input color is in the format 'aabbggrr' 
-      and strips the first two characters to convert it to 'bbggrr'.
-    - If the color is not found in the predefined mapping, a message is 
-      printed, and the function returns None.
-    """
-
-    # turn color from aabbggrr to bbggrr
-    color = color[2:]
-
-    color_convert = {1: 'ffffff', 
-                     2: '0affff', 
-                     3: '0701fc',
-                     4: '800080', 
-                     5: '0880fd', 
-                     6: 'ff02fc', 
-                     7: '06ff21', 
-                     8: 'ffff20', 
-                     9: '336699', 
-                     10: 'ff0000'}
+    UNCERTAINTY_CATEGORIES = {
+        "unclear signs of agriculture",
+        "only slightly green",
+        "uneven",
+        "may naturally be green",
+        "may be a fishpond"
+    }
     
-    if color in color_convert.values():
-        return list(color_convert.keys())[list(color_convert.values()).index(color)]
-    else:
-        # print("Warning: Not one of the main colors used. Returning None for the color value.")
-        return None
+    norm_text = normalize(text)
+    matches = set()
+    
+    for cat in UNCERTAINTY_CATEGORIES:
+        score = fuzz.partial_ratio(norm_text, cat)
+        if score >= threshold:
+            matches.add(cat)
+    
+    return list(matches)
+
+def get_special_categories(text, synonym_map, threshold=75):
+    '''
+    Matches polygon descriptions with their special categories, if
+    there is a corresponding special category. Uses rapidfuzz to  determine similarity scores between 
+    known categories and text in order to match descriptions with categories.
+
+    Parameters
+        - text (str): The polygon description text.
+        - synonym_map (dict): Map specifying known categories
+        and their synonyms
+
+    Return
+        - matches (array): An array of special categories corresponding 
+        to the description text.
+    '''
+
+    text = normalize(text)
+    categories = set()
+
+    for umbrella_term, synonyms in synonym_map.items():
+      for synonym in synonyms:
+          norm_syn = normalize(synonym)
+          score = fuzz.partial_ratio(norm_syn, text)
+          if score >= threshold:
+              categories.add(umbrella_term)
+
+    return list(categories)
 
 def convert_geometry(placemark):
     """
@@ -208,8 +209,6 @@ def kml_to_geojson(kml_file):
         - The <name> element is parsed to extract properties using the `parse_name` function.
         - The <description> element is parsed to extract additional properties using 
           the `parse_description` function.
-        - The color of the placemark is extracted and converted to an image number 
-          using `get_color_for_placemark` and `convert_color_to_im_num`.
         - If a placemark lacks a supported geometry, it is skipped.
         - The resulting GeoJSON file is saved in the same directory as the input KML file, 
           with the same name but a `.geojson` extension.
@@ -246,16 +245,8 @@ def kml_to_geojson(kml_file):
         else:
             desc_props = {"certainty": 5, "uncertainty_explanation": ""}
 
-        # Extract and convert color to image number
-        color = get_color_for_placemark(placemark, root)
-        if color is not None:
-            color_im_num = convert_color_to_im_num(color)
-        else: 
-            color_im_num = None
-        color_props = {"color": color,"color_im_num": color_im_num}
-
         # Merge properties
-        properties = {"name": name_elem.text, **props, **desc_props, **color_props}
+        properties = {"name": name_elem.text, **props, **desc_props}
 
         # Convert the geometry
         geometry = convert_geometry(placemark)
@@ -306,5 +297,3 @@ if __name__ == "__main__":
     
     kml_file = args.kml_file
     gdf = kml_to_geojson(kml_file)
-    
-    print(f"GeoJSON written to {os.path.splitext(kml_file)[0]}.geojson")

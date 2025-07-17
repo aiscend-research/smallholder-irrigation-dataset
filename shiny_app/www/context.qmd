@@ -1,0 +1,47 @@
+---
+title: "About This Dataset"
+format: html
+editor: visual
+execute:
+  echo: false
+---
+
+This dataset was created by manually labeling 1,000 satellite images in Google Earth Pro using EarthCollect. 
+
+```{r}
+#| echo: false
+#| layout-ncol: 3
+#| out.width: "80%"
+#| out.height: "auto"
+
+knitr::include_graphics(c(
+  here::here("shiny_app", "www", "labelingex1.png"),
+  here::here("shiny_app", "www", "labelingex2.png"),
+  here::here("shiny_app", "www", "labelingex3.png")
+))
+
+```
+
+
+::: panel-tabset
+## Irrigation 101
+There are various levels of irrigation depending on the infrastructure's sophistication. Also, irrigation requires three things to be effective: a water source, water transportation and water distribution. 
+
+```{r}
+#| echo: false
+#| out.width: "100%"
+#| out.height: "auto"
+
+knitr::include_graphics(here::here("shiny_app","www","irrigationdiagram.png"))
+```
+
+
+## Labeling Process
+Each image was evaluated for:
+
+- Irrigation presence (certainty score 1–5)
+- Percent cover of irrigated area
+- Water source (stream, borehole, etc.)
+
+## Additional Information
+

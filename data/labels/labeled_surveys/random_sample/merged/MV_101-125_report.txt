@@ -1,7 +1,0 @@
-Outlier Warning: Row 4 (internal_id 15, site_id id_5121300, 4/6/2017): coverage outlier (> 0.35 %) with 0.81% coverage.
-Polygon 11 (internal_id 5, 17/6/2023) does not overlap the survey area.
-Outlier Warning: Row 39 (internal_id 18, site_id id_5092601, 12/7/2024): coverage outlier (> 0.35 %) with 1.99% coverage.
-Outlier Warning: Row 42 (internal_id 21, site_id id_5062566, 14/6/2019): coverage outlier (> 0.35 %) with 0.42% coverage.
-Polygon 0 (internal_id 19, 2/6/2018) has no matching survey row.
-Polygon 44 (internal_id 18, 4/6/2018) has no matching survey row.
-Polygon 55 (internal_id 3, 31/10/2026) has no matching survey row.
