@@ -18,7 +18,7 @@ def normalize_band(band):
         return band.astype(np.float32)
     return rescale_intensity(band, in_range='image', out_range=(0, 1))
 
-def plot_rgb(image, bands=(4, 3, 2), figsize=(8, 8), title=None, return_fig=False):
+def plot_rgb(image, bands=(3, 2, 1), figsize=(8, 8), title=None, return_fig=False):
     """
     Plot an RGB composite.
     Args:
@@ -58,7 +58,7 @@ def plot_rgb(image, bands=(4, 3, 2), figsize=(8, 8), title=None, return_fig=Fals
 def main():
     parser = argparse.ArgumentParser(description="View Sentinel-2 .tif images as RGB composites.")
     parser.add_argument("tif_path", type=str, help="Path to .tif file")
-    parser.add_argument("--bands", type=int, nargs=3, default=(4, 3, 2),
+    parser.add_argument("--bands", type=int, nargs=3, default=(3, 2, 1),
                         help="Band indices for R G B (1-based, default: 4 3 2 for Sentinel-2 true color)")
     parser.add_argument("--title", type=str, default=None, help="Plot title")
     args = parser.parse_args()

@@ -58,7 +58,7 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
     
     count = collection.size().getInfo()
     if count == 0:
-        print(f"[SKIP] No S2 images found for ({lat}, {lon}) {start_date}–{end_date}.")
+        print(f"[SKIP] No S2 images found for ({lat}, {lon}) {start_date}-{end_date}.")
         return None, output_prefix
     
     mosaic = collection.mosaic()
@@ -78,5 +78,5 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
     )
 
     task.start()
-    print(f"Export started for ({lat}, {lon}) {start_date} – {end_date}")
+    print(f"Export started for ({lat}, {lon}) {start_date} - {end_date}")
     return task, output_prefix

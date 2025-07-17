@@ -108,7 +108,7 @@ earthengine:
 
 - Use `visualize_tif.py` to view downloaded TIFs as RGB images.
 
-- `python src/features/visualize_tif.py data/features/site_xxx_xxx_2023/s2_xxx_xxx_2023-01-01_2023-01-11.tif --bands 4 3 2 --title "My RGB Plot"`
+- `python src/features/visualize_tif.py data/features/site_-15.04_26.69_2023/s2_-15.04_26.69_2023-01-01_2023-01-11.tif --bands 3 2 1 --title "My RGB Plot"`
 
 ### File location
 

@@ -5,7 +5,7 @@ import rasterio
 # Constants matching your main script
 WIDTH, HEIGHT = 1098, 1098  # 1km x 1km at 10m resolution
 BANDS = 5                   # B2, B3, B4, B8, QA60
-BLANK_PATH = 'data/features/blank.tif'  # Or wherever you want
+BLANK_PATH = 'data/features/blank.tif' 
 
 # Ensure output directory exists
 os.makedirs(os.path.dirname(BLANK_PATH), exist_ok=True)

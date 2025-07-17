@@ -41,12 +41,6 @@ def wait_for_task(task, poll_interval=30):
         logging.error(f"  EE export failed with error: {status.get('error_message', 'Unknown error')}")
     return status
 
-def gcs_object_path(rel_site_folder, output_prefix):
-    return f"{rel_site_folder}/{output_prefix}.tif"
-
-def gcs_meta_object_path(rel_site_folder, output_prefix):
-    return f"{rel_site_folder}/{output_prefix}.json"
-
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/")
 GCS_PROJECT = "smallholder-irr"
@@ -67,20 +61,20 @@ for idx, row in labels.iterrows():
     target_date = datetime(int(row["year"]), int(row["month"]), int(row["day"]))
     windows = get_dense_time_windows(target_date)
 
+    site_folder = os.path.join(DOWNLOAD_DIR, f"site_{lat:.2f}_{lon:.2f}_{target_date.year}")
+    os.makedirs(site_folder, exist_ok=True)
+    rel_site_folder = f"site_{lat:.2f}_{lon:.2f}_{target_date.year}"
+
     for widx, (start_date, end_date) in enumerate(windows):
-        output_prefix = f"s2_{lat:.4f}_{lon:.4f}_{start_date}_{end_date}"
-        site_folder = os.path.join(DOWNLOAD_DIR, f"site_{lat:.4f}_{lon:.4f}_{target_date.year}")
-        os.makedirs(site_folder, exist_ok=True)
+        output_prefix = f"s2_{lat:.2f}_{lon:.2f}_{start_date}_{end_date}"
+        gcs_prefix = f"{rel_site_folder}/{output_prefix}"
 
         tif_path = os.path.join(site_folder, f"{output_prefix}.tif")
         meta_path = os.path.join(site_folder, f"{output_prefix}.json")
-        rel_site_folder = os.path.relpath(site_folder, DOWNLOAD_DIR)
-        gcs_tif = gcs_object_path(rel_site_folder, output_prefix)
-        gcs_json = gcs_meta_object_path(rel_site_folder, output_prefix)
 
-        # Check if file exists in GCS
-        if fs.exists(gcs_tif, bucket=bucket):
-            logging.info(f"  [SKIP] File already exists in GCS: gs://{bucket}/{gcs_tif}")
+        # Check if file exists in GCS (bucket-relative path)
+        if fs.exists(f"{bucket}/{gcs_prefix}.tif"):
+            logging.info(f"  [SKIP] File already exists in GCS: gs://{bucket}/{gcs_prefix}.tif")
             continue
 
         logging.info(f"[{idx+1}/{len(labels)}-{widx+1}/{len(windows)}] Exporting: ({lat}, {lon}) {start_date}–{end_date}")
@@ -88,7 +82,7 @@ for idx, row in labels.iterrows():
         try:
             task, out_prefix = download_sentinel2_mosaic(
                 lat, lon, start_date, end_date,
-                output_prefix=output_prefix,
+                output_prefix=gcs_prefix,
                 bands=bands
             )
             if task is None:
@@ -106,9 +100,9 @@ for idx, row in labels.iterrows():
                 }
                 with open(meta_path, "w") as f:
                     json.dump(meta, f, indent=2)
-                fs.put(tif_path, gcs_tif, bucket=bucket)
-                fs.put(meta_path, gcs_json, bucket=bucket)
-                logging.info(f"Uploaded blank placeholder and metadata to GCS: gs://{bucket}/{gcs_tif}")
+                fs.put(tif_path, f"{bucket}/{gcs_prefix}.tif")
+                fs.put(meta_path, f"{bucket}/{gcs_prefix}.json")
+                logging.info(f"Uploaded blank placeholder and metadata to GCS: gs://{bucket}/{gcs_prefix}.tif")
                 continue
             logging.info(f"  Started export for {output_prefix}")
             wait_for_task(task, poll_interval=30)
@@ -119,11 +113,11 @@ for idx, row in labels.iterrows():
 
         # After successful export, download from GCS to local
         try:
-            logging.info(f"Downloading from gs://{bucket}/{gcs_tif} to {tif_path} ...")
-            fs.get(gcs_tif, tif_path, bucket=bucket)
+            logging.info(f"Downloading from gs://{bucket}/{gcs_prefix}.tif to {tif_path} ...")
+            fs.get(f"{bucket}/{gcs_prefix}.tif", tif_path)
             logging.info(f"Download complete: {tif_path}")
         except Exception as e:
-            logging.error(f"Failed to download {gcs_tif}: {e}")
+            logging.error(f"Failed to download {gcs_prefix}.tif: {e}")
             continue
 
         # NODATA/Cloud mask check (basic)
@@ -148,7 +142,7 @@ for idx, row in labels.iterrows():
         }
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
-        fs.put(meta_path, gcs_json, bucket=bucket)
-        logging.info(f"Metadata written and uploaded: {meta_path} (gs://{bucket}/{gcs_json})")
+        fs.put(meta_path, f"{bucket}/{gcs_prefix}.json")
+        logging.info(f"Metadata written and uploaded: {meta_path} (gs://{bucket}/{gcs_prefix}.json)")
 
 logging.info("All mosaics processed!")
