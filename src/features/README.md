@@ -87,31 +87,38 @@ earthengine:
 
 > **Note:** This section describes the workflow for exporting dense Sentinel-2 mosaics for all label points using the Earth Engine API and Google Cloud Storage. The pipeline is designed for time series sampling at 10-day intervals across each year, with robust handling for missing or cloudy images.
 
-### How it works
+### Site and Time Window Definition
 
-- For every point in `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, the script generates ~36 time windows (10-day intervals) spanning the full year, referenced to the site’s label date.
+- Input Table: Loads `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, which contains locations, observation dates, and a unique ID for each sample.
+
+- Time Windows: For each site and year, generates ~36–37 consecutive 10-day intervals spanning the full year, aligned to the site’s observation date.
+
+### Sentinel-2 Mosaic Retrieval
 
 - For each time window:
   - Checks if the corresponding `.tif` file already exists in the Google Cloud Storage (GCS) bucket (matching the folder structure used locally). If so, it skips to the next.
 
   - If no valid Sentinel-2 image is found (e.g., due to clouds), a blank placeholder TIF is generated and stored (see below).
 
-  - Otherwise, an Earth Engine export task generates a Sentinel-2 surface reflectance mosaic (including the QA60 cloud mask band), which is then downloaded from GCS.
+  - Otherwise, an Earth Engine export task generates a 1km x 1km Sentinel-2 surface reflectance mosaic (including the QA60 cloud mask band), which is then downloaded from GCS.
 
-- Each time window always produces a `.tif` file (either actual data or a blank placeholder) and a corresponding `.json` metadata file.
+  - Each time window always produces a `.tif` file (either actual data or a blank placeholder) and a corresponding `.json` metadata file.
+
+### Stacking and Output
+
+- Loads all corresponding `.tif` files (real or blank) and stacks them into a single NumPy array of shape 
+  `(n_time, n_bands, height, width)`.
+
+- Saves A `.npy` file containing the full-year stacked mosaic sequence for the site. A comprehensive `.json` 
+  metadata file with window definitions, bands, locations, and missing frame info. Both outputs are named with the unique site/sample ID (e.g., `site_-15.04_26.69_2023_1_stack.npy`).
+
+![Mean RGB composite of all time steps for first sample site.](src/features/readme_figures/sentinel2_mosaic_example.png)
 
 ### Handling missing data (blank images)
 
-- If no data is available for a window (e.g., persistent clouds), a blank placeholder image is copied into place using `generate_blank_tif.py`.
+- If no data is available for a window (e.g., persistent clouds), a blank placeholder image is copied into place using `generate_blank_tif.py`. 
 
 - Metadata for missing data windows includes `"missing_data": true`.
-### Viewing/Exporting
-
-- Command-line utility to visualize Sentinel-2 .tif images (including blank ones) as RGB composites, with warnings for all-blank/placeholder.
-
-- Use `visualize_tif.py` to view downloaded TIFs as RGB images.
-
-- `python src/features/visualize_tif.py data/features/site_-15.04_26.69_2023/s2_-15.04_26.69_2023-01-01_2023-01-11.tif --bands 3 2 1 --title "My RGB Plot"`
 
 ### File location
 
@@ -119,8 +126,8 @@ earthengine:
 `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`
 
 - Downloaded features & metadata:
-`data/features/site_{lat}_{lon}_{year}/s2_{lat}_{lon}_{start}_{end}.tif`
-`data/features/site_{lat}_{lon}_{year}/s2_{lat}_{lon}_{start}_{end}.json`
+`data/features/site_{lat}_{lon}_{year}_ID_stack.npy`
+`data/features/site_{lat}_{lon}_{year}_ID_stack.json`
 
 - Blank images:
 `data/features/blank.tif`
