@@ -176,6 +176,19 @@ data/targeting/features/
 
 *.sh
 
+multi-temporal-crop-classification-subset.tar.gz
+install.log
+multi-temporal-crop-classification-subset
+src/modeling/prototyping.ipynb
+.ipynb_checkpoints/
+*.tar.gz
+*.zip
+*.pkl
+models/
+experiments/
+outputs/
+
+irr-venv/*
 irr-venv/*
 !src/processing/process_file_pair.sh
 !src/processing/check_for_warnings.sh
