@@ -1,7 +1,0 @@
-Row 20 (internal_id 18, 8/10/2018): survey marked irrigation 2 (possible irrigation) but no matching polygons found.
-Row 25 (internal_id 18, 16/10/2021): survey marked irrigation 3 (possible irrigation) but no matching polygons found.
-Row 28 (internal_id 15, 14/8/2024): survey marked irrigation 5 (possible irrigation) but no matching polygons found.
-Row 28 (internal_id 15, 14/8/2024): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Row 47 (internal_id 3, 31/10/2016): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
-Polygon 40 (internal_id nan, nan/nan/nan) has no matching survey row.
-Polygon 105 (internal_id 15.0, 26.0/8.0/2024.0) has no matching survey row.

@@ -11,3 +11,4 @@ terratorch
 tqdm
 sklearn
 joblib
+rapidfuzz>=3.13.0

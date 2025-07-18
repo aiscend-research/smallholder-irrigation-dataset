@@ -37,8 +37,7 @@ Before using any scripts, follow these steps:
 | 1    | `survey_to_csv.py`             | Converts Earth Collect `.zip` survey files into usable `.csv` files               |
 | 2    | `polygons_to_geojson.py`       | Converts Google Earth Pro `.kml` files into `.geojson` format                     |
 | 3    | `merge_survey_and_polygons.py` | Merges processed survey data with labeled polygons and computes coverage stats    |
-| 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files and merges them automatically |
-| 5    | `pool_latest_labels.py`   | Pools the latest labeled irrigation data and outputs both a CSV and a GeoJSON file      |
+| 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files, merges them, and pools the latest labeled irrigation data (outputs both a CSV and a GeoJSON file) |
 
 ---
 
@@ -49,8 +48,13 @@ Each script creates or saves new files as it runs:
 * `survey_to_csv.py` creates a `.csv` file in the `processed/` folder with survey results
 * `polygons_to_geojson.py` creates a `.geojson` file in the `processed/` folder with labeled polygons
 * `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder, **and also saves a log file** summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
-* `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`
-* `pool_latest_labels.py` pools the latest labeled irrigation data for the `random_sample` group and outputs both a CSV and a GeoJSON file with bounding box geometries for each label.
+* `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`, and then pools the latest labeled irrigation data for the group:
+
+```bash
+python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
+```
+
+This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
 
 You can either fully process a single pair of survey and polygon files, or batch process an entire folder.
 
@@ -92,6 +96,36 @@ This command runs all three steps on everything inside the `raw/` folder:
 ```bash
 python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
 ```
+
+This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
+
+---
+
+### 🛑 Checking for Warnings in Latest Surveys
+
+The script `check_for_warnings.sh` helps you quickly identify which of the most recent survey versions still have warnings or issues flagged during the merging/validation process.
+
+**What it does:**  
+- Scans the merged survey reports for your group (e.g., `random_sample`).
+- Compares them to the list of latest surveys in `latest_irrigation_table.csv`.
+- Prints the names of any surveys that are both the latest version **and** have warnings (i.e., their report does not say "All checks passed successfully.").
+
+**How to use:**
+1. Make sure you have run the full processing pipeline so that the merged reports and latest irrigation table are up to date.
+2. From the project root, run:
+   ```bash
+   ./src/processing/check_for_warnings.sh
+   ```
+   (You may need to make it executable first: `chmod +x src/processing/check_for_warnings.sh`)
+
+**Output:**  
+A list of survey file names that are the latest version and still have outstanding warnings.
+
+We additionally eventually wrote a script that removes obsolete surveys (keeps only the latest, corrected ones) from the raw folder to keep them from being constantly processed:
+   ```bash
+   ./src/processing/remove_obsolete_surveys.sh
+   ```
+   (You may need to make it executable first: `chmod +x src/processing/remove_obsolete_surveys.sh`)
 
 ---
 
@@ -142,3 +176,17 @@ To help everyone work smoothly together on this project:
 These habits will help keep the project organized, make collaboration easier, and ensure that we don't lose or overwrite each other's work.
 
 ---
+
+## Running Tests
+
+To run all unit tests:
+
+```{bash}
+python -m unittest discover tests
+```
+
+Or, to run a specific test file:
+
+```{bash}
+python -m unittest tests/test_polygons_to_geojson.py
+```

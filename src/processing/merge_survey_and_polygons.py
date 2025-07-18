@@ -7,6 +7,7 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # Add src to the path so utils can be found
 from utils.geometries import survey_polygon
+from polygons_to_geojson import CATEGORIES
 
 def check_irrigation_polygon_consistency(row, matching_polys, irrigation, idx):
     """
@@ -34,16 +35,13 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
     """
     Processes a single survey row: matches polygons, computes coverage and stats, and returns results and report lines.
     Returns (result_dict, report_lines), where the results include: 
-        - percent_coverage: Percentage of the survey area covered by polygons.
-        - percent_coverage_hc: Percentage of the survey area covered by polygons with certainty >= certainty_cutoff.
-        - poly_avg_size: Average size of the polygons covering the survey area.
-        - poly_avg_size_hc: Average size of the polygons with certainty >= the certainty_cutoff.
-        - poly_min_size: Minimum size of the polygons covering the survey area.
-        - poly_min_size_hc: Minimum size of the polygons with certainty >= the certainty_cutoff.
-        - percent_coverage_hc_plantation: Percent coverage of high-certainty polygons with special_category containing 'plantation'.
-        - percent_coverage_hc_industrial: ... 'industrial'.
-        - percent_coverage_hc_lawn: ... 'lawn'.
-        - percent_coverage_hc_covered: ... 'covered'.
+        - percent_coverage: Percentage (%) of the survey area covered by polygons.
+        - percent_coverage_hc: Percentage (%) of the survey area covered by polygons with certainty >= certainty_cutoff.
+        - poly_avg_size: Average size of the polygons covering the survey area (square meters).
+        - poly_avg_size_hc: Average size of the polygons with certainty >= the certainty_cutoff (square meters).
+        - poly_min_size: Minimum size of the polygons covering the survey area (square meters).
+        - poly_min_size_hc: Minimum size of the polygons with certainty >= the certainty_cutoff (square meters).
+        - percent_coverage_hc_{category}: Percent (%) coverage of high-certainty polygons with a specific category.
     """
     # Initialize result dict with default values and consistent names
     result = {
@@ -53,11 +51,9 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
         "poly_avg_size_hc": None,
         "poly_min_size": None,
         "poly_min_size_hc": None,
-        "percent_coverage_hc_plantation": 0.0,
-        "percent_coverage_hc_industrial": 0.0,
-        "percent_coverage_hc_lawn": 0.0,
-        "percent_coverage_hc_covered": 0.0,
     }
+    for category in CATEGORIES:
+        result[f"percent_coverage_hc_{category}"] = 0.0
 
     # Find polygons that match by internal_id (or site_id if the labeler accidentally used that), year, month, and day.
     condition = (
@@ -112,12 +108,12 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
             result["percent_coverage_hc"] = (intersection_high.area / survey_area) * 100 if survey_area > 0 else 0.0
 
             # For each special category, calculate percent coverage
-            for special in ["plantation", "industrial", "lawn", "covered"]:
-                special_polys = high_polys[high_polys["special_category"].astype(str).str.contains(special, case=False, na=False)]
+            for category in CATEGORIES:
+                special_polys = high_polys[high_polys["category"].astype(str).str.contains(category, case=False, na=False)]
                 if not special_polys.empty:
                     union_special = unary_union(special_polys.geometry.tolist())
                     intersection_special = row["geometry"].intersection(union_special)
-                    result[f"percent_coverage_hc_{special}"] = (intersection_special.area / survey_area) * 100 if survey_area > 0 else 0.0
+                    result[f"percent_coverage_hc_{category}"] = (intersection_special.area / survey_area) * 100 if survey_area > 0 else 0.0
 
     return result, report_lines
 
@@ -216,6 +212,29 @@ def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certa
     survey_results.drop(columns="geometry").to_csv(results_path, index=False)
     print(f"Saved merged dataset at {results_path}")
 
+    # Enrich and save polygons GeoJSON with polygon size and site level info ---
+    # Calculate polygon area (in m^2)
+    polygons['polygon_area_m2'] = polygons.to_crs("EPSG:32735").geometry.area
+
+    # Select relevant site-level columns from survey_gdf
+    survey_info_cols = ['site_id', 'internal_id', 'plot_file', 'x', 'y', 'water_source', 'year', 'month', 'day', 'source_file']
+    survey_info = survey_gdf[survey_info_cols].drop_duplicates()
+
+    # Merge polygons with survey info on site_id, internal_id, year, month, day
+    polygons_merged = polygons.merge(
+        survey_info,
+        on=['site_id', 'internal_id', 'year', 'month', 'day'],
+        how='left'
+    )
+
+    # Save enriched polygons GeoJSON
+    polygons_path_out = os.path.join(
+        merged_folder,
+        os.path.basename(survey_path).replace('.csv', '_polygons.geojson')
+    )
+    polygons_merged.to_file(polygons_path_out, driver='GeoJSON')
+    print(f"Saved merged polygons at {polygons_path_out}")
+
     # Return the survey results GeoDataFrame (with added percent coverage columns)
     return survey_gdf
 
@@ -224,22 +243,22 @@ if __name__ == "__main__":
     
     # Example usage/test code
 
-    # survey = "data/labels/labeled_surveys/random_sample/processed/MV_76-100.csv"
-    # survey_results = merge_and_check(survey)
-    # print(survey_results.head())
+    survey = "data/labels/labeled_surveys/random_sample/processed/MV_v2_425-449.csv"
+    survey_results = merge_and_check(survey)
+    print(survey_results.head())
 
     # CLI argument parsing
 
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
-    parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
-    parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
+    # parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
+    # parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
+    # args = parser.parse_args()
     
-    survey_path = args.survey_path
-    polygons_path = args.polygons_path if args.polygons_path else None
+    # survey_path = args.survey_path
+    # polygons_path = args.polygons_path if args.polygons_path else None
     
-    survey_results = merge_and_check(survey_path, polygons_path)
+    # survey_results = merge_and_check(survey_path, polygons_path)
     
-    print(f"Merged results have {len(survey_results)} rows.")
+    # print(f"Merged results have {len(survey_results)} rows.")

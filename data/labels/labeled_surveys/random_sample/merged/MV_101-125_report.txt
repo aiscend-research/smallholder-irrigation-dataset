@@ -1,4 +1,0 @@
-Polygon 11 (internal_id 5, 17/6/2023) does not overlap the survey area.
-Polygon 0 (internal_id 19, 2/6/2018) has no matching survey row.
-Polygon 44 (internal_id 18, 4/6/2018) has no matching survey row.
-Polygon 55 (internal_id 3, 31/10/2026) has no matching survey row.

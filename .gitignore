@@ -191,6 +191,8 @@ outputs/
 irr-venv/*
 irr-venv/*
 !src/processing/process_file_pair.sh
+!src/processing/check_for_warnings.sh
+!src/processing/remove_obsolete_surveys.sh
 .Rproj.user
 data/labels/unlabeled_surveys/random_sample/Zambia_0.05_n_*.csv
 secrets/earthengine-key.json
