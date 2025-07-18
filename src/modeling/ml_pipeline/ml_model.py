@@ -28,3 +28,12 @@ def train_GradientBoosting(
     )
     clf.fit(X_train, y_train)
     return clf
+
+def train_model(X_train, y_train, model_type, **hyperparams):
+    if model_type == "random_forest":
+        clf = train_randomForest(X_train, y_train, **hyperparams)
+    elif model_type == "gradient_boosting":
+        clf = train_GradientBoosting(X_train, y_train, **hyperparams)
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+    return clf

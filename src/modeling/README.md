@@ -10,9 +10,9 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
 
 ## Structure
 ```
-├── main.py                    # Entry point to run the full pipeline
+├── run_experiment.py          # Entry point to run an experiment
+├── final_test.py              # Entry point to evaluate a best model's performance to the test dataset (in progress)
 ├── experiments.yaml           # Specify experiment details
-├── prototyping.ipynb          # Notebook for interactive experimentation
 ├── README.md                  # This file
 ├── ml_pipeline/               # Core ML pipeline modules
 │   ├── __init__.py            # Makes ml_pipeline a Python package
@@ -20,18 +20,7 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
 │   ├── ml_model.py            # Model training
 │   ├── evaluation.py          # Model prediction and metrics
 │   └── visualization.py       # Plotting predictions and confusion matrix
-├── experiments/               # Stores output of experiments
-│    WORK IN PROGRESS
 ```
-### `experiments.yaml`
-Contains specfic configurations for each model to be run. 
-
-### `main.py`
-Loads in model configurations from the `experiments.yaml` file and runs the pipeline on each model. Saves the output to the experiments folder. 
-
-### `experiments` 
-Folder where results from experiments are saved, as of now included in the gitignore. Stucture is a work in progress. 
-
 ### Machine Learning Pipeline:
 
 #### `build_features.py`
@@ -48,3 +37,41 @@ Folder where results from experiments are saved, as of now included in the gitig
  #### `visualization.py`
  `print_confusion_matix(y_true, y_pred)`: Displays a confusion matrix using `matplotlib`.
 `plot_ml_predictions(dataset, clf, class_names, colors)`: Visualizes the model’s pixel-wise predictions vs ground truth masks for selected samples, using color-coded masks. Class colors and names are dataset-dependent and should be passed in as arguments. This function will have to changed depending on the dataset.
+
+### Running Experiments Using the ML Pipeline
+
+This pipeline is designed to make it easy to run, track, and reproduce machine learning experiments. The workflow is configuration-driven, so you can specify all experiment details in a YAML file and run them with a single script.
+
+#### **Configuration: `experiment.yaml`**
+
+- This file contains all the settings for a single experiment, including:
+  - **Experiment name** (for tracking)
+  - **Data settings** (dataset path, train/validation/test subset sizes)
+  - **Model type** (e.g., `random_forest`, `gradient_boosting`)
+  - **Model hyperparameters** (grouped by model type)
+  - **Visualization options** (class colors, number of samples to plot)
+  - **Output directory** (where results will be saved)
+
+The `experiment.yaml` file is listed in the `.gitignore`, so users may tweak it at their will for a given experiment, but the default configurations will remain untouched. 
+
+#### **Running Experiments: `run_experiment.py`**
+
+- This script loads the experiment configuration from `experiment.yaml` and runs the full ML pipeline. 
+
+#### **Expected Outputs**
+
+For each experiment run, a new subfolder is created in the specified output directory (default: `./experiments`). The name of the folder corresponds to the experiment name as specified in `experiment.yaml, concatenated with a datetime stamp. 
+
+This folder contains:
+- `experiment.yaml`: A copy of the experiment configurations used to devise this experiment
+- `model.pkl`: The trained model, serialized with joblib.
+- `metrics.json`: Evaluation metrics (accuracy, F1 score, etc.) on the validation set.
+- `visualization.png`: Plots of model predictions and confusion matrices.
+- `config.yaml`: A snapshot of the exact configuration used for this run.
+- `run.log`: A complete log of the experiment, including all print statements and errors.
+
+This structure ensures that every experiment is fully reproducible: you can always trace back from results to the exact code and configuration used.
+
+#### **Best Practices**
+
+- **Commit your code before running experiments.** This ensures you can always match results to the code that produced them. 
