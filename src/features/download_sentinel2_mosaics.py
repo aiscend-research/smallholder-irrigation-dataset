@@ -77,7 +77,7 @@ bucket = load_config()["earthengine"]["bucket_name"]
 ee_key = os.path.join(project_root, load_config()["earthengine"]["service_account_key"])
 fs = gcsfs.GCSFileSystem(token=ee_key, project=GCS_PROJECT)
 
-bands = ['B2', 'B3', 'B4', 'B8', 'QA60']
+bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12','QA60']
 
 for idx, row in labels.iterrows():
     lat = row["y"]

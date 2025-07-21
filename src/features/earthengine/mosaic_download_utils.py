@@ -48,7 +48,7 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
 
     # Always include QA60 (cloud mask)
     if bands is None:
-        bands = ['B2', 'B3', 'B4', 'B8', 'QA60']
+        bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12','QA60']
 
     collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
         .filterBounds(region) \
