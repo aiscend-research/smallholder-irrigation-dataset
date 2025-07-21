@@ -107,7 +107,7 @@ class TestLabelBandFunctions(unittest.TestCase):
             'crs': 'EPSG:4326'
         }
 
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
         self.assertEqual(
             1,
@@ -141,7 +141,7 @@ class TestLabelBandFunctions(unittest.TestCase):
             'crs': 'EPSG:4326'
         }
 
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
         self.assertEqual(
             3,
@@ -182,8 +182,8 @@ class TestLabelBandFunctions(unittest.TestCase):
 
         image_meta = create_bounding_box(center_lat, center_lon)
 
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=3)
 
         self.assertEqual(
             (8, image_meta['height'], image_meta['width']),
@@ -290,8 +290,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lon = 28.479152896241143
         center_lat = -13.02898847831871
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=3)
 
         self.assertEqual(
             (8, image_meta['height'], image_meta['width']),
@@ -320,8 +320,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lat = -13.02898847831871
 
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=2)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=2)
 
         self.assertEqual(
             (8, image_meta['height'], image_meta['width']),
@@ -369,8 +369,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lat = -9.201089565713376
 
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=1)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=1)
 
         self.assertEqual(
             (8, image_meta['height'], image_meta['width']),
@@ -436,8 +436,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lat = -13.02898847831871
 
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=1)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=1)
 
         self.assertEqual(
             (8, image_meta['height'], image_meta['width']),
@@ -514,8 +514,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lat = -11.15545729747778
 
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=3)
 
         output_path = "test_label_band.tif"
         save_label_raster(band, image_meta, output_path)
@@ -571,8 +571,8 @@ class TestLabelBandFunctions(unittest.TestCase):
         center_lat = -11.15545729747778
 
         image_meta = create_bounding_box(center_lat, center_lon)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=3)
-        band = rasterize_polygons(gdf, image_meta)
+        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
+        band = rasterize_polygons(gdf, image_meta, certainty_thresh=3)
 
         output_path = "test_label_band.tif"
         save_label_raster(band, image_meta, output_path)
