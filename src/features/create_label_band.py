@@ -176,7 +176,7 @@ def get_image_meta(input_image_path):
 
     return image_meta
 
-def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp, certainty_thresh=4):
+def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp):
     """
     Retrieve polygons corresponding to a particular .tif image.
 
@@ -187,7 +187,6 @@ def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, ti
         - internal_id (int): Internal survey id to retrieve polygons at the correct location
         - image_meta (dict): Metadata of particular .tif image we are working with.
         - timestamp (Date): Date
-        - certainty_thresh (int): Minimum certainty for a polygon to be considered irrigated.
 
     Output: 
         - gdf (geopandas.geodataframe.GeoDataFrame): DataFrame that corresponds to the polygons 
@@ -208,12 +207,9 @@ def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, ti
     # Filter by times
     gdf = gdf[ (gdf['year'] == timestamp.year) & (gdf['month'] == timestamp.month) & (gdf['day'] == timestamp.day)]
 
-    # Filter out low certainty polygons
-    gdf = gdf[gdf['certainty'] >=  certainty_thresh]  
-
     return gdf
 
-def rasterize_polygons(gdf, image_meta):
+def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
     """
     Rasterizes the polygons to match the resolution of the particular image.
 
@@ -221,6 +217,7 @@ def rasterize_polygons(gdf, image_meta):
         - gdf (geopandas.geodataframe.GeoDataFrame): DataFrame that corresponds to the polygons for the 
         particular image.
         -image_meta (dict): Metadata of particular .tif image we are working with.
+        - certainty_thresh (int): Minimum certainty for a polygon to be considered irrigated.
 
     Output: 
         - label_array (numpy.ndarray): A binary numpy array of the same shape as the input image, with
@@ -234,8 +231,43 @@ def rasterize_polygons(gdf, image_meta):
         "covered": 5
     }
 
-    # Create a label array with 6 bands, band 1 for each type of irrigation, bands 2-6 for uncertainty explanations
+    # Create a label array with 8 bands, band 1 for each type of irrigation, bands 2-6 for uncertainty explanations
     labels = np.zeros((8, image_meta['height'], image_meta['width']), dtype=np.uint8)
+
+     # Add certainty score band
+    shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
+    certainty_array = rasterize(
+        shapes=shapes,
+        out_shape=(image_meta['height'], image_meta['width']),
+        transform=image_meta['transform'],
+        fill=0,
+        dtype='uint8'
+    )
+    labels[7] = certainty_array
+
+    # Retrieve uncertainty bands 2-6
+    UNCERTAINTY_TYPES = [
+        "unclear signs of agriculture",
+        "only slightly green",
+        "uneven",
+        "may naturally be green",
+        "may be a fishpond"
+    ]
+
+    for i in range(5):
+        shapes = [(geom, 1) for geom, cat in zip(gdf.geometry, gdf.uncertainty_explanation) if UNCERTAINTY_TYPES[i] in cat.split(";")]
+        mask = rasterize(
+            shapes=shapes,
+            out_shape=(image_meta['height'], image_meta['width']),
+            transform=image_meta['transform'],
+            fill=0,
+            dtype='uint8'
+        ) 
+        labels[i + 2] = mask
+
+    # Add the actual irrigation bands, but only if the certainty is high enough
+    # Filter out low certainty polygons
+    gdf = gdf[gdf['certainty'] >=  certainty_thresh]  
 
     # Retrieve irrigation bands (first and second bands)
     shapes = []
@@ -259,37 +291,6 @@ def rasterize_polygons(gdf, image_meta):
     # Second band is a binary mask of first band
     labels[0] = label_array
     labels[1] = np.where(label_array != 0, 1, 0)
-
-    # Retrieve uncertainty bands 2-6
-    UNCERTAINTY_TYPES = [
-        "unclear signs of agriculture",
-        "only slightly green",
-        "uneven",
-        "may naturally be green",
-        "may be a fishpond"
-    ]
-
-    for i in range(5):
-        shapes = [(geom, 1) for geom, cat in zip(gdf.geometry, gdf.uncertainty_explanation) if UNCERTAINTY_TYPES[i] in cat.split(";")]
-        mask = rasterize(
-            shapes=shapes,
-            out_shape=(image_meta['height'], image_meta['width']),
-            transform=image_meta['transform'],
-            fill=0,
-            dtype='uint8'
-        ) 
-        labels[i + 2] = mask
-
-    # Add certainty score band
-    shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
-    certainty_array = rasterize(
-        shapes=shapes,
-        out_shape=(image_meta['height'], image_meta['width']),
-        transform=image_meta['transform'],
-        fill=0,
-        dtype='uint8'
-    )
-    labels[7] = certainty_array
 
     return labels
 
