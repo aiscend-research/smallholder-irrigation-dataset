@@ -243,22 +243,22 @@ if __name__ == "__main__":
     
     # Example usage/test code
 
-    survey = "data/labels/labeled_surveys/random_sample/processed/MV_v2_425-449.csv"
-    survey_results = merge_and_check(survey)
-    print(survey_results.head())
+    # survey = "data/labels/labeled_surveys/random_sample/processed/MV_v2_425-449.csv"
+    # survey_results = merge_and_check(survey)
+    # print(survey_results.head())
 
     # CLI argument parsing
 
-    # import argparse
+    import argparse
 
-    # parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
-    # parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
-    # parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Merge survey data with polygon data and perform consistency checks.")
+    parser.add_argument("survey_path", type=str, help="Path to the survey CSV file.")
+    parser.add_argument("--polygons_path", type=str, help="Path to the polygons GeoJSON file (optional).")
+    args = parser.parse_args()
     
-    # survey_path = args.survey_path
-    # polygons_path = args.polygons_path if args.polygons_path else None
+    survey_path = args.survey_path
+    polygons_path = args.polygons_path if args.polygons_path else None
     
-    # survey_results = merge_and_check(survey_path, polygons_path)
+    survey_results = merge_and_check(survey_path, polygons_path)
     
-    # print(f"Merged results have {len(survey_results)} rows.")
+    print(f"Merged results have {len(survey_results)} rows.")
