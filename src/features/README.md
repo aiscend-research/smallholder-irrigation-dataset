@@ -15,6 +15,7 @@
     - [Handling missing data (blank images)](#handling-missing-data-blank-images)
     - [Viewing/Exporting](#viewingexporting)
     - [File location](#file-location)
+  - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
 
@@ -131,3 +132,33 @@ earthengine:
 
 - Blank images:
 `data/features/blank.tif`
+
+## Creating Pixel-Level Labels
+
+For each Sentinel-2 image, we classify each pixel as irrigated or not. For irrigated pixels, we also specify the type of irrigation, the labeler's level of certainty, and reasons for any uncertainty. To do this, we overlay labeled polygons on an eight-band `.tif` file, with the following bands.
+
+<img src="readme_figures/band_table.png" alt="table showing band information" width="600" />
+
+The first band specifies the type of irrigation, if any, and the second is a simple binary mask of the first. These bands only include areas as irrigated if they clear a certain threshold of certainty, with the default being >=3. 
+
+The next five bands are binary masks indicating the reasons for any uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation. The last band indicates the certainty score, with 5 being high certainty, 1 being low certainty, and 0 indicating no irrigation. These bands include all areas regardless of their level of certainty.
+
+The script will then create a folder `~/data/dataset/labels` containing all labels. For each input image, it will create a label file in format `uniqueID_siteID_date_labeler.tif` where
+- `uniqueID` is a unique identifier for the label
+-  `siteID` is the ID of the site
+-  `date` is the date of the image (format `YYYY.MM.DD`)
+-  `labeler` is the labeler's initials
+
+To run this script, navigate to the `src` directory and run
+
+```{bash}
+python3 features/create_label_band.py
+```
+
+This will create a folder `~/data/dataset/labels` with all corresponding labels.
+
+To run tests for this script, run the following command from this directory:
+
+```{bash}
+python -m unittest tests/test_create_label_band.py
+```
