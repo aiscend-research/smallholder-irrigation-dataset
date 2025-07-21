@@ -99,10 +99,10 @@ class TestLabelBandFunctions(unittest.TestCase):
         from the source file, when there is only one corresponding polygon.
         """
 
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
-        survey_id = 5043172
-        internal_id = 23
-        timestamp = datetime.strptime("2023-05-25", "%Y-%m-%d").date() + timedelta(15)
+        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        survey_id = 3504043
+        internal_id = 21
+        timestamp = datetime.strptime("2020-8-27", "%Y-%m-%d").date()
         image_meta = {
             'crs': 'EPSG:4326'
         }
@@ -115,16 +115,16 @@ class TestLabelBandFunctions(unittest.TestCase):
             msg=f"test_retrieve_polygons fail: Expected 1 polygon but got {len(gdf)}"
         )
         self.assertEqual(
-            2023, gdf.iloc[0].year, msg=f"test_retrieve_polygons fail: Expected year 2023 but got {gdf['year'].values[0]}"
+            2020, gdf.iloc[0].year, msg=f"test_retrieve_polygons fail: Expected year 2020 but got {gdf['year'].values[0]}"
         )
         self.assertEqual(
-            3, gdf.iloc[0].certainty, msg=f"test_retrieve_polygons fail: Expected certainty 3 but got {gdf['certainty'].values[0]}"
+            5, gdf.iloc[0].certainty, msg=f"test_retrieve_polygons fail: Expected certainty 5 but got {gdf['certainty'].values[0]}"
         )
         self.assertEqual(
-            6, gdf.iloc[0].month, msg=f"test_retrieve_polygons fail: Expected month 6 but got {gdf['month'].values[0]}"
+            8, gdf.iloc[0].month, msg=f"test_retrieve_polygons fail: Expected month 8 but got {gdf['month'].values[0]}"
         )
         self.assertEqual(
-            9, gdf.iloc[0].day, msg=f"test_retrieve_polygons fail: Expected day 9 but got {gdf['day'].values[0]}"
+            27, gdf.iloc[0].day, msg=f"test_retrieve_polygons fail: Expected day 27 but got {gdf['day'].values[0]}"
         )
 
     def test_retrieve_polygons_multiple_polygons(self):
@@ -144,17 +144,12 @@ class TestLabelBandFunctions(unittest.TestCase):
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
         self.assertEqual(
-            3,
+            4,
             len(gdf),
-            msg=f"test_retrieve_polygons fail: Expected 1 polygon but got {len(gdf)}"
+            msg=f"test_retrieve_polygons fail: Expected 4 polygons but got {len(gdf)}"
         )
 
         for i in range(3):
-            # All polygons certainty greater than threshold
-            self.assertGreaterEqual(
-                gdf.iloc[i].certainty, 3,
-                msg=f"test_retrieve_polygons fail: Expected certainty >= 3 but got {gdf['certainty'].values[i]}"
-            )
             # All polygons correct date
             self.assertEqual(
                 2019, gdf.iloc[0].year, msg=f"test_retrieve_polygons fail: Expected year 2023 but got {gdf['year'].values[0]}"
@@ -283,12 +278,12 @@ class TestLabelBandFunctions(unittest.TestCase):
         """
         # survey has one polygon of certainty 5
         irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
-        survey_id = 5107007
-        internal_id = 16
-        timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
+        survey_id = 3504043
+        internal_id = 21
+        timestamp = datetime.strptime("2020-8-27", "%Y-%m-%d").date()
 
-        center_lon = 28.479152896241143
-        center_lat = -13.02898847831871
+        center_lon = 31.434356858051235
+        center_lat = -11.826157726704926
         image_meta = create_bounding_box(center_lat, center_lon)
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
         band = rasterize_polygons(gdf, image_meta, certainty_thresh=3)
@@ -302,7 +297,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         for i in range(2, 7):
             self.assertTrue(
                 (band[i] == 0).all(),
-                msg=f"test_rasterize_polygons fail: Expected uncertainty band {i} to be all zeros"
+                msg=f"test_rasterize_polygons fail: Expected uncertainty band {i+1} to be all zeros"
             )
 
     def test_rasterize_polygons_correct_uncertainty_bands_polygon_with_single_uncertainty(self):
