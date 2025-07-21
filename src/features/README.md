@@ -89,7 +89,9 @@ For each Sentinel-2 image, we classify each pixel as irrigated or not. For irrig
 
 <img src="readme_figures/band_table.png" alt="table showing band information" width="600" />
 
-The first band specifies the type of irrigation, if any, and the second is a simple binary mask of the first. The next five bands are binary masks indicating the reasons for any uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation. The last band indicates the certainty score, with 5 being high certainty, 1 being low certainty, and 0 indicating no irrigation.
+The first band specifies the type of irrigation, if any, and the second is a simple binary mask of the first. These bands only include areas as irrigated if they clear a certain threshold of certainty, with the default being >=3. 
+
+The next five bands are binary masks indicating the reasons for any uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation. The last band indicates the certainty score, with 5 being high certainty, 1 being low certainty, and 0 indicating no irrigation. These bands include all areas regardless of their level of certainty.
 
 The script will then create a folder `~/data/dataset/labels` containing all labels. For each input image, it will create a label file in format `uniqueID_siteID_date_labeler.tif` where
 - `uniqueID` is a unique identifier for the label
