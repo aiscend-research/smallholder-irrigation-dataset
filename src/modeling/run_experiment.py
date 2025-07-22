@@ -10,6 +10,10 @@ from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
 from ml_pipeline.visualization import print_confusion_matix, plot_ml_predictions
 
+#In order to access the get_data_root function form utils 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from utils.utils import get_data_root
+
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
@@ -50,6 +54,7 @@ def run_experiment(exp_cfg, config_path):
             print(f"Saving outputs to: {experiment_dir}")
 
             # Load and prepare data
+            #dataset_path = os.path.join(get_data_root(), "modeling", "test") #for data on the cluster 
             dataset_path = exp_cfg["data"]["dataset_path"]
             train_size = exp_cfg["data"].get("train_subset_size", None) # Default to use all data
             val_size = exp_cfg["data"].get("val_subset_size", None)
@@ -80,8 +85,11 @@ def run_experiment(exp_cfg, config_path):
             # Predict and evaluate
             y_pred = clf.predict(X_val)
             metrics = model_metrics(y_pred, y_val)
+            metrics_dict = {
+                        "accuracy": metrics[0],
+                        "f1_score": metrics[1]}
             with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2)
+                json.dump(metrics_dict, f, indent=2)
             print("Metrics:", metrics)
 
             # Visualization
@@ -94,7 +102,6 @@ def run_experiment(exp_cfg, config_path):
                 val_dataset, clf, class_names, colors,
                 num_samples=num_samples, save_path=visualization_path
             )
-            print(f"Visualizations saved to {visualization_path}")
             print(f"[{timestamp}] Experiment complete.")
 
         finally:

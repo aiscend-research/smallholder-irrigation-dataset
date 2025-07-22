@@ -9,6 +9,6 @@ matplotlib
 seaborn
 terratorch
 tqdm
-sklearn
+scikit-learn
 joblib
 rapidfuzz>=3.13.0

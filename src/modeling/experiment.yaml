@@ -4,13 +4,12 @@ data:
   dataset_path: "multi-temporal-crop-classification-subset"
   train_subset_size: 1000 #subseting a 1000 pixels
   test_subset_size: 1000
+  val_subset_size: 1000
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
-
   # Only the hyperparameters corresponding to the above model type will be used in the experiement designation
   hyperparameters: # ignored if not a random_forest model
-    
     random_forest: 
       n_estimators: 100
       random_state: 42
