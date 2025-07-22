@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
 <Document>
-	<name>PS_1025-1049.kml</name>
-	<open>1</open>
-	<atom:link rel="app" href="https://www.google.com/earth/about/versions/#earth-pro" title="Google Earth Pro 7.3.6.10201"></atom:link>
+	<name>PS_1025-1049 v2.kml</name>
 	<StyleMap id="m_ylw-pushpin">
 		<Pair>
 			<key>normal</key>
@@ -240,7 +238,6 @@
 	</Style>
 	<Folder>
 		<name>PS_1025-1049</name>
-		<open>1</open>
 		<Placemark>
 			<name>ps_6_7.27.2023</name>
 			<description>5</description>
@@ -503,38 +500,6 @@ May naturally be green</description>
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>ps_13_8.13.2016</name>
-			<description>4
-Only slightly green</description>
-			<styleUrl>#msn_ylw-pushpin3</styleUrl>
-			<Polygon>
-				<tessellate>1</tessellate>
-				<outerBoundaryIs>
-					<LinearRing>
-						<coordinates>
-							28.05877020795721,-14.76962983980169,0 28.05893603730661,-14.76955874536075,0 28.05884216550206,-14.76937948311512,0 28.05865085112482,-14.76947316025455,0 28.05877020795721,-14.76962983980169,0 
-						</coordinates>
-					</LinearRing>
-				</outerBoundaryIs>
-			</Polygon>
-		</Placemark>
-		<Placemark>
-			<name>ps_13_8.13.2016</name>
-			<description>3
-Only slightly green</description>
-			<styleUrl>#msn_ylw-pushpin3</styleUrl>
-			<Polygon>
-				<tessellate>1</tessellate>
-				<outerBoundaryIs>
-					<LinearRing>
-						<coordinates>
-							28.05930741523422,-14.76943336136709,0 28.05930541437685,-14.76914518485209,0 28.05916660331935,-14.76913803342723,0 28.05915077218406,-14.7694260007866,0 28.05930741523422,-14.76943336136709,0 
-						</coordinates>
-					</LinearRing>
-				</outerBoundaryIs>
-			</Polygon>
-		</Placemark>
-		<Placemark>
 			<name>ps_15_7.9.2019</name>
 			<description>4
 Only slightly green</description>
@@ -689,6 +654,7 @@ May naturally be green</description>
 				</outerBoundaryIs>
 			</Polygon>
 		</Placemark>
+		<atom:link rel="app" href="https://www.google.com/earth/about/versions/#earth-pro" title="Google Earth Pro 7.3.6.10201"></atom:link>
 	</Folder>
 </Document>
 </kml>
