@@ -29,7 +29,7 @@ if project_root not in sys.path:
 from src.utils.utils import load_config, find_project_root
 from src.utils.geometries import get_bounding_box
 
-# === Initialization ===
+# Initialization
 def initialize_earthengine():
     config = load_config()
     ee_key = os.path.join(find_project_root(os.getcwd()), config["earthengine"]["service_account_key"])
@@ -40,7 +40,7 @@ def initialize_earthengine():
     ee.Initialize(credentials)
     print("Earth Engine initialized.")
 
-# === Helpers ===
+# Helpers
 def sanitize_description(desc):
     allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;_-")
     return ''.join([c if c in allowed else '_' for c in desc])[:95]
@@ -100,7 +100,7 @@ def calculate_indices(img):
     ndwi = np.where((B3 + B11) != 0, (B3 - B11) / (B3 + B11), -9999)
     return ndvi, evi, ndwi
 
-# === Configuration ===
+# Configuration
 logging.basicConfig(level=logging.INFO)
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/")
@@ -118,7 +118,7 @@ bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12']
 def_shape = (len(bands), 100, 100)
 cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
 
-# === Main Loop ===
+# Main Loop
 for idx, row in data.iterrows():
     lat, lon = row['y'], row['x']
     uid = row['unique_id']
@@ -149,7 +149,7 @@ for idx, row in data.iterrows():
             fs.get(f"{bucket}/{prefix}.tif", tif_path)
 
         with rasterio.open(tif_path) as src:
-            img = src.read().astype(np.int16)  # ✅ 修复 dtype
+            img = src.read().astype(np.int16)  
         if img.shape != def_shape:
             img = resize_img(img, def_shape)
 
