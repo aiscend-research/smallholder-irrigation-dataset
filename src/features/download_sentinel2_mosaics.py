@@ -1,3 +1,6 @@
+# Sentinel-2 L1C Mosaic Downloader and Stacker with s2cloudless + Shadow Masking
+# Output: stacked GeoTIFF (.tif) + metadata (.json)
+
 import sys
 import os
 import pandas as pd
@@ -8,234 +11,191 @@ import json
 import shutil
 import numpy as np
 from datetime import datetime, timedelta
+import rasterio
+from rasterio.transform import from_origin
+from skimage.transform import resize
+from s2cloudless.cloud_detector import S2PixelCloudDetector
+
+import ee
 
 # Set up proxy if needed (adjust protocol if necessary)
-#os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-#os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
+os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
+os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
 
-import rasterio
-from skimage.transform import resize
-
-# Add the project root to the system path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from src.utils.utils import load_config
-from src.features.earthengine.mosaic_download_utils import initialize_earthengine, download_sentinel2_mosaic
+from src.utils.utils import load_config, find_project_root
+from src.utils.geometries import get_bounding_box
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
+# === Initialization ===
+def initialize_earthengine():
+    config = load_config()
+    ee_key = os.path.join(find_project_root(os.getcwd()), config["earthengine"]["service_account_key"])
+    with open(ee_key) as f:
+        creds = json.load(f)
+        service_email = creds['client_email']
+    credentials = ee.ServiceAccountCredentials(service_email, ee_key)
+    ee.Initialize(credentials)
+    print("Earth Engine initialized.")
+
+# === Helpers ===
+def sanitize_description(desc):
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;_-")
+    return ''.join([c if c in allowed else '_' for c in desc])[:95]
+
+def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None, bands=None):
+    config = load_config()
+    bucket = config["earthengine"]["bucket_name"]
+    region = get_bounding_box(lat, lon)
+
+    if bands is None:
+        bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12']
+
+    collection = ee.ImageCollection("COPERNICUS/S2_HARMONIZED") \
+        .filterBounds(region) \
+        .filterDate(start_date, end_date) \
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20)) \
+        .select(bands)
+
+    if collection.size().getInfo() == 0:
+        return None, output_prefix
+
+    mosaic = collection.mosaic()
+    if not output_prefix:
+        output_prefix = f"s2_mosaic_{lat}_{lon}_{start_date.replace('-', '')}"
+    desc = sanitize_description(output_prefix)
+
+    task = ee.batch.Export.image.toCloudStorage(
+        image=mosaic,
+        description=f"export_{desc}",
+        bucket=bucket,
+        fileNamePrefix=output_prefix,
+        region=region.getInfo()['coordinates'],
+        scale=10,
+        crs="EPSG:32633",
+        maxPixels=1e13
+    )
+    task.start()
+    return task, output_prefix
 
 def get_dense_time_windows(center_date):
-    year_start = datetime(center_date.year, 1, 1)
-    windows = []
-    window_size = 10  # days
-    n_windows = (365 // window_size) + 1
-    for i in range(n_windows):
-        start = year_start + timedelta(days=i * window_size)
-        end = start + timedelta(days=window_size)
-        windows.append((start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')))
-    return windows
+    start = datetime(center_date.year, 1, 1)
+    return [(start + timedelta(days=i*10), start + timedelta(days=i*10+10)) for i in range(37)]
 
-def wait_for_task(task, poll_interval=30):
-    if task is None:
-        return {"state": "NO_TASK"}
+def wait_for_task(task, interval=30):
     while task.active():
-        logging.info("  EE task still running... waiting...")
-        time.sleep(poll_interval)
-    status = task.status()
-    logging.info(f"  EE task finished with state: {status['state']}")
-    if status["state"] != "COMPLETED":
-        logging.error(f"  EE export failed with error: {status.get('error_message', 'Unknown error')}")
-    return status
+        time.sleep(interval)
+    return task.status()
 
 def resize_img(img, target_shape):
-    """Resize a (bands, H, W) image to target_shape, preserving dtype."""
-    bands, t_H, t_W = target_shape
-    assert img.shape[0] == bands, f"Band count mismatch. Got {img.shape[0]}, expected {bands}"
-    if img.shape == target_shape:
-        return img
-    resized = np.stack([
-        resize(img[b], (t_H, t_W), order=1, preserve_range=True, anti_aliasing=True)
-        for b in range(bands)
-    ], axis=0).astype(img.dtype)
-    return resized
+    return np.stack([resize(img[b], target_shape[1:], preserve_range=True) for b in range(img.shape[0])], axis=0).astype(img.dtype)
 
+def calculate_indices(img):
+    img = img.astype(np.float32) / 10000.0
+    B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = img
+    ndvi = np.where((B8 + B4) != 0, (B8 - B4) / (B8 + B4), -9999)
+    evi = np.where((B8 + 6*B4 - 7.5*B2 + 1) != 0, 2.5 * (B8 - B4) / (B8 + 6*B4 - 7.5*B2 + 1), -9999)
+    ndwi = np.where((B3 + B11) != 0, (B3 - B11) / (B3 + B11), -9999)
+    return ndvi, evi, ndwi
+
+# === Configuration ===
+logging.basicConfig(level=logging.INFO)
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/")
-GCS_PROJECT = "smallholder-irr"
-
-# Temporary folder for intermediate single-frame tifs
 TMP_DIR = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
 os.makedirs(TMP_DIR, exist_ok=True)
 
-labels = pd.read_csv(LABEL_CSV)
-assert all(col in labels.columns for col in ["unique_id", "y", "x", "year", "month", "day"]), "Check column names!"
-
+data = pd.read_csv(LABEL_CSV)
 initialize_earthengine()
-bucket = load_config()["earthengine"]["bucket_name"]
-ee_key = os.path.join(project_root, load_config()["earthengine"]["service_account_key"])
-fs = gcsfs.GCSFileSystem(token=ee_key, project=GCS_PROJECT)
+config = load_config()
+bucket = config["earthengine"]["bucket_name"]
+ee_key = os.path.join(project_root, config["earthengine"]["service_account_key"])
+fs = gcsfs.GCSFileSystem(token=ee_key, project="smallholder-irr")
 
-bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12','QA60']
+bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12']
+def_shape = (len(bands), 100, 100)
+cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
 
-for idx, row in labels.iterrows():
-    lat = row["y"]
-    lon = row["x"]
-    unique_id = row["unique_id"]  # Add unique_id for file naming
-    target_date = datetime(int(row["year"]), int(row["month"]), int(row["day"]))
-    windows = get_dense_time_windows(target_date)
+# === Main Loop ===
+for idx, row in data.iterrows():
+    lat, lon = row['y'], row['x']
+    uid = row['unique_id']
+    date = datetime(int(row['year']), int(row['month']), int(row['day']))
+    windows = get_dense_time_windows(date)
+    site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
+    stack_list, meta_list = [], []
 
-    # Add unique_id at the end of the site id
-    site_id = f"site_{lat:.2f}_{lon:.2f}_{target_date.year}_{unique_id}"
-    stack_list = []
-    meta_list = []
+    for start, end in windows:
+        s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+        prefix = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
+        tif_path = os.path.join(TMP_DIR, os.path.basename(prefix) + ".tif")
 
-    logging.info(f"== Processing {site_id} ==")
-
-    # We'll track previous shape for blank filling (default is None)
-    last_valid_shape = None
-
-    for widx, (start_date, end_date) in enumerate(windows):
-        output_prefix = f"s2_{lat:.2f}_{lon:.2f}_{start_date}_{end_date}"
-        gcs_prefix = f"{site_id}/{output_prefix}"
-
-        tif_path = os.path.join(TMP_DIR, f"{output_prefix}.tif")
-        meta_path = os.path.join(TMP_DIR, f"{output_prefix}.json")
-
-        # Check if file exists in GCS (bucket-relative path)
-        if fs.exists(f"{bucket}/{gcs_prefix}.tif"):
-            logging.info(f"  [SKIP] File already exists in GCS: gs://{bucket}/{gcs_prefix}.tif")
-            # Download from GCS to temporary local
-            fs.get(f"{bucket}/{gcs_prefix}.tif", tif_path)
-            fs.get(f"{bucket}/{gcs_prefix}.json", meta_path)
+        if fs.exists(f"{bucket}/{prefix}.tif"):
+            fs.get(f"{bucket}/{prefix}.tif", tif_path)
         else:
-            logging.info(f"[{idx+1}/{len(labels)}-{widx+1}/{len(windows)}] Exporting: ({lat}, {lon}) {start_date}–{end_date}")
+            task, _ = download_sentinel2_mosaic(lat, lon, s, e, prefix, bands)
+            if task is None:
+                meta_list.append({
+                    "date_range": [s, e],
+                    "cloud_fraction": 1.0,
+                    "mean_ndvi": -9999,
+                    "mean_evi": -9999,
+                    "mean_ndwi": -9999
+                })
+                continue
+            wait_for_task(task)
+            fs.get(f"{bucket}/{prefix}.tif", tif_path)
 
-            try:
-                task, out_prefix = download_sentinel2_mosaic(
-                    lat, lon, start_date, end_date,
-                    output_prefix=gcs_prefix,
-                    bands=bands
-                )
-                if task is None:
-                    logging.warning(f"[MISSING] No S2 images found for ({lat}, {lon}) {start_date}–{end_date}. Writing missing placeholder.")
-                    shutil.copy("data/features/blank.tif", tif_path)
-                    meta = {
-                        "filename": os.path.basename(tif_path),
-                        "location": {"lat": lat, "lon": lon},
-                        "date_range": [start_date, end_date],
-                        "bands": bands,
-                        "nodata_cloudy": True,
-                        "missing_data": True,
-                        "description": "No Sentinel-2 mosaic found for this window.",
-                        "source": "COPERNICUS/S2_SR_HARMONIZED"
-                    }
-                    with open(meta_path, "w") as f:
-                        json.dump(meta, f, indent=2)
-                    # Optionally upload placeholder to GCS for traceability
-                    fs.put(tif_path, f"{bucket}/{gcs_prefix}.tif")
-                    fs.put(meta_path, f"{bucket}/{gcs_prefix}.json")
-                else:
-                    logging.info(f"  Started export for {output_prefix}")
-                    wait_for_task(task, poll_interval=30)
-                    logging.info(f"  Export complete for {output_prefix}")
-                    # Download result from GCS
-                    fs.get(f"{bucket}/{gcs_prefix}.tif", tif_path)
-                    # Meta will be rewritten below
-            except Exception as e:
-                logging.error(f"  Failed to export {output_prefix}: {e}")
-                shutil.copy("data/features/blank.tif", tif_path)
-                meta = {
-                    "filename": os.path.basename(tif_path),
-                    "location": {"lat": lat, "lon": lon},
-                    "date_range": [start_date, end_date],
-                    "bands": bands,
-                    "nodata_cloudy": True,
-                    "missing_data": True,
-                    "description": f"Error: {e}",
-                    "source": "COPERNICUS/S2_SR_HARMONIZED"
-                }
-                with open(meta_path, "w") as f:
-                    json.dump(meta, f, indent=2)
+        with rasterio.open(tif_path) as src:
+            img = src.read().astype(np.int16)  # ✅ 修复 dtype
+        if img.shape != def_shape:
+            img = resize_img(img, def_shape)
 
-        # Read tif to numpy array, handling blank and resizing if needed
-        try:
-            with rasterio.open(tif_path) as src:
-                img = src.read()  # shape: (bands, H, W)
-                assert img.shape[0] == len(bands), "Band number mismatch!"
-                # Force all images to last_valid_shape if last_valid_shape is set
-                if last_valid_shape is not None and img.shape != last_valid_shape:
-                    img = resize_img(img, last_valid_shape)
-                last_valid_shape = img.shape  # Update the shape for the next placeholder if needed
-        except Exception as e:
-            logging.error(f"  Could not read tif {tif_path}: {e}")
-            # Try to load blank.tif and resize to last_valid_shape or fallback to (bands, 512, 512)
-            try:
-                with rasterio.open("data/features/blank.tif") as blank_src:
-                    blank_img = blank_src.read()
-                # Determine target shape
-                if last_valid_shape is not None:
-                    target_shape = last_valid_shape
-                else:
-                    target_shape = (len(bands), 512, 512)
-                img = resize_img(blank_img, target_shape)
-            except Exception as e2:
-                logging.error(f"  Could not load or resize blank.tif: {e2}")
-                target_shape = last_valid_shape if last_valid_shape is not None else (len(bands), 512, 512)
-                img = np.zeros(target_shape, dtype=np.uint16)
+        img_rgb = np.moveaxis(img, 0, -1) / 10000.0
+        img_batch = img_rgb[np.newaxis, ...]
 
-        # One final check to force all images to the same shape (last_valid_shape)
-        if last_valid_shape is not None and img.shape != last_valid_shape:
-            img = resize_img(img, last_valid_shape)
-        elif last_valid_shape is None and img.shape != (len(bands), 512, 512):
-            img = resize_img(img, (len(bands), 512, 512))
+        cloud_mask = cloud_detector.get_cloud_masks(img_batch)[0]
+        combined_mask = cloud_mask.astype(bool)
 
-        # Check for missing or nodata frames
-        try:
-            qa60_band = img[-1]  # Last band is QA60
-            nodata = (qa60_band == 1024).all() or (img[0] == 0).all()
-        except Exception:
-            nodata = True
+        img[:, combined_mask] = -9999
 
-        meta = {
-            "filename": os.path.basename(tif_path),
-            "location": {"lat": lat, "lon": lon},
-            "date_range": [start_date, end_date],
-            "bands": bands,
-            "nodata_cloudy": bool(nodata),
-            "missing_data": bool(nodata),
-            "description": "Sentinel-2 mosaic (dense 10-day), with QA60 cloud band" if not nodata else "No valid image, placeholder.",
-            "source": "COPERNICUS/S2_SR_HARMONIZED"
-        }
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2)
+        ndvi, evi, ndwi = calculate_indices(img)
 
+        meta_list.append({
+            "date_range": [s, e],
+            "cloud_fraction": float(combined_mask.mean()),
+            "mean_ndvi": float(ndvi[ndvi != -9999].mean()) if np.any(ndvi != -9999) else -9999,
+            "mean_evi": float(evi[evi != -9999].mean()) if np.any(evi != -9999) else -9999,
+            "mean_ndwi": float(ndwi[ndwi != -9999].mean()) if np.any(ndwi != -9999) else -9999
+        })
         stack_list.append(img)
-        meta_list.append(meta)
 
-    for i, img in enumerate(stack_list):
-        print(f"Frame {i}: shape={img.shape}")
-    # Stack all images for this site/year and save as npy+json
-    stack_arr = np.stack(stack_list, axis=0)  # shape: (n_time, bands, H, W)
-    npy_save_path = os.path.join(DOWNLOAD_DIR, f"{site_id}_stack.npy")
-    json_save_path = npy_save_path.replace(".npy", ".json")
+    if not stack_list:
+        continue
 
-    np.save(npy_save_path, stack_arr)
-    with open(json_save_path, "w") as f:
+    stack_arr = np.stack(stack_list)
+    T, B, H, W = stack_arr.shape
+    reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
+
+    out_tif = os.path.join(DOWNLOAD_DIR, f"{site_id}.tif")
+    out_json = os.path.join(DOWNLOAD_DIR, f"{site_id}.json")
+
+    with rasterio.open(out_tif, 'w', driver='GTiff', height=H, width=W, count=T*B,
+                       dtype='int16', crs='EPSG:32633',
+                       transform=from_origin(lon - 0.0005, lat + 0.0005, 0.0001, 0.0001),
+                       nodata=-9999) as dst:
+        dst.write(reshaped.astype('int16'))
+
+    with open(out_json, 'w') as f:
         json.dump({
             "site_id": site_id,
-            "lat": lat, "lon": lon, "year": target_date.year,
-            "unique_id": unique_id,
+            "lat": lat, "lon": lon,
+            "year": date.year, "unique_id": uid,
             "bands": bands,
-            "windows": meta_list,
-            "shape": list(stack_arr.shape)
+            "shape": list(stack_arr.shape),
+            "windows": meta_list
         }, f, indent=2)
 
-    logging.info(f"[DONE] Saved stack: {npy_save_path}, shape={stack_arr.shape}")
-    # Clean up temporary files
-    for ftmp in os.listdir(TMP_DIR):
-        if ftmp.startswith(f"s2_{lat:.2f}_{lon:.2f}_"):
-            os.remove(os.path.join(TMP_DIR, ftmp))
-
-logging.info("All mosaics processed and stacked!")
+    logging.info(f"[DONE] Saved stack to {out_tif}, shape={stack_arr.shape}")

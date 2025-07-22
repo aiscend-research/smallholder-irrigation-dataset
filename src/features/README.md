@@ -86,40 +86,40 @@ earthengine:
 
 ## Downloading Features
 
-> **Note:** This section describes the workflow for exporting dense Sentinel-2 mosaics for all label points using the Earth Engine API and Google Cloud Storage. The pipeline is designed for time series sampling at 10-day intervals across each year, with robust handling for missing or cloudy images.
+> **Note:** This module downloads dense Sentinel-2 mosaics for irrigation-labeled sites via Google Earth Engine. The pipeline is built for 2016–2025, supporting cloud/shadow filtering and NDVI/EVI/NDWI extraction across time.
 
 ### Site and Time Window Definition
 
-- Input Table: Loads `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, which contains locations, observation dates, and a unique ID for each sample.
+- Input Table: Loads `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, containing (lat, lon, date, ID) entries.
 
-- Time Windows: For each site and year, generates ~36–37 consecutive 10-day intervals spanning the full year, aligned to the site’s observation date.
+
+- Time Windows: For each site, generates 37 consecutive 10-day intervals around the observation date (a full year).
 
 ### Sentinel-2 Mosaic Retrieval
 
-- For each time window:
-  - Checks if the corresponding `.tif` file already exists in the Google Cloud Storage (GCS) bucket (matching the folder structure used locally). If so, it skips to the next.
+- Source: `COPERNICUS/S2_HARMONIZED` (Sentinel-2 L1C, TOA reflectance)
 
-  - If no valid Sentinel-2 image is found (e.g., due to clouds), a blank placeholder TIF is generated and stored (see below).
+- Bands Used: B2 to B12 (total 10 bands)
 
-  - Otherwise, an Earth Engine export task generates a 1km x 1km Sentinel-2 surface reflectance mosaic (including the QA60 cloud mask band), which is then downloaded from GCS.
+- Filtering: Uses `s2cloudless` to compute cloud masks and also detects cloud shadows.
 
-  - Each time window always produces a `.tif` file (either actual data or a blank placeholder) and a corresponding `.json` metadata file.
+- Missing data: Skips mosaic; fills metadata with cloud_fraction=1.0 and NDVI/EVI/NDWI = -9999
 
 ### Stacking and Output
 
-- Loads all corresponding `.tif` files (real or blank) and stacks them into a single NumPy array of shape 
-  `(n_time, n_bands, height, width)`.
+- Each valid .tif image is reshaped to (10, 100, 100) and stacked across time.
 
-- Saves A `.npy` file containing the full-year stacked mosaic sequence for the site. A comprehensive `.json` 
-  metadata file with window definitions, bands, locations, and missing frame info. Both outputs are named with the unique site/sample ID (e.g., `site_-15.04_26.69_2023_1_stack.npy`).
+- Output saved as:
+  
+  - `data/features/site_{lat}_{lon}_{year}_{ID}.tif` (shape: T × B × H × W → reshaped to T×B channels)
+  
+  - `data/features/site_{lat}_{lon}_{year}_{ID}.json`: metadata including cloud fraction, NDVI/EVI/NDWI per frame
 
-![Mean RGB composite of all time steps for first sample site.](src/features/readme_figures/sentinel2_mosaic_example.png)
+### Cloud/Shadow and Missing Data Handling
 
-### Handling missing data (blank images)
+- Combined mask: `s2cloudless.get_cloud_masks` + `s2cloudless.get_shadow_masks`
 
-- If no data is available for a window (e.g., persistent clouds), a blank placeholder image is copied into place using `generate_blank_tif.py`. 
-
-- Metadata for missing data windows includes `"missing_data": true`.
+- Masked pixels are assigned -9999 (not 0)
 
 ### File location
 
@@ -162,3 +162,6 @@ To run tests for this script, run the following command from this directory:
 ```{bash}
 python -m unittest tests/test_create_label_band.py
 ```
+
+`data/features/site_{lat}_{lon}_{year}_ID.tif`
+`data/features/site_{lat}_{lon}_{year}_ID.json`
