@@ -11,7 +11,7 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
 ## Structure
 ```
 ├── run_experiment.py          # Entry point to run an experiment
-├── final_test.py              # Entry point to evaluate a best model's performance to the test dataset (in progress)
+├── final_test.py              # Entry point to evaluate a best model's performance to  the test dataset (in progress)
 ├── experiments.yaml           # Specify experiment details
 ├── README.md                  # This file
 ├── ml_pipeline/               # Core ML pipeline modules
@@ -26,7 +26,6 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
 #### `build_features.py`
 `get_datamodule(dataset_path)`: Loads a TerraTorch-style datamodule from the given path.
 `flatten_dataset(dataset)`: Converts multi-dimensional satellite imagery into a **tabular format** where each pixel becomes a row with multi-temporal features. This is so that you can run classical ML models like Random Forests. Flattening removes spatial context, so this is intended for pixel-wise classification only.
-
 
  #### `ml_model.py`
  Contains a `train_randomForest` function that uses sklearn to train a randomForest model on training data. Contains a similar function for a gradient boosted model.
@@ -46,7 +45,7 @@ This pipeline is designed to make it easy to run, track, and reproduce machine l
 
 - This file contains all the settings for a single experiment, including:
   - **Experiment name** (for tracking)
-  - **Data settings** (dataset path, train/validation/test subset sizes)
+  - **Data settings** (train/validation/test subset sizes)
   - **Model type** (e.g., `random_forest`, `gradient_boosting`)
   - **Model hyperparameters** (grouped by model type)
   - **Visualization options** (class colors, number of samples to plot)
@@ -56,7 +55,7 @@ The `experiment.yaml` file is listed in the `.gitignore`, so users may tweak it 
 
 #### **Running Experiments: `run_experiment.py`**
 
-- This script loads the experiment configuration from `experiment.yaml` and runs the full ML pipeline. 
+- This script loads the experiment configuration from `experiment.yaml` and runs the full ML pipeline. Dataset path is specified in this file. 
 
 #### **Expected Outputs**
 
