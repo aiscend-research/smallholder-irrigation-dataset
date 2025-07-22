@@ -196,3 +196,6 @@ irr-venv/*
 .Rproj.user
 data/labels/unlabeled_surveys/random_sample/Zambia_0.05_n_*.csv
 secrets/earthengine-key.json
+
+.RData
+.Rhistory
