@@ -133,10 +133,16 @@ For a particular window, data may be missing (if there is no satellite imagery w
 
 ### Stacking and Output
 
-Each of the 37 .tif images is of size (13, 100, 100). We then stack these, resulting in final .tif image of size (37, 13, 100, 100). For each labeled image, we save two files to our data folder:
+The 37 tif images are stored on the Google Cloud Bucket, and NOT locally. However, these 37 images are combined and a file with their combined data is stored locally, as described below.
 
-- `data/features/site_{lat}_{lon}_{year}_{ID}.tif` – The final .tif image of shape (37, 13, 100, 100), which is a stack of all 37 retrieved images
+**Shape**: Each of the 37 .tif images is of size (13, 100, 100). We then stack these, resulting in final .tif image of size (37, 13, 100, 100), which we then flatten into shape (37 $\times$ 13, 100, 100). 
+
+**Files Stored**: For each labeled image, we save two files to our data folder:
+
+- `data/features/site_{lat}_{lon}_{year}_{ID}.tif` – The final .tif image of shape (37 $\times$ 13, 100, 100), which is a stack of all 37 retrieved images
 - `data/features/site_{lat}_{lon}_{year}_{ID}.json` – Metadata for the .tif image, which includes cloud fraction, average NDVI/EVI/NDWI per frame
+
+Note that lat and lon are the latitude and longitude of center of the labeled image, year is the year the labeled image was taken, and ID is the unique ID of the labeled image.
 
 ## Creating Pixel-Level Labels
 
