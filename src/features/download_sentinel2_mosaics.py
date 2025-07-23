@@ -136,7 +136,7 @@ def calculate_indices(img):
     B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = img
     ndvi = np.where((B8 + B4) != 0, (B8 - B4) / (B8 + B4), NO_DATA)
     evi = np.where((B8 + 6*B4 - 7.5*B2 + 1) != 0, 2.5 * (B8 - B4) / (B8 + 6*B4 - 7.5*B2 + 1), NO_DATA)
-    ndwi = np.where((B3 + B11) != 0, (B3 - B11) / (B3 + B11), NO_DATA)
+    ndwi = np.where((B8 + B11) != 0, (B8 - B11) / (B8 + B11), NO_DATA)
     return ndvi, evi, ndwi
 
 def retrieve_images():
