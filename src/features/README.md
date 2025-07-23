@@ -11,10 +11,10 @@
     - [3. Create a Service Account](#3-create-a-service-account)
   - [Service account and GCS configuration](#service-account-and-gcs-configuration)
   - [Downloading Features](#downloading-features)
-    - [How it works](#how-it-works)
-    - [Handling missing data (blank images)](#handling-missing-data-blank-images)
-    - [Viewing/Exporting](#viewingexporting)
-    - [File location](#file-location)
+    - [Time Window Definition](#time-window-definition)
+    - [Sentinel-2 Mosaic Retrieval](#sentinel-2-mosaic-retrieval)
+      - [Handling Missing and Invalid Data](#handling-missing-and-invalid-data)
+    - [Stacking and Output](#stacking-and-output)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
@@ -88,50 +88,55 @@ earthengine:
 
 > **Note:** This module downloads dense Sentinel-2 mosaics for irrigation-labeled sites via Google Earth Engine. The pipeline is built for 2016–2025, supporting cloud/shadow filtering and NDVI/EVI/NDWI extraction across time.
 
-### Site and Time Window Definition
+To download features, we first load in all the irrigated images and their (lat, lon, date, ID) data from `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`. Then for each image, we generate a time series of images at the same location, with the middle of the time series being the date of the labeled image.
 
-- Input Table: Loads `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`, containing (lat, lon, date, ID) entries.
+### Time Window Definition
 
+For each labeled image, we generate 37 consecutive 10-day intervals around the observation date, with the center of the series being the date of the labeled image.
 
-- Time Windows: For each site, generates 37 consecutive 10-day intervals around the observation date (a full year).
+![time window graphic](./readme_figures/time_window.png)
+
+Each of the 37 time windows corresponds to a single satellite image, which is a mosaic over that particular 10 day interval.
 
 ### Sentinel-2 Mosaic Retrieval
 
-- Source: `COPERNICUS/S2_HARMONIZED` (Sentinel-2 L1C, TOA reflectance)
+The satellite imagery we use for the time series is Sentinel-2 L1C data (available starting June 2015), retrieved through [Google Earth Engine](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_HARMONIZED)
 
-- Bands Used: B2 to B12 (total 10 bands)
+For each of the 37 ten-day windows in the time series, we generate a mosaic image spanning the interval, and save it to our Google Cloud Bucket. Each of these resultant images contains 13 bands: all 10 original Sentinel-2 bands and 3 derived bands to measure vegetation.
 
-- Filtering: Uses `s2cloudless` to compute cloud masks and also detects cloud shadows.
+- **10 Original Sentinel-2 Bands**: B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12
+- **NDVI: Normalized Difference Vegetation Index**: Measures green vegetation density, computed from NIR and Red bands (B8, B4).
 
-- Missing data: Skips mosaic; fills metadata with cloud_fraction=1.0 and NDVI/EVI/NDWI = -9999
+$$
+\text{NDVI} = \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}}
+$$
+
+- **EVI: Enhanced Vegetation Index**: Similar to NDVI, but slightly better in areas with dense canopy or haze. Computed from NIR, Red, and Blue bands (B8, B4, B2)
+
+$$
+\text{EVI} = 2.5 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + 6 \times \text{Red} - 7.5 \times \text{Blue} + 1}
+$$
+
+- **NDWI: Normalized Difference Water Index**: Detects moisture changes in vegetation and soil. Computed from NIR and SWIR1 bands (B8, B11).
+
+$$
+\text{NDWI} = \frac{\text{NIR} - \text{SWIR}}{\text{NIR} + \text{SWIR}}
+$$
+
+#### Handling Missing and Invalid Data
+
+For a particular window, data may be missing (if there is no satellite imagery within that timeframe) or invalid (if there are clouds covering the image)
+
+- **Cloud Detection** After retrieving all bands, we use module `s2cloudless` to detect pixels affected by clouds or cloud shadows. These pixels are set to -9999 across all bands to indicate missing/invalid data.
+
+- **Missing Images** In rare cases, a time window may have no available satellite imagery. When this occurs, all pixels are assigned a value of -9999 to indicate missing data. Additionally, we set `cloud_fraction = 1.0` in the corresponding metadata file.
 
 ### Stacking and Output
 
-- Each valid .tif image is reshaped to (10, 100, 100) and stacked across time.
+Each of the 37 .tif images is of size (13, 100, 100). We then stack these, resulting in final .tif image of size (37, 13, 100, 100). For each labeled image, we save two files to our data folder:
 
-- Output saved as:
-  
-  - `data/features/site_{lat}_{lon}_{year}_{ID}.tif` (shape: T × B × H × W → reshaped to T×B channels)
-  
-  - `data/features/site_{lat}_{lon}_{year}_{ID}.json`: metadata including cloud fraction, NDVI/EVI/NDWI per frame
-
-### Cloud/Shadow and Missing Data Handling
-
-- Combined mask: `s2cloudless.get_cloud_masks` + `s2cloudless.get_shadow_masks`
-
-- Masked pixels are assigned -9999 (not 0)
-
-### File location
-
-- Input labels:
-`data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`
-
-- Downloaded features & metadata:
-`data/features/site_{lat}_{lon}_{year}_ID_stack.npy`
-`data/features/site_{lat}_{lon}_{year}_ID_stack.json`
-
-- Blank images:
-`data/features/blank.tif`
+- `data/features/site_{lat}_{lon}_{year}_{ID}.tif` – The final .tif image of shape (37, 13, 100, 100), which is a stack of all 37 retrieved images
+- `data/features/site_{lat}_{lon}_{year}_{ID}.json` – Metadata for the .tif image, which includes cloud fraction, average NDVI/EVI/NDWI per frame
 
 ## Creating Pixel-Level Labels
 
@@ -162,6 +167,3 @@ To run tests for this script, run the following command from this directory:
 ```{bash}
 python -m unittest tests/test_create_label_band.py
 ```
-
-`data/features/site_{lat}_{lon}_{year}_ID.tif`
-`data/features/site_{lat}_{lon}_{year}_ID.json`
