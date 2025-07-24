@@ -74,3 +74,17 @@ This structure ensures that every experiment is fully reproducible: you can alwa
 #### **Best Practices**
 
 - **Commit your code before running experiments.** This ensures you can always match results to the code that produced them. 
+
+`custom_dataset.py`
+On a high level, a dataset class helps us to load in the data. My current dataset class takes in a .tif file and converts it to mask tensors. Since this is a barebones version the only band it takes is Band 2, with 0,1 indicating not irrigated or irrigated. The dataset desgined for multitemporalcropclassfication has the following additional functionality: 
+* Band Selection
+* Metadata Handling
+* Preprocessing and Transformation
+  - Reshaping, normalization, transforms, NaN values
+* Label Adjustments
+* Sample Enrichment
+  - adding more details 
+* Visualization  
+
+`custom_datamodule.py`
+Class that helps to combine multiple dataset samples, and create train/val/test spilts. Inherits from PyTorch Lightening for more flexiblity. 
