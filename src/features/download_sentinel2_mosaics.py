@@ -59,7 +59,6 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
         - task (Earth Engine Task): Earth Engine task object that downloads the mosaic image
         - output_prefix (str): The prefix of the output file
     '''
-    print(f"Attempting to download images (if found) for {output_prefix}")
     config = load_config()
     bucket = config["earthengine"]["bucket_name"]
     region = get_bounding_box(lat, lon)
@@ -180,6 +179,7 @@ def retrieve_images():
         for start, end in windows:
             s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
             prefix = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
+            logging.info(f"Fetching image for {prefix}")
             tif_path = os.path.join(TMP_DIR, os.path.basename(prefix) + ".tif")
 
             # If tif file has already been added to the Google Cloud Bucket, retrieve it
@@ -202,7 +202,25 @@ def retrieve_images():
                     stack_list.append(img)
                     continue
 
-                wait_for_task(task)
+                status = wait_for_task(task)
+
+                # Download to GCS failed
+                if status['state'] != 'COMPLETED':
+                    logging.info(f"[ERROR] Export task failed or incomplete for {prefix}. Status: {status['state']}")
+                    if 'error_message' in status:
+                        logging.info("Error message:", status['error_message'])
+                        meta_list.append({
+                            "date_range": [s, e],
+                            "cloud_fraction": 1.0,
+                            "mean_ndvi": NO_DATA,
+                            "mean_evi": NO_DATA,
+                            "mean_ndwi": NO_DATA
+                        })
+                        # Create blank tif
+                        img = np.full((13, 100, 100), NO_DATA)
+                        stack_list.append(img)
+                        continue
+
                 fs.get(f"{bucket}/{prefix}.tif", tif_path)
 
             # Read image
@@ -227,9 +245,6 @@ def retrieve_images():
                 (img, ndvi[None, :, :], evi[None, :, :], ndwi[None, :, :]),
                 axis=0
             )
-            bands.extend(["NDVI", "EVI", "NDWI"])
-
-            print(f"Resultant image shape {img.shape} – should be (13, 100, 100)")
 
             meta_list.append({
                 "date_range": [s, e],
