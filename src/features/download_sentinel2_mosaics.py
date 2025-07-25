@@ -18,8 +18,8 @@ from s2cloudless.cloud_detector import S2PixelCloudDetector
 import ee
 
 # Set up proxy if needed (adjust protocol if necessary)
-#os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-#os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
+os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
+os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -28,22 +28,38 @@ if project_root not in sys.path:
 from src.utils.utils import load_config, find_project_root
 from src.utils.geometries import get_bounding_box
 
+# Constants
+NO_DATA = -9999 # Value for missing/invalid data
+BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'] # All bands downloaded from Sentinel-2
+FINAL_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'NDVI', 'EVI', 'NDWI'] # All bands in final .tif
+LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv") 
+DOWNLOAD_DIR = os.path.join(project_root, "data/features/") # Path to download
+TMP_DIR = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
+
+config = load_config()
+bucket = config["earthengine"]["bucket_name"]
+ee_key = os.path.join(project_root, config["earthengine"]["service_account_key"])
+fs = gcsfs.GCSFileSystem(token=ee_key, project="smallholder-irr")
+def_shape = (len(BANDS), 100, 100)
+cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
+
 # Pseudo-atmospheric correction (Dark Object Subtraction, DOS) 
-def pseudo_atmospheric_correction(image):
+def pseudo_atmospheric_correction(image, region):
     """
     Applies a simple Dark Object Subtraction (DOS) pseudo-atmospheric correction to the input image.
     Only bands B2, B3, B4, B8 are corrected, while other bands are left unchanged.
     Args:
         image (ee.Image): Sentinel-2 image in TOA reflectance.
+        region (ee.Geometry): The geometry/region for reduction.
     Returns:
         ee.Image: Image with corrected bands (B2, B3, B4, B8) using DOS, other bands untouched.
     """
     dark_percentile = 1
     bands = ['B2', 'B3', 'B4', 'B8']
-    # Calculate the 1st percentile (dark object) for each band over the whole image region
+    # Calculate the 1st percentile (dark object) for each band over the provided region
     stats = image.reduceRegion(
         reducer=ee.Reducer.percentile([dark_percentile]),
-        geometry=image.geometry(),
+        geometry=region,
         scale=20,
         maxPixels=1e8
     )
@@ -55,7 +71,8 @@ def pseudo_atmospheric_correction(image):
     # Keep all other bands as they are
     other_bands = [image.select(b) for b in image.bandNames().getInfo() if b not in bands]
     # Merge corrected and original bands
-    return image.addBands(corrected_bands, overwrite=True)
+    merged = image.addBands(corrected_bands, overwrite=True)
+    return merged
 
 # Custom SCL band simulation
 def add_custom_scene_classification(image):
@@ -105,26 +122,15 @@ def add_custom_scene_classification(image):
     scl = scl.where(cloud_score.gt(0.6).And(cloud_score.lte(0.8)), 8)  # Medium-prob cloud
     scl = scl.where(shadow_score.gt(0.25), 3)  # Cloud shadow
     scl = scl.where(ndmi.gt(0.3), 10)  # Cirrus proxy
- 
-    return image.addBands(scl.rename("SCL"))
 
-# Constants
-NO_DATA = -9999 # Value for missing/invalid data
-BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'] # All bands downloaded from Sentinel-2
-FINAL_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'NDVI', 'EVI', 'NDWI'] # All bands in final .tif
-LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv") 
-DOWNLOAD_DIR = os.path.join(project_root, "data/features/") # Path to download
-TMP_DIR = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
-
-config = load_config()
-bucket = config["earthengine"]["bucket_name"]
-ee_key = os.path.join(project_root, config["earthengine"]["service_account_key"])
-fs = gcsfs.GCSFileSystem(token=ee_key, project="smallholder-irr")
-def_shape = (len(BANDS), 100, 100)
-cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
+    scl = scl.rename("SCL").toUint16()
+    return image.addBands(scl)
 
 # Initialization
 def initialize_earthengine():
+    """
+    Initializes the Earth Engine Python API using service account credentials from the config file.
+    """
     config = load_config()
     ee_key = os.path.join(find_project_root(os.getcwd()), config["earthengine"]["service_account_key"])
     with open(ee_key) as f:
@@ -136,6 +142,11 @@ def initialize_earthengine():
 
 # Helpers
 def sanitize_description(desc):
+    """
+    Sanitizes a description string for Earth Engine export tasks.
+    Only allows alphanumerics, dots, commas, colons, semicolons, dashes, and underscores.
+    Truncates to 95 characters.
+    """
     allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;_-")
     return ''.join([c if c in allowed else '_' for c in desc])[:95]
 
@@ -168,8 +179,10 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
 
     mosaic = collection.mosaic()
     # Pseudo-atmospheric correction and custom SCL
-    mosaic = pseudo_atmospheric_correction(mosaic)
+    mosaic = pseudo_atmospheric_correction(mosaic, region)
     mosaic = add_custom_scene_classification(mosaic)
+    bands_export = bands + ['SCL']
+    mosaic = mosaic.select(bands_export).toUint16()
 
     if not output_prefix:
         output_prefix = f"s2_mosaic_{lat}_{lon}_{start_date.replace('-', '')}"
@@ -217,23 +230,64 @@ def get_dense_time_windows(center_date):
     return windows
 
 def wait_for_task(task, interval=30):
+    """
+    Polls an Earth Engine task until it is complete.
+    Args:
+        task: Earth Engine batch task object
+        interval: seconds between polling
+    Returns:
+        status: dict, Earth Engine task status
+    """
     while task.active():
         time.sleep(interval)
     return task.status()
 
 def resize_img(img, target_shape):
+    """
+    Resizes a multi-band image array to the given target shape.
+    """
     return np.stack([resize(img[b], target_shape[1:], preserve_range=True) for b in range(img.shape[0])], axis=0).astype(img.dtype)
 
 # Retrieve ndvi, evi, and ndwi bands
 def calculate_indices(img):
+    """
+    Calculate NDVI, EVI, NDWI from the first 10 Sentinel-2 bands.
+    Returns int16 arrays scaled by 10000, with NO_DATA for missing values.
+
+    Args:
+        img: numpy array, shape (>=10, H, W)
+
+    Returns:
+        ndvi, evi, ndwi: int16 numpy arrays, each shape (H, W)
+    """
     img = img.astype(np.float32) / 10000.0
-    B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = img
-    ndvi = np.where((B8 + B4) != 0, (B8 - B4) / (B8 + B4), NO_DATA)
-    evi = np.where((B8 + 6*B4 - 7.5*B2 + 1) != 0, 2.5 * (B8 - B4) / (B8 + 6*B4 - 7.5*B2 + 1), NO_DATA)
-    ndwi = np.where((B8 + B11) != 0, (B8 - B11) / (B8 + B11), NO_DATA)
+    # Always use the first 10 bands
+    B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = img[:10]
+    ndvi = np.full(B2.shape, NO_DATA, dtype=np.int16)
+    evi = np.full(B2.shape, NO_DATA, dtype=np.int16)
+    ndwi = np.full(B2.shape, NO_DATA, dtype=np.int16)
+
+    valid_ndvi = (B8 + B4) != 0
+    valid_evi = (B8 + 6*B4 - 7.5*B2 + 1) != 0
+    valid_ndwi = (B8 + B11) != 0
+
+    ndvi[valid_ndvi] = ((B8 - B4)[valid_ndvi] / (B8 + B4)[valid_ndvi] * 10000).astype(np.int16)
+    evi[valid_evi] = (2.5 * (B8 - B4)[valid_evi] / (B8 + 6*B4 - 7.5*B2 + 1)[valid_evi] * 10000).astype(np.int16)
+    ndwi[valid_ndwi] = ((B8 - B11)[valid_ndwi] / (B8 + B11)[valid_ndwi] * 10000).astype(np.int16)
     return ndvi, evi, ndwi
 
 def retrieve_time_series_stack(site_id, lat, lon, date):
+    """
+    Retrieves the time series of Sentinel-2 mosaics for a given site and computes indices and cloud masking.
+    Args:
+        site_id: string
+        lat, lon: float, coordinates
+        date: datetime.date or datetime.datetime, center date
+
+    Returns:
+        stack_list: list of numpy arrays, each (13, 100, 100)
+        meta_list: list of metadata dictionaries for each time window
+    """
     windows = get_dense_time_windows(date)
     stack_list, meta_list = [], []
 
@@ -243,13 +297,10 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
         logging.info(f"Fetching image for {prefix}")
         tif_path = os.path.join(TMP_DIR, os.path.basename(prefix) + ".tif")
 
-        # If tif file has already been added to the Google Cloud Bucket, retrieve it
         if fs.exists(f"{bucket}/{prefix}.tif"):
             fs.get(f"{bucket}/{prefix}.tif", tif_path)
         else:
             task, _ = download_sentinel2_mosaic(lat, lon, s, e, prefix)
-            
-            # No image was found for the location at that time interval
             if task is None:
                 meta_list.append({
                     "date_range": [s, e],
@@ -258,54 +309,51 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
                     "mean_evi": NO_DATA,
                     "mean_ndwi": NO_DATA 
                 })
-                # Create blank tif
-                img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA)
+                img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
                 stack_list.append(img)
                 continue
 
             status = wait_for_task(task)
-
-            # Download to GCS failed
             if status['state'] != 'COMPLETED':
                 logging.info(f"[ERROR] Export task failed or incomplete for {prefix}. Status: {status['state']}")
                 if 'error_message' in status:
-                    logging.info("Error message:", status['error_message'])
-                    meta_list.append({
-                        "date_range": [s, e],
-                        "cloud_fraction": 1.0,
-                        "mean_ndvi": NO_DATA,
-                        "mean_evi": NO_DATA,
-                        "mean_ndwi": NO_DATA
-                    })
-                    # Create blank tif
-                    img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA)
-                    stack_list.append(img)
-                    continue
+                    logging.info(f"Error message: {status['error_message']}")
+                meta_list.append({
+                    "date_range": [s, e],
+                    "cloud_fraction": 1.0,
+                    "mean_ndvi": NO_DATA,
+                    "mean_evi": NO_DATA,
+                    "mean_ndwi": NO_DATA
+                })
+                img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
+                stack_list.append(img)
+                continue
 
             fs.get(f"{bucket}/{prefix}.tif", tif_path)
 
-        # Read image
         with rasterio.open(tif_path) as src:
-            img = src.read().astype(np.int16)  
-        if img.shape != def_shape:
-            img = resize_img(img, def_shape)
+            img = src.read().astype(np.int16)
+        if img.shape != def_shape and img.shape[0] >= 10:
+            img = resize_img(img[:10], def_shape)  # Only first 10 bands, exclude SCL
 
-        # Resize
-        img_rgb = np.moveaxis(img, 0, -1) / 10000.0
-        img_batch = img_rgb[np.newaxis, ...]
-
-        # Add NDVI, EVI, NDWI bands
-        ndvi, evi, ndwi = calculate_indices(img)
-        img = np.concatenate(
-            (img, ndvi[None, :, :], evi[None, :, :], ndwi[None, :, :]),
+        ndvi, evi, ndwi = calculate_indices(img[:10])
+        img_with_indices = np.concatenate(
+            (img[:10], ndvi[None, :, :], evi[None, :, :], ndwi[None, :, :]),
             axis=0
         )
 
-        # Set cloudy pixels to -9999 (NO_DATA value)
-        cloud_mask = cloud_detector.get_cloud_masks(img_batch)[0]
-        combined_mask = cloud_mask.astype(bool)
-        img[:, combined_mask] = NO_DATA
-        
+        img_rgb = np.moveaxis(img[:10], 0, -1) / 10000.0
+        img_batch = img_rgb[np.newaxis, ...]
+
+        try:
+            cloud_mask = cloud_detector.get_cloud_masks(img_batch)[0]
+            combined_mask = cloud_mask.astype(bool)
+        except Exception as e:
+            logging.error(f"Cloud mask failed for {prefix}: {e}")
+            combined_mask = np.zeros(img.shape[1:], dtype=bool)
+
+        img_with_indices[:, combined_mask] = NO_DATA
+
         meta_list.append({
             "date_range": [s, e],
             "cloud_fraction": float(combined_mask.mean()),
@@ -313,8 +361,8 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
             "mean_evi": float(evi[evi != NO_DATA].mean()) if np.any(evi != NO_DATA) else NO_DATA,
             "mean_ndwi": float(ndwi[ndwi != NO_DATA].mean()) if np.any(ndwi != NO_DATA) else NO_DATA 
         })
-        stack_list.append(img)
-    
+        stack_list.append(img_with_indices)
+
     return stack_list, meta_list
 
 def retrieve_images():
@@ -326,31 +374,19 @@ def retrieve_images():
     the image from Google Earth Engine, processes each image into the correct format (through calculation of 
     vegetation bands, use of cloud mask), add it to Google Cloud Bucket, and retrieve it from there.
     '''
-
-    # Configuration
     logging.basicConfig(level=logging.INFO)
     os.makedirs(TMP_DIR, exist_ok=True)
-
     data = pd.read_csv(LABEL_CSV)
     initialize_earthengine()
-
-    # Main Loop
     for idx, row in data.iterrows():
         lat, lon = row['y'], row['x']
         uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))
         site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
-        stack_list, meta_list = [], []
-
-        # Retrieve all 37 images for this particular location & time
         stack_list, meta_list = retrieve_time_series_stack(site_id, lat, lon, date)
-
-        # Process the images from 37 time steps
         stack_arr = np.stack(stack_list)
         T, B, H, W = stack_arr.shape
         reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
-
-        # Download .tif and .json files.
         out_tif = os.path.join(DOWNLOAD_DIR, f"{site_id}.tif")
         out_json = os.path.join(DOWNLOAD_DIR, f"{site_id}.json")
 
