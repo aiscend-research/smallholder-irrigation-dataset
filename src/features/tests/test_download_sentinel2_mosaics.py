@@ -72,24 +72,34 @@ class TestDownloadMosaics(unittest.TestCase):
         ndvi, evi, ndwi = calculate_indices(img)
 
         # Pixel[0, 0] – Standard case
-        ndvi_00 = (0.8 - 0.2) / (0.8 + 0.2)
-        evi_00 = 2.5 * (0.8 - 0.2) / (0.8 + 6*0.2 - 7.5*0.1 + 1)
-        ndwi_00 = (0.8 - 0.8) / (0.8 + 0.8)
+        ndvi_00 = 1000 * (0.8 - 0.2) / (0.8 + 0.2)
+        evi_00 = 1000 * (2.5 * (0.8 - 0.2) / (0.8 + 6*0.2 - 7.5*0.1 + 1))
+        ndwi_00 = 1000 * ((0.8 - 0.8) / (0.8 + 0.8))
 
         self.assertAlmostEqual(ndvi[0,0], ndvi_00, places=4, 
-                               msg="test_calculate_indices fail: Expect ndvi to be {ndvi_00} but got {ndvi[0, 0]}")
+                               msg=f"test_calculate_indices fail: Expect ndvi to be {ndvi_00} but got {ndvi[0, 0]}")
         self.assertAlmostEqual(evi[0,0], evi_00, places=4, 
-                               msg="test_calculate_indices fail: Expect evi to be {evi_00} but got {evi[0, 0]}")
+                               msg=f"test_calculate_indices fail: Expect evi to be {evi_00} but got {evi[0, 0]}")
         self.assertAlmostEqual(ndwi[0,0], ndwi_00, places=4,
-                               msg="test_calculate_indices fail: Expect ndwi to be {ndwi_00} but got {ndwi[0, 0]}")
+                               msg=f"test_calculate_indices fail: Expect ndwi to be {ndwi_00} but got {ndwi[0, 0]}")
 
         # Pixel [1, 1] – Test divide by 0
         self.assertEqual(ndvi[1,1], NO_DATA,
-                                msg="test_calculate_indices fail: Expect ndvi to be {NO_DATA} but got {ndvi[1, 1]}")
+                                msg=f"test_calculate_indices fail: Expect ndvi to be {NO_DATA} but got {ndvi[1, 1]}")
         self.assertEqual(evi[1,1], 0,
-                                msg="test_calculate_indices fail: Expect evi to be {NO_DATA} but got {evi[1, 1]}")
+                                msg=f"test_calculate_indices fail: Expect evi to be {NO_DATA} but got {evi[1, 1]}")
         self.assertEqual(ndwi[1,1], NO_DATA,
-                                msg="test_calculate_indices fail: Expect ndwi to be {NO_DATA} but got {ndwi[1, 1]}")
+                                msg=f"test_calculate_indices fail: Expect ndwi to be {NO_DATA} but got {ndwi[1, 1]}")
+
+        # Test that NDVI, NDWI, and EVI are all in range [-1000, 1000]
+        img = np.random.randint(0, 1000, (10, 100, 100), dtype=np.int16)
+        ndvi, evi, ndwi = calculate_indices(img)
+        self.assertTrue(np.all(ndvi >= -1000) and np.all(ndvi <= 1000),
+                        msg=f"test_calculate_indices fail: Expect all NDVI values to be in range [-1, 1] but got min {ndvi.min()} and max {ndvi.max()}")
+        self.assertTrue(np.all(evi >= -1000) and np.all(evi <= 1000),
+                        msg=f"test_calculate_indices fail: Expect all EVI values to be in range [-1, 1] but got min {evi.min()} and max {evi.max()}")
+        self.assertTrue(np.all(ndwi >= -1000) and np.all(ndwi <= 1000),
+                        msg=f"test_calculate_indices fail: Expect all NDWI values to be in range [-1, 1] but got min {ndwi.min()} and max {ndwi.max()}")
 
     @patch("download_sentinel2_mosaics.fs")
     @patch("download_sentinel2_mosaics.download_sentinel2_mosaic")
@@ -171,7 +181,7 @@ class TestDownloadMosaics(unittest.TestCase):
     @patch("download_sentinel2_mosaics.fs")
     @patch("download_sentinel2_mosaics.download_sentinel2_mosaic")
     @patch("download_sentinel2_mosaics.calculate_indices")
-    def test_retrieve_time_series_stack_no_images(
+    def test_retrieve_time_series_stack_no_images(s
         self,
         mock_calculate_indices,
         mock_download,
