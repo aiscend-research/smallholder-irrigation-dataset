@@ -287,9 +287,11 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
     Returns:
         stack_list: list of numpy arrays, each (13, 100, 100)
         meta_list: list of metadata dictionaries for each time window
+        empty_window_count (int): count of windows without images
     """
     windows = get_dense_time_windows(date)
     stack_list, meta_list = [], []
+    empty_window_count = 0
 
     for start, end in windows:
         s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
@@ -311,6 +313,7 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
                 })
                 img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
                 stack_list.append(img)
+                empty_window_count += 1
                 continue
 
             status = wait_for_task(task)
@@ -327,6 +330,7 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
                 })
                 img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
                 stack_list.append(img)
+                empty_window_count += 1
                 continue
 
             fs.get(f"{bucket}/{prefix}.tif", tif_path)
@@ -363,7 +367,7 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
         })
         stack_list.append(img_with_indices)
 
-    return stack_list, meta_list
+    return stack_list, meta_list, empty_window_count
 
 def retrieve_images():
     '''
@@ -383,7 +387,7 @@ def retrieve_images():
         uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))
         site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
-        stack_list, meta_list = retrieve_time_series_stack(site_id, lat, lon, date)
+        stack_list, meta_list, empty_window_count = retrieve_time_series_stack(site_id, lat, lon, date)
         stack_arr = np.stack(stack_list)
         T, B, H, W = stack_arr.shape
         reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
@@ -404,6 +408,7 @@ def retrieve_images():
                 "unique_id": uid,
                 "bands": FINAL_BANDS,
                 "shape": list(stack_arr.shape),
+                "empty_window_count": empty_window_count,
                 "windows": meta_list
             }, f, indent=2)
 

@@ -58,7 +58,7 @@ class TestDownloadMosaics(unittest.TestCase):
         
         # Pixel [0,0]
         img[8, 0, 0] = 8000   # B11
-        img[7, 0, 0] = 8500   # B8A
+        img[7, 0, 0] = 8500  # B8A
         img[6, 0, 0] = 8000   # B8
         img[2, 0, 0] = 2000   # B4
         img[0, 0, 0] = 1000   # B2
@@ -72,15 +72,15 @@ class TestDownloadMosaics(unittest.TestCase):
         ndvi, evi, ndwi = calculate_indices(img)
 
         # Pixel[0, 0] – Standard case
-        ndvi_00 = 1000 * (0.8 - 0.2) / (0.8 + 0.2)
-        evi_00 = 1000 * (2.5 * (0.8 - 0.2) / (0.8 + 6*0.2 - 7.5*0.1 + 1))
-        ndwi_00 = 1000 * ((0.8 - 0.8) / (0.8 + 0.8))
+        ndvi_00 = int(10000 * (0.8 - 0.2) / (0.8 + 0.2))
+        evi_00 = int(10000 * (2.5 * (0.8 - 0.2) / (0.8 + 6*0.2 - 7.5*0.1 + 1)))
+        ndwi_00 = int(10000 * ((0.8 - 0.8) / (0.8 + 0.8)))
 
-        self.assertAlmostEqual(ndvi[0,0], ndvi_00, places=4, 
+        self.assertEqual(ndvi[0,0], ndvi_00,
                                msg=f"test_calculate_indices fail: Expect ndvi to be {ndvi_00} but got {ndvi[0, 0]}")
-        self.assertAlmostEqual(evi[0,0], evi_00, places=4, 
+        self.assertEqual(evi[0,0], evi_00,
                                msg=f"test_calculate_indices fail: Expect evi to be {evi_00} but got {evi[0, 0]}")
-        self.assertAlmostEqual(ndwi[0,0], ndwi_00, places=4,
+        self.assertEqual(ndwi[0,0], ndwi_00,
                                msg=f"test_calculate_indices fail: Expect ndwi to be {ndwi_00} but got {ndwi[0, 0]}")
 
         # Pixel [1, 1] – Test divide by 0
@@ -94,12 +94,12 @@ class TestDownloadMosaics(unittest.TestCase):
         # Test that NDVI, NDWI, and EVI are all in range [-1000, 1000]
         img = np.random.randint(0, 1000, (10, 100, 100), dtype=np.int16)
         ndvi, evi, ndwi = calculate_indices(img)
-        self.assertTrue(np.all(ndvi >= -1000) and np.all(ndvi <= 1000),
-                        msg=f"test_calculate_indices fail: Expect all NDVI values to be in range [-1, 1] but got min {ndvi.min()} and max {ndvi.max()}")
-        self.assertTrue(np.all(evi >= -1000) and np.all(evi <= 1000),
-                        msg=f"test_calculate_indices fail: Expect all EVI values to be in range [-1, 1] but got min {evi.min()} and max {evi.max()}")
-        self.assertTrue(np.all(ndwi >= -1000) and np.all(ndwi <= 1000),
-                        msg=f"test_calculate_indices fail: Expect all NDWI values to be in range [-1, 1] but got min {ndwi.min()} and max {ndwi.max()}")
+        self.assertTrue(np.all(ndvi >= -10000) and np.all(ndvi <= 10000),
+                        msg=f"test_calculate_indices fail: Expect all NDVI values to be in range [-10000, 10000] but got min {ndvi.min()} and max {ndvi.max()}")
+        self.assertTrue(np.all(evi >= -10000) and np.all(evi <= 10000),
+                        msg=f"test_calculate_indices fail: Expect all EVI values to be in range [-10000, 10000] but got min {evi.min()} and max {evi.max()}")
+        self.assertTrue(np.all(ndwi >= -10000) and np.all(ndwi <= 10000),
+                        msg=f"test_calculate_indices fail: Expect all NDWI values to be in range [-10000, 10000] but got min {ndwi.min()} and max {ndwi.max()}")
 
     @patch("download_sentinel2_mosaics.fs")
     @patch("download_sentinel2_mosaics.download_sentinel2_mosaic")
@@ -146,7 +146,10 @@ class TestDownloadMosaics(unittest.TestCase):
         mock_cloud_masks.return_value = np.zeros((100, 100), dtype=bool)
 
         # Call function
-        stack, meta = retrieve_time_series_stack("site123", 30.0, 70.0, date(2021, 1, 5))
+        stack, meta, empty_window_ct = retrieve_time_series_stack("site123", 30.0, 70.0, date(2021, 1, 5))
+
+        self.assertEqual(empty_window_ct, 0, 
+                         msg=f"test_retrieve_time_series_stack fail: Expect empty_window_ct to be 0, but got {empty_window_ct}")
 
         # Ensure correct sizes
         self.assertEqual(len(stack), 37,
@@ -181,7 +184,7 @@ class TestDownloadMosaics(unittest.TestCase):
     @patch("download_sentinel2_mosaics.fs")
     @patch("download_sentinel2_mosaics.download_sentinel2_mosaic")
     @patch("download_sentinel2_mosaics.calculate_indices")
-    def test_retrieve_time_series_stack_no_images(s
+    def test_retrieve_time_series_stack_no_images(
         self,
         mock_calculate_indices,
         mock_download,
@@ -206,7 +209,11 @@ class TestDownloadMosaics(unittest.TestCase):
             np.ones((100, 100))   # NDWI
         )
 
-        stack, meta = retrieve_time_series_stack("site123", 30.0, 70.0, date(2021, 1, 5))
+        stack, meta, empty_window_ct = retrieve_time_series_stack("site123", 30.0, 70.0, date(2021, 1, 5))
+
+        # Should be 37 empty windows
+        self.assertEqual(empty_window_ct, 37,
+                         msg=f"test_retrieve_time_series_stack_no_images fail: Empty window count to be 37, but got {empty_window_ct}")
 
         # Each image in stack_list should be -9999
         for s in stack:
