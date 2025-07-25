@@ -14,20 +14,101 @@ from datetime import datetime, timedelta
 import rasterio
 from rasterio.transform import from_origin
 from skimage.transform import resize
-from src.utils.utils import load_config, find_project_root
-from src.utils.geometries import get_bounding_box
 from s2cloudless.cloud_detector import S2PixelCloudDetector
 
 import ee
 NO_DATA = -9999
 
 # Set up proxy if needed (adjust protocol if necessary)
-# os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-# os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
+#os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
+#os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
     sys.path.append(project_root)
+
+from src.utils.utils import load_config, find_project_root
+from src.utils.geometries import get_bounding_box
+
+# Pseudo-atmospheric correction (Dark Object Subtraction, DOS) 
+def pseudo_atmospheric_correction(image):
+    """
+    Applies a simple Dark Object Subtraction (DOS) pseudo-atmospheric correction to the input image.
+    Only bands B2, B3, B4, B8 are corrected, while other bands are left unchanged.
+    Args:
+        image (ee.Image): Sentinel-2 image in TOA reflectance.
+    Returns:
+        ee.Image: Image with corrected bands (B2, B3, B4, B8) using DOS, other bands untouched.
+    """
+    dark_percentile = 1
+    bands = ['B2', 'B3', 'B4', 'B8']
+    # Calculate the 1st percentile (dark object) for each band over the whole image region
+    stats = image.reduceRegion(
+        reducer=ee.Reducer.percentile([dark_percentile]),
+        geometry=image.geometry(),
+        scale=20,
+        maxPixels=1e8
+    )
+    # Apply DOS correction for selected bands
+    def dos_correction(band):
+        offset = ee.Number(stats.get(band))
+        return image.select(band).subtract(offset).rename(band)
+    corrected_bands = [dos_correction(b) for b in bands]
+    # Keep all other bands as they are
+    other_bands = [image.select(b) for b in image.bandNames().getInfo() if b not in bands]
+    # Merge corrected and original bands
+    return image.addBands(corrected_bands, overwrite=True)
+
+# Custom SCL band simulation
+def add_custom_scene_classification(image):
+    """
+    Adds a custom Scene Classification Layer (SCL) to simulate L2A-like labels for Sentinel-2 L1C imagery.
+    The classification schema is as follows:
+      0 - No Data
+      1 - Saturated/Defective
+      2 - Dark Area Pixels
+      3 - Cloud Shadow
+      4 - Vegetation
+      5 - Not Vegetated
+      6 - Water
+      7 - Unclassified
+      8 - Cloud Medium Probability
+      9 - Cloud High Probability
+     10 - Thin Cirrus
+     11 - Snow/Ice
+
+    Args:
+        image (ee.Image): Sentinel-2 image (TOA or pseudo-corrected).
+    Returns:
+        ee.Image: Image with an additional SCL band.
+    """
+    ndvi = image.normalizedDifference(['B8', 'B4']).rename("NDVI")
+    ndwi = image.normalizedDifference(['B3', 'B11']).rename("NDWI")
+    ndmi = image.normalizedDifference(['B8', 'B11']).rename("NDMI")
+    ndsi = image.normalizedDifference(['B3', 'B11']).rename("NDSI")
+    brightness = image.select(['B2', 'B3', 'B4']).reduce(ee.Reducer.sum()).rename("Brightness")
+
+    # Estimate cloud and shadow probability
+    cloud_score = image.expression(
+        '(B2 + B3 + B4) / 3',
+        {'B2': image.select('B2'), 'B3': image.select('B3'), 'B4': image.select('B4')}
+    ).rename("CloudScore")
+
+    shadow_score = ndmi.multiply(-1).rename("ShadowScore")
+
+    # Define thresholds (tune if necessary)
+    scl = ee.Image(0)  # default No Data
+    scl = scl.where(brightness.lt(0.15), 2)  # Dark area
+    scl = scl.where(ndwi.gt(0.2), 6)  # Water
+    scl = scl.where(ndsi.gt(0.5), 11)  # Snow/Ice
+    scl = scl.where(ndvi.gt(0.5), 4)  # Vegetation
+    scl = scl.where(ndvi.lt(0.1).And(ndwi.lt(0.2)), 5)  # Not vegetated
+    scl = scl.where(cloud_score.gt(0.8), 9)  # High-prob cloud
+    scl = scl.where(cloud_score.gt(0.6).And(cloud_score.lte(0.8)), 8)  # Medium-prob cloud
+    scl = scl.where(shadow_score.gt(0.25), 3)  # Cloud shadow
+    scl = scl.where(ndmi.gt(0.3), 10)  # Cirrus proxy
+ 
+    return image.addBands(scl.rename("SCL"))
 
 # Initialization
 def initialize_earthengine():
@@ -76,6 +157,10 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
         return None, output_prefix
 
     mosaic = collection.mosaic()
+    # Pseudo-atmospheric correction and custom SCL
+    mosaic = pseudo_atmospheric_correction(mosaic)
+    mosaic = add_custom_scene_classification(mosaic)
+
     if not output_prefix:
         output_prefix = f"s2_mosaic_{lat}_{lon}_{start_date.replace('-', '')}"
     desc = sanitize_description(output_prefix)

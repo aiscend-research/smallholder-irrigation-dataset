@@ -86,7 +86,7 @@ earthengine:
 
 ## Downloading Features
 
-> **Note:** This module downloads dense Sentinel-2 mosaics for irrigation-labeled sites via Google Earth Engine. The pipeline is built for 2016–2025, supporting cloud/shadow filtering and NDVI/EVI/NDWI extraction across time.
+> **Note:** This module downloads dense Sentinel-2 mosaics for irrigation-labeled sites via Google Earth Engine. The pipeline supports data from 2016–2025, with cloud/shadow filtering, NDVI/EVI/NDWI extraction, and custom pseudo-L2A quality masks by using L1C data.
 
 To download features, we first load in all the irrigated images and their (lat, lon, date, ID) data from `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`. Then for each image, we generate a time series of images at the same location, with the middle of the time series being the date of the labeled image.
 
@@ -103,6 +103,16 @@ Each of the 37 time windows corresponds to a single satellite image, which is a 
 The satellite imagery we use for the time series is Sentinel-2 L1C data (available starting June 2015), retrieved through [Google Earth Engine](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_HARMONIZED)
 
 For each of the 37 ten-day windows in the time series, we generate a mosaic image spanning the interval, and save it to our Google Cloud Bucket. Each of these resultant images contains 13 bands: all 10 original Sentinel-2 bands and 3 derived bands to measure vegetation.
+
+Preprocessing for Each Mosaic:
+
+- Pseudo-Atmospheric Correction (DOS):
+    - Each Sentinel-2 L1C mosaic is first corrected using a simple Dark Object Subtraction (DOS)algorithm. This reduces atmospheric haze and brings the reflectance values closer to L2A surface reflectance.
+
+- Custom Scene Classification Layer (SCL):
+    - After atmospheric correction, a custom SCL (Scene Classification Layer) band is generated based on NDVI, NDWI, NDSI, and brightness thresholds. This SCL simulates the L2A official product, enabling masking of clouds, shadows, water, snow/ice, vegetation, and more, and allows downstream analysis to use L2A-like quality masks for each time step.
+
+Each of these resultant images contains the following bands:
 
 - **10 Original Sentinel-2 Bands**: B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12
 - **NDVI: Normalized Difference Vegetation Index**: Measures green vegetation density, computed from NIR and Red bands (B8, B4).
@@ -122,6 +132,8 @@ $$
 $$
 \text{NDWI} = \frac{\text{NIR} - \text{SWIR}}{\text{NIR} + \text{SWIR}}
 $$
+
+- **Custom SCL Band**: Scene classification for cloud, shadow, water, vegetation, etc.
 
 #### Handling Missing and Invalid Data
 
