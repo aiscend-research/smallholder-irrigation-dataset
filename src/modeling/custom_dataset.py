@@ -1,6 +1,7 @@
 import os
 import torch
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
 import rasterio
 
 class MultiTemporalBarebonesDataset(Dataset):
@@ -23,32 +24,41 @@ class MultiTemporalBarebonesDataset(Dataset):
         tif_path = os.path.join(self.data_dir, f"{sample_name}.tif")
 
         with rasterio.open(tif_path) as src:
-            mask = src.read(self.mask_band)      # shape: (H, W)
+            full_array = src.read()  # shape: (481+, H, W)
+            mask = src.read(self.mask_band)  # shape: (H, W)
 
-        # Optional: create a dummy image of zeros (same shape as mask), for compatibility
-        dummy_image = torch.zeros_like(torch.from_numpy(mask)).float().unsqueeze(0)  # shape (1, H, W)
-        mask = torch.from_numpy(mask).long()
-        return dummy_image, mask
+        # Construct image tensor: (13, 37, H, W)
+        image_tensor = torch.from_numpy(full_array[:481]).float()
+        H, W = image_tensor.shape[1:]
+        image_tensor = image_tensor.reshape(37, 13, H, W).permute(1, 0, 2, 3)  # (13, 37, H, W)
+
+        mask_tensor = torch.from_numpy(mask).long()  # shape: (H, W)
+
+        return {
+            "image": image_tensor,
+            "mask": mask_tensor
+        }
+    
+    def plot_band_timeseries(self, idx=0, band_idx=7, num_steps=5):
+        """
+        Visualize time-series for a specific spectral band at a sample index.
+
+        Args:
+            idx (int): Index of the sample to visualize.
+            band_idx (int): Spectral band index (0–12) to visualize across time.
+            num_steps (int): Number of time steps to plot (from t=0 to t=num_steps-1).
+        """
+        sample = self[idx]
+        image = sample["image"]  # shape: (13, 37, H, W)
+        band_timeseries = image[band_idx]  # shape: (37, H, W)
+
+        fig, axes = plt.subplots(1, num_steps, figsize=(4 * num_steps, 4))
+        for i in range(num_steps):
+            axes[i].imshow(band_timeseries[i], cmap='viridis')
+            axes[i].set_title(f"Timestep {i}")
+            axes[i].axis('off')
+        plt.tight_layout()
+        plt.show()
     
     def _build_metadata(self):
         pass
-
-# --- TESTING CODE ---
-# data_dir = "experiments"
-# sample_file_list = ["test4"]  # Assumes 'experiments/test4.tif' exists
-
-# dataset = IrrigationMaskDataset(data_dir, sample_file_list)
-# image, mask = dataset[0]
-
-# import matplotlib.pyplot as plt
-
-# plt.subplot(1,2,1)
-# plt.imshow(image[0], cmap='gray')  # dummy image (all zeros)
-# plt.title('Dummy Input (no satellite image)')
-# plt.axis('off')
-
-# plt.subplot(1,2,2)
-# plt.imshow(mask, cmap='Greens', vmin=0, vmax=1)
-# plt.title('Irrigation Mask (Band 2)')
-# plt.axis('off')
-# plt.show()
