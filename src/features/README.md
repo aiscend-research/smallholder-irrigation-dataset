@@ -13,6 +13,8 @@
   - [Downloading Features](#downloading-features)
     - [Time Window Definition](#time-window-definition)
     - [Sentinel-2 Mosaic Retrieval](#sentinel-2-mosaic-retrieval)
+      - [Atmospheric Correction](#atmospheric-correction)
+      - [Retrieved Bands](#retrieved-bands)
       - [Handling Missing and Invalid Data](#handling-missing-and-invalid-data)
     - [Stacking and Output](#stacking-and-output)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
@@ -104,36 +106,51 @@ The satellite imagery we use for the time series is Sentinel-2 L1C data (availab
 
 For each of the 37 ten-day windows in the time series, we generate a mosaic image spanning the interval, and save it to our Google Cloud Bucket. Each of these resultant images contains 13 bands: all 10 original Sentinel-2 bands and 3 derived bands to measure vegetation.
 
-Preprocessing for Each Mosaic:
+#### Atmospheric Correction
+
+Because we are using Sentinel-2 L1C data, which does not include atmospheric correction (L2A data does include atmospheric correction, but is unavailable for years 2016-2018), we perform the following steps on each Sentinel-2 L1C mosaic to perform our own atmospheric correction:
 
 - Pseudo-Atmospheric Correction (DOS):
-    - Each Sentinel-2 L1C mosaic is first corrected using a simple Dark Object Subtraction (DOS)algorithm. This reduces atmospheric haze and brings the reflectance values closer to L2A surface reflectance.
+    - Each Sentinel-2 L1C mosaic is first corrected using a simple Dark Object Subtraction (DOS) algorithm. This reduces atmospheric haze and brings the reflectance values closer to L2A surface reflectance.
 
 - Custom Scene Classification Layer (SCL):
     - After atmospheric correction, a custom SCL (Scene Classification Layer) band is generated based on NDVI, NDWI, NDSI, and brightness thresholds. This SCL simulates the L2A official product, enabling masking of clouds, shadows, water, snow/ice, vegetation, and more, and allows downstream analysis to use L2A-like quality masks for each time step.
 
-Each of these resultant images contains the following bands:
+#### Retrieved Bands
+
+We then take the original Sentinel-2 bands and use them to create 3 vegetation bands. The final .tif image per window contains the following bands:
 
 - **10 Original Sentinel-2 Bands**: B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12
-- **NDVI: Normalized Difference Vegetation Index**: Measures green vegetation density, computed from NIR and Red bands (B8, B4).
+- **NDVI: Normalized Difference Vegetation Index**: Measures green vegetation density, computed from NIR and Red bands (B8, B4). We store this value scaled by 10000 for storage efficiency.
 
 $$
-\text{NDVI} = \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}}
+\text{NDVI} = 10000 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}} \in [-10000, 10000]
 $$
 
-- **EVI: Enhanced Vegetation Index**: Similar to NDVI, but slightly better in areas with dense canopy or haze. Computed from NIR, Red, and Blue bands (B8, B4, B2)
+- **EVI: Enhanced Vegetation Index**: Similar to NDVI, but slightly better in areas with dense canopy or haze. Computed from NIR, Red, and Blue bands (B8, B4, B2). We store this value scaled by 10000 for storage efficiency.
 
 $$
-\text{EVI} = 2.5 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + 6 \times \text{Red} - 7.5 \times \text{Blue} + 1}
+\text{EVI} = 10000 \times 2.5 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + 6 \times \text{Red} - 7.5 \times \text{Blue} + 1} \in [-10000, 10000]
 $$
 
-- **NDWI: Normalized Difference Water Index**: Detects moisture changes in vegetation and soil. Computed from NIR and SWIR1 bands (B8, B11).
+- **NDWI: Normalized Difference Water Index**: Detects moisture changes in vegetation and soil. Computed from NIR and SWIR1 bands (B8, B11). We store this value scaled by 10000 for storage efficiency.
 
 $$
-\text{NDWI} = \frac{\text{NIR} - \text{SWIR}}{\text{NIR} + \text{SWIR}}
+\text{NDWI} = 10000 \times \frac{\text{NIR} - \text{SWIR}}{\text{NIR} + \text{SWIR}} \in [-10000, 10000]
 $$
 
-- **Custom SCL Band**: Scene classification for cloud, shadow, water, vegetation, etc.
+- **Custom SCL Band**: Scene classification for cloud, shadow, water, vegetation, etc. The SCL band contains integer values between 1 and 11, representing different scene classes. Note that pixels with no data or data that has been masked due to clouds or cloud shadows (as determined by `s2cloudless`) are set to -9999.
+  - 1 - Saturated/Defective
+  - 2 - Dark Area Pixels
+  - 3 - Cloud Shadow
+  - 4 - Vegetation
+  - 5 - Not Vegetated
+  - 6 - Water
+  - 7 - Unclassified
+  - 8 - Cloud Medium Probability
+  - 9 - Cloud High Probability
+  - 10 - Thin Cirrus
+  - 11 - Snow/Ice
 
 #### Handling Missing and Invalid Data
 

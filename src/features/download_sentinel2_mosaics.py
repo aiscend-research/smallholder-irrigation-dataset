@@ -31,7 +31,7 @@ from src.utils.geometries import get_ee_bounding_box
 # Constants
 NO_DATA = -9999 # Value for missing/invalid data
 BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'] # All bands downloaded from Sentinel-2
-FINAL_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'NDVI', 'EVI', 'NDWI'] # All bands in final .tif
+FINAL_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'NDVI', 'EVI', 'NDWI', 'SCL'] # All bands in final .tif
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv") 
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/") # Path to download
 TMP_DIR = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
@@ -41,7 +41,7 @@ bucket = config["earthengine"]["bucket_name"]
 ee_key = os.path.join(project_root, config["earthengine"]["service_account_key"])
 fs = gcsfs.GCSFileSystem(token=ee_key, project="smallholder-irr")
 def_shape = (len(BANDS), 100, 100)
-cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
+cloud_detector = S2PixelCloudDetector(threshold=0.6, average_over=4, dilation_size=2)
 
 # Pseudo-atmospheric correction (Dark Object Subtraction, DOS) 
 def pseudo_atmospheric_correction(image, region):
@@ -285,7 +285,7 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
         date: datetime.date or datetime.datetime, center date
 
     Returns:
-        stack_list: list of numpy arrays, each (13, 100, 100)
+        stack_list: list of numpy arrays, each (14, 100, 100)
         meta_list: list of metadata dictionaries for each time window
         empty_window_count (int): count of windows without images
     """
@@ -335,10 +335,14 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
 
             fs.get(f"{bucket}/{prefix}.tif", tif_path)
 
+        scl_band = np.full((100, 100), NO_DATA, dtype=np.int16)
         with rasterio.open(tif_path) as src:
             img = src.read().astype(np.int16)
+            scl_band = src.read(11).astype(np.int16)
         if img.shape != def_shape and img.shape[0] >= 10:
             img = resize_img(img[:10], def_shape)  # Only first 10 bands, exclude SCL
+        if scl_band.shape != (100, 100):
+            scl_band = resize(scl_band, (100, 100))
 
         ndvi, evi, ndwi = calculate_indices(img[:10])
         img_with_indices = np.concatenate(
@@ -347,7 +351,7 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
         )
 
         img_rgb = np.moveaxis(img[:10], 0, -1) / 10000.0
-        img_batch = img_rgb[np.newaxis, ...]
+        img_batch = img_rgb[np.newaxis, ...] # Shape for get_cloud_masks: (1, 100, 100, 10)
 
         try:
             cloud_mask = cloud_detector.get_cloud_masks(img_batch)[0]
@@ -356,6 +360,15 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
             logging.error(f"Cloud mask failed for {prefix}: {e}")
             combined_mask = np.zeros(img.shape[1:], dtype=bool)
 
+        # Add SCL band to the image
+        # Convert all 0 values in SCL to NO_DATA
+        scl_band[scl_band == 0] = NO_DATA
+        img_with_indices = np.concatenate(
+            (img_with_indices, scl_band[None, :, :]),
+            axis=0
+        )
+
+        # Apply cloud mask to all bands
         img_with_indices[:, combined_mask] = NO_DATA
 
         meta_list.append({
@@ -390,7 +403,7 @@ def retrieve_images():
         stack_list, meta_list, empty_window_count = retrieve_time_series_stack(site_id, lat, lon, date)
         stack_arr = np.stack(stack_list)
         T, B, H, W = stack_arr.shape
-        expected_shape = (37, 13, 100, 100)
+        expected_shape = (37, len(FINAL_BANDS), 100, 100)
         if stack_arr.shape != expected_shape:
             raise ValueError(
                 f"Output stack shape {stack_arr.shape} does not match expected {expected_shape} "
