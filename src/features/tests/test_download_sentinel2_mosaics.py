@@ -4,10 +4,8 @@ Contains tests for helper functions for download_sentinel2_mosaics
 
 import unittest
 from datetime import datetime, timedelta, date
-from download_sentinel2_mosaics import download_sentinel2_mosaic, get_dense_time_windows, calculate_indices, NO_DATA, retrieve_images, retrieve_time_series_stack
+from download_sentinel2_mosaics import get_dense_time_windows, calculate_indices, NO_DATA, retrieve_time_series_stack
 import numpy as np
-import rasterio
-import os
 from unittest.mock import patch, MagicMock
 
 class TestDownloadMosaics(unittest.TestCase):
@@ -117,9 +115,8 @@ class TestDownloadMosaics(unittest.TestCase):
         mock_fs,
     ):
         '''
-        Test that retrieve_time_series_stack returns correctly shaped
-        arrays when each time window has an image returned from Google 
-        Earth Engine.
+        Test that retrieve_time_series_stack returns correctly shaped arrays when each time window 
+        has an image returned from Google Earth Engine.
         '''
         # Setup mocks
         mock_fs.exists.return_value = False
@@ -130,9 +127,16 @@ class TestDownloadMosaics(unittest.TestCase):
         mock_wait_for_task.return_value = {"state": "COMPLETED"}
 
         # Simulate image read
-        dummy_img = np.ones((10, 100, 100), dtype=np.int16)
+        dummy_img = np.ones((11, 100, 100), dtype=np.int16)
+        def read_side_effect(band=None):
+            if band == 11:
+                return np.ones((100, 100), dtype=np.int16)
+            else:
+                return dummy_img
+
         mock_src = MagicMock()
         mock_src.read.return_value = dummy_img
+        mock_src.read.side_effect = read_side_effect
         mock_rasterio_open.return_value.__enter__.return_value = mock_src
 
         # Indices
@@ -150,12 +154,11 @@ class TestDownloadMosaics(unittest.TestCase):
 
         self.assertEqual(empty_window_ct, 0, 
                          msg=f"test_retrieve_time_series_stack fail: Expect empty_window_ct to be 0, but got {empty_window_ct}")
-
         # Ensure correct sizes
         self.assertEqual(len(stack), 37,
                          msg=f"test_retrieve_time_series_stack fail: Expect stack_list to be size 37, but got {len(stack)}")
-        self.assertEqual(stack[0].shape, (13, 100, 100),
-                         msg=f"test_retrieve_time_series_stack fail: Expect first image in stack_list to be size (13, 100, 100) but got {stack[0].shape}")
+        self.assertEqual(stack[0].shape, (14, 100, 100),
+                         msg=f"test_retrieve_time_series_stack fail: Expect first image in stack_list to be size (14, 100, 100) but got {stack[0].shape}")
         self.assertEqual(len(meta), 37,
                          msg=f"test_retrieve_time_series_stack fail: Expect meta_list to be size 37, but got {len(meta)}")
 
