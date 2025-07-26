@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     # This is also about 3 cm off. 
 
-def get_bounding_box(lat, lon, half_side_km=0.5):
+def get_ee_bounding_box (lat, lon, half_side_km=0.5):
     """
     Returns an Earth Engine Rectangle geometry (~1km x 1km) centered on lat, lon.
     """

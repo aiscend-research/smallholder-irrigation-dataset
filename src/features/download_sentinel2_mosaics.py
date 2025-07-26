@@ -26,7 +26,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from src.utils.utils import load_config, find_project_root
-from src.utils.geometries import get_bounding_box
+from src.utils.geometries import get_ee_bounding_box 
 
 # Constants
 NO_DATA = -9999 # Value for missing/invalid data
@@ -166,7 +166,7 @@ def download_sentinel2_mosaic(lat, lon, start_date, end_date, output_prefix=None
     '''
     config = load_config()
     bucket = config["earthengine"]["bucket_name"]
-    region = get_bounding_box(lat, lon)
+    region = get_ee_bounding_box(lat, lon)
 
     collection = ee.ImageCollection("COPERNICUS/S2_HARMONIZED") \
         .filterBounds(region) \
@@ -390,6 +390,12 @@ def retrieve_images():
         stack_list, meta_list, empty_window_count = retrieve_time_series_stack(site_id, lat, lon, date)
         stack_arr = np.stack(stack_list)
         T, B, H, W = stack_arr.shape
+        expected_shape = (37, 13, 100, 100)
+        if stack_arr.shape != expected_shape:
+            raise ValueError(
+                f"Output stack shape {stack_arr.shape} does not match expected {expected_shape} "
+                f"(T={T}, B={B}, H={H}, W={W})"
+            )
         reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
         out_tif = os.path.join(DOWNLOAD_DIR, f"{site_id}.tif")
         out_json = os.path.join(DOWNLOAD_DIR, f"{site_id}.json")

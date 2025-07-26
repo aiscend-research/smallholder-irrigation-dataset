@@ -199,3 +199,5 @@ secrets/earthengine-key.json
 
 .RData
 .Rhistory
+
+src/features/earthengine/
