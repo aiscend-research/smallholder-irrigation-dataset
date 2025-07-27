@@ -11,8 +11,10 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
 ## Structure
 ```
 ├── run_experiment.py          # Entry point to run an experiment
-├── final_test.py              # Entry point to evaluate a best model's performance to  the test dataset (in progress)
+├── final_test.py              # Entry point to evaluate a best model's performance to the test dataset (in progress)
 ├── experiments.yaml           # Specify experiment details
+├── custom_dataset.py          # Custom dataset class
+├── custom_datamodule.py       # Custom datamodule class
 ├── README.md                  # This file
 ├── ml_pipeline/               # Core ML pipeline modules
 │   ├── __init__.py            # Makes ml_pipeline a Python package
@@ -36,6 +38,30 @@ The test dataset is from one of the example multi-temporal-crop datasets used by
  #### `visualization.py`
  `print_confusion_matix(y_true, y_pred)`: Displays a confusion matrix using `matplotlib`.
 `plot_ml_predictions(dataset, clf, class_names, colors)`: Visualizes the model’s pixel-wise predictions vs ground truth masks for selected samples, using color-coded masks. Class colors and names are dataset-dependent and should be passed in as arguments. This function will have to changed depending on the dataset.
+
+### Custom Dataset and Datamodule
+
+`custom_dataset.py`
+The MultiTemporalBarebonesDataset is a custom PyTorch Dataset designed to load and process multi-temporal Sentinel-2 .tif files for crop classification or land cover tasks. Each .tif file is expected to contain a stacked array of 481 image bands representing 37 time steps × 13 features (Sentinel-2 bands and vegetation indices). An optional irrigation mask can be extracted from an additional band if present.
+
+Features:
+	•	Automatically reshapes image data into the format (13, 37, H, W) for modeling.
+	•	Includes a built-in method to visualize temporal progression for any spectral band.
+
+Example Output:
+	•	image: Tensor of shape (13, 37, H, W)
+	•	mask: Tensor of shape (H, W)
+
+Potential future additions include:
+   * Metadata Handling
+   * Preprocessing and Transformation
+      - Reshaping, normalization, transforms, NaN values
+   * Label Adjustments
+   * Sample Enrichment
+    - adding more details 
+
+`custom_datamodule.py`
+Class that helps to combine multiple dataset samples, and create train/val/test spilts. Inherits from PyTorch Lightening for more flexiblity. 
 
 ### Running Experiments Using the ML Pipeline
 
@@ -74,17 +100,3 @@ This structure ensures that every experiment is fully reproducible: you can alwa
 #### **Best Practices**
 
 - **Commit your code before running experiments.** This ensures you can always match results to the code that produced them. 
-
-`custom_dataset.py`
-On a high level, a dataset class helps us to load in the data. My current dataset class takes in a .tif file and converts it to mask tensors. Since this is a barebones version the only band it takes is Band 2, with 0,1 indicating not irrigated or irrigated. The dataset desgined for multitemporalcropclassfication has the following additional functionality: 
-* Band Selection
-* Metadata Handling
-* Preprocessing and Transformation
-  - Reshaping, normalization, transforms, NaN values
-* Label Adjustments
-* Sample Enrichment
-  - adding more details 
-* Visualization  
-
-`custom_datamodule.py`
-Class that helps to combine multiple dataset samples, and create train/val/test spilts. Inherits from PyTorch Lightening for more flexiblity. 
