@@ -16,6 +16,7 @@ from rasterio.transform import from_origin
 from skimage.transform import resize
 from s2cloudless.cloud_detector import S2PixelCloudDetector
 import ee
+from concurrent.futures import ThreadPoolExecutor
 
 # Set up proxy if needed (adjust protocol if necessary)
 os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
@@ -292,35 +293,106 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
     windows = get_dense_time_windows(date)
     stack_list, meta_list = [], []
     empty_window_count = 0
+    task_info_list = [] # (task, prefix, s, e, exists) – task is download task, prefix is the GCS path prefix, s and e are start and end dates, exists is a boolean indicating if the image already exists in GCS
 
+    # Submit API calls for each window
     for start, end in windows:
         s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
         prefix = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
-        logging.info(f"Fetching image for {prefix}")
-        tif_path = os.path.join(TMP_DIR, os.path.basename(prefix) + ".tif")
 
         if fs.exists(f"{bucket}/{prefix}.tif"):
-            fs.get(f"{bucket}/{prefix}.tif", tif_path)
+            task_info_list.append((None, prefix, s, e, True))
         else:
+            # Image does not exist in GCS, submit task to download
             task, _ = download_sentinel2_mosaic(lat, lon, s, e, prefix)
-            if task is None:
-                meta_list.append({
-                    "date_range": [s, e],
-                    "cloud_fraction": 1.0,
-                    "mean_ndvi": NO_DATA,
-                    "mean_evi": NO_DATA,
-                    "mean_ndwi": NO_DATA 
-                })
-                img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
-                stack_list.append(img)
-                empty_window_count += 1
-                continue
 
-            status = wait_for_task(task)
+            # GEE found no images for this window
+            if task is None:
+                task_info_list.append((None, prefix, s, e, False))
+            else: 
+                task_info_list.append((task, prefix, s, e, False))
+
+    # Wait for all download tasks to complete
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Log how long it takes to wait for all tasks
+        time_start = time.time()
+        logging.info("Waiting for all download tasks to complete...")
+        futures = []
+        for task, prefix, s, e, exists in task_info_list:
+            # If the image already exists, we can skip waiting for the task
+            if exists or task is None:
+                continue
+            if task is not None:
+                futures.append(executor.submit(wait_for_task, task))
+        
+        # Wait for all futures to complete
+        for future in futures:
+            try:
+                future.result()  # Wait for the task to complete
+            except Exception as e:
+                logging.error(f"Error waiting for task: {e}")
+
+        time_end = time.time()
+        logging.info(f"All download tasks completed in {time_end - time_start:.2f} seconds.")
+
+    # Process all images
+    # First, check which images need to be downloaded
+    files_to_download = []
+    for task, prefix, s, e, exists in task_info_list:
+        if exists:
+            files_to_download.append((prefix, os.path.join(TMP_DIR, f"{prefix}.tif")))
+        elif task is not None and task.status()['state'] == 'COMPLETED':
+            files_to_download.append((prefix, os.path.join(TMP_DIR, f"{prefix}.tif")))
+
+    # Then, download images from GCS in parallel
+    def download_file(prefix, local_path):
+        """
+        Downloads a file from GCS to the local path.
+        """
+        try:
+            fs.get(f"{bucket}/{prefix}.tif", local_path)
+        except Exception as e:
+            logging.error(f"Failed to download {prefix}.tif: {e}")
+
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        futures = []
+        for prefix, local_path in files_to_download:
+            futures.append(executor.submit(download_file, prefix, local_path))
+        
+        # Wait for all downloads to complete
+        for future in futures:
+            try:
+                future.result()  # Wait for the download to complete
+            except Exception as e:
+                logging.error(f"Error downloading file: {e}")
+
+    # Now process each downloaded image
+    for task, prefix, s, e, exists in task_info_list:
+        tif_path = os.path.join(TMP_DIR, f"{prefix}.tif")
+
+        if exists or (task is not None and task.status()['state'] == 'COMPLETED'):
+            # File already downloaded
+            pass
+        
+        # If no images found by GEE, add blank tif
+        elif task is None:
+            meta_list.append({
+                "date_range": [s, e],
+                "cloud_fraction": 1.0,
+                "mean_ndvi": NO_DATA,
+                "mean_evi": NO_DATA,
+                "mean_ndwi": NO_DATA
+            })
+            empty_window_count += 1
+            stack_list.append(np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16))
+            continue
+
+        else:
+            # Handle errors if task failed, same as before
+            status = task.status()
             if status['state'] != 'COMPLETED':
-                logging.info(f"[ERROR] Export task failed or incomplete for {prefix}. Status: {status['state']}")
                 if 'error_message' in status:
-                    logging.info(f"Error message: {status['error_message']}")
+                    logging.info(f"Error downloading image from GEE: {status['error_message']}")
                 meta_list.append({
                     "date_range": [s, e],
                     "cloud_fraction": 1.0,
@@ -328,13 +400,11 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
                     "mean_evi": NO_DATA,
                     "mean_ndwi": NO_DATA
                 })
-                img = np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
-                stack_list.append(img)
+                stack_list.append(np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16))
                 empty_window_count += 1
                 continue
 
-            fs.get(f"{bucket}/{prefix}.tif", tif_path)
-
+        # Read and process the image
         scl_band = np.full((100, 100), NO_DATA, dtype=np.int16)
         with rasterio.open(tif_path) as src:
             img = src.read().astype(np.int16)
@@ -396,6 +466,7 @@ def retrieve_images():
     data = pd.read_csv(LABEL_CSV)
     initialize_earthengine()
     for idx, row in data.iterrows():
+        logging.info(f"Processing row {idx+1}/{len(data)}")
         lat, lon = row['y'], row['x']
         uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))

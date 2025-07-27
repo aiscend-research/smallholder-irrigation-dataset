@@ -124,7 +124,7 @@ class TestDownloadMosaics(unittest.TestCase):
         # Simulate successful EE task
         mock_task = MagicMock()
         mock_download.return_value = (mock_task, "dummy_prefix")
-        mock_wait_for_task.return_value = {"state": "COMPLETED"}
+        mock_task.status.return_value = {"state": "COMPLETED"}
 
         # Simulate image read
         dummy_img = np.ones((11, 100, 100), dtype=np.int16)
