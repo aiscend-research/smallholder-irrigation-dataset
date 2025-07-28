@@ -1,7 +1,15 @@
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.multioutput import MultiOutputClassifier
+
 def train_randomForest(X_train, y_train, n_estimators=100, random_state=42):
-    clf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+    base_model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        random_state=random_state,
+        n_jobs=-1
+    )
+    clf = MultiOutputClassifier(base_model)
     clf.fit(X_train, y_train)
     return clf
 
@@ -16,7 +24,7 @@ def train_GradientBoosting(
     max_features=None,
     random_state=42
 ):
-    clf = GradientBoostingClassifier(
+    base_model = GradientBoostingClassifier(
         n_estimators=n_estimators,
         learning_rate=learning_rate,
         max_depth=max_depth,
@@ -26,6 +34,7 @@ def train_GradientBoosting(
         max_features=max_features,
         random_state=random_state
     )
+    clf = MultiOutputClassifier(base_model)
     clf.fit(X_train, y_train)
     return clf
 

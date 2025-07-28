@@ -49,8 +49,8 @@ Features:
 	•	Includes a built-in method to visualize temporal progression for any spectral band.
 
 Example Output:
-	•	image: Tensor of shape (13, 37, H, W)
-	•	mask: Tensor of shape (H, W)
+	*	image: Tensor of shape (13, 37, H, W)
+	*	mask: Tensor of shape (H, W)
 
 Potential future additions include:
    * Metadata Handling

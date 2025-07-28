@@ -2,7 +2,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 
-class MultiTemporalBarebonesDataModule(LightningDataModule):
+class MultiTemporalCropDataModule(LightningDataModule):
     def __init__(
         self,
         data_dir,
@@ -25,19 +25,19 @@ class MultiTemporalBarebonesDataModule(LightningDataModule):
         self.mask_band = mask_band
 
     def setup(self, stage=None):
-        from custom_dataset import MultiTemporalBarebonesDataset
+        from custom_dataset import MultiTemporalCropDataset
         if stage in (None, "fit"):
-            self.train_dataset = MultiTemporalBarebonesDataset(
+            self.train_dataset = MultiTemporalCropDataset(
                 self.data_dir, self.train_files, self.image_band, self.mask_band
             )
         if stage in (None, "fit", "validate"):
             if self.val_files:
-                self.val_dataset = MultiTemporalBarebonesDataset(
+                self.val_dataset = MultiTemporalCropDataset(
                     self.data_dir, self.val_files, self.image_band, self.mask_band
                 )
         if stage in (None, "test"):
             if self.test_files:
-                self.test_dataset = MultiTemporalBarebonesDataset(
+                self.test_dataset = MultiTemporalCropDataset(
                     self.data_dir, self.test_files, self.image_band, self.mask_band
                 )
 
