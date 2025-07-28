@@ -16,7 +16,7 @@ from rasterio.transform import from_origin
 from skimage.transform import resize
 from s2cloudless.cloud_detector import S2PixelCloudDetector
 import ee
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 # Set up proxy if needed (adjust protocol if necessary)
 os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
@@ -36,6 +36,7 @@ FINAL_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'NDVI', 'EV
 LABEL_CSV = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv") 
 DOWNLOAD_DIR = os.path.join(project_root, "data/features/") # Path to download
 TMP_DIR = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
+MAX_PARALLEL_ROWS = 3 # Max number of rows to process in parallel
 
 config = load_config()
 bucket = config["earthengine"]["bucket_name"]
@@ -139,6 +140,13 @@ def initialize_earthengine():
         service_email = creds['client_email']
     credentials = ee.ServiceAccountCredentials(service_email, ee_key)
     ee.Initialize(credentials)
+
+    # Set up logging in each process
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] [PID %(process)d] %(levelname)s: %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
     print("Earth Engine initialized.")
 
 # Helpers
@@ -452,6 +460,49 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
 
     return stack_list, meta_list, empty_window_count
 
+def process_row(row):
+    """
+    Process a single row of the DataFrame to retrieve and save the Sentinel-2 time series stack.
+    """
+    lat, lon = row['y'], row['x']
+    uid = row['unique_id']
+    logging.info(f"Processing row {uid}")
+    date = datetime(int(row['year']), int(row['month']), int(row['day']))
+    site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
+    stack_list, meta_list, empty_window_count = retrieve_time_series_stack(site_id, lat, lon, date)
+    stack_arr = np.stack(stack_list)
+    T, B, H, W = stack_arr.shape
+    expected_shape = (37, len(FINAL_BANDS), 100, 100)
+    if stack_arr.shape != expected_shape:
+        raise ValueError(
+            f"Output stack shape {stack_arr.shape} does not match expected {expected_shape} "
+            f"(T={T}, B={B}, H={H}, W={W})"
+        )
+    reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
+    out_tif = os.path.join(DOWNLOAD_DIR, f"{site_id}.tif")
+    out_json = os.path.join(DOWNLOAD_DIR, f"{site_id}.json")
+
+    with rasterio.open(out_tif, 'w', driver='GTiff', height=H, width=W, count=T*B,
+                    dtype='int16', crs='EPSG:32633',
+                    transform=from_origin(lon - 0.0005, lat + 0.0005, 0.0001, 0.0001),
+                    nodata=NO_DATA) as dst:
+        dst.write(reshaped.astype('int16'))
+
+    with open(out_json, 'w') as f:
+        json.dump({
+            "site_id": site_id,
+            "lat": lat, "lon": lon,
+            "year": date.year, 
+            "unique_id": uid,
+            "bands": FINAL_BANDS,
+            "shape": list(stack_arr.shape),
+            "empty_window_count": empty_window_count,
+            "windows": meta_list
+        }, f, indent=2)
+
+    logging.info(f"[DONE] Saved stack to {out_tif}, shape={stack_arr.shape}")
+    return f"Processed row {uid} successfully"
+
 def retrieve_images():
     '''
     For each labeled image, downloads its corresponding time series (36 images, with 18 images before the label date
@@ -464,45 +515,17 @@ def retrieve_images():
     logging.basicConfig(level=logging.INFO)
     os.makedirs(TMP_DIR, exist_ok=True)
     data = pd.read_csv(LABEL_CSV)
-    initialize_earthengine()
-    for idx, row in data.iterrows():
-        logging.info(f"Processing row {idx+1}/{len(data)}")
-        lat, lon = row['y'], row['x']
-        uid = row['unique_id']
-        date = datetime(int(row['year']), int(row['month']), int(row['day']))
-        site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
-        stack_list, meta_list, empty_window_count = retrieve_time_series_stack(site_id, lat, lon, date)
-        stack_arr = np.stack(stack_list)
-        T, B, H, W = stack_arr.shape
-        expected_shape = (37, len(FINAL_BANDS), 100, 100)
-        if stack_arr.shape != expected_shape:
-            raise ValueError(
-                f"Output stack shape {stack_arr.shape} does not match expected {expected_shape} "
-                f"(T={T}, B={B}, H={H}, W={W})"
-            )
-        reshaped = stack_arr.transpose(1, 0, 2, 3).reshape(T*B, H, W)
-        out_tif = os.path.join(DOWNLOAD_DIR, f"{site_id}.tif")
-        out_json = os.path.join(DOWNLOAD_DIR, f"{site_id}.json")
-
-        with rasterio.open(out_tif, 'w', driver='GTiff', height=H, width=W, count=T*B,
-                        dtype='int16', crs='EPSG:32633',
-                        transform=from_origin(lon - 0.0005, lat + 0.0005, 0.0001, 0.0001),
-                        nodata=NO_DATA) as dst:
-            dst.write(reshaped.astype('int16'))
-
-        with open(out_json, 'w') as f:
-            json.dump({
-                "site_id": site_id,
-                "lat": lat, "lon": lon,
-                "year": date.year, 
-                "unique_id": uid,
-                "bands": FINAL_BANDS,
-                "shape": list(stack_arr.shape),
-                "empty_window_count": empty_window_count,
-                "windows": meta_list
-            }, f, indent=2)
-
-        logging.info(f"[DONE] Saved stack to {out_tif}, shape={stack_arr.shape}")
+    
+    logging.info(f"Starting to process {len(data)} rows from {LABEL_CSV}")
+    with ProcessPoolExecutor(max_workers=MAX_PARALLEL_ROWS, initializer=initialize_earthengine) as executor:  # Adjust workers based on your CPU + GEE quota
+        futures = {executor.submit(process_row, row): idx for idx, row in data.iterrows()}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                logging.info(result)
+            except Exception as e:
+                idx = futures[future]
+                logging.error(f"[ERROR] Row {idx}: {e}")
 
 if __name__ == "__main__":
     retrieve_images()
