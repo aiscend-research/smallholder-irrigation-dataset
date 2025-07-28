@@ -19,8 +19,8 @@ import ee
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 # Set up proxy if needed (adjust protocol if necessary)
-os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
-os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
+#os.environ["HTTP_PROXY"] = "socks5://127.0.0.1:33210"
+#os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:33210"
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -285,6 +285,16 @@ def calculate_indices(img):
     ndwi[valid_ndwi] = ((B8 - B11)[valid_ndwi] / (B8 + B11)[valid_ndwi] * 10000).astype(np.int16)
     return ndvi, evi, ndwi
 
+def mask_scl_anomalies(scl_band, no_data=NO_DATA):
+    """
+    Masks out all problematic SCL classes by setting them to NO_DATA.
+    Problematic SCL values: 0 (No Data), 1 (Saturated/Defective), 3 (Cloud Shadow),
+    8 (Medium Probability Cloud), 9 (High Probability Cloud), 10 (Thin Cirrus)
+    """
+    mask_vals = [0, 1, 3, 8, 9, 10]
+    scl_band[np.isin(scl_band, mask_vals)] = no_data
+    return scl_band
+
 def retrieve_time_series_stack(site_id, lat, lon, date):
     """
     Retrieves the time series of Sentinel-2 mosaics for a given site and computes indices and cloud masking.
@@ -434,13 +444,25 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
         try:
             cloud_mask = cloud_detector.get_cloud_masks(img_batch)[0]
             combined_mask = cloud_mask.astype(bool)
+            cloud_mask_failed = False  # Mark successful mask
         except Exception as e:
             logging.error(f"Cloud mask failed for {prefix}: {e}")
-            combined_mask = np.zeros(img.shape[1:], dtype=bool)
+            # Skip this image and treat the entire window as invalid
+            meta_list.append({
+                "date_range": [s, e],
+                "cloud_fraction": 1.0,
+                "mean_ndvi": NO_DATA,
+                "mean_evi": NO_DATA,
+                "mean_ndwi": NO_DATA,
+                "cloud_mask_failed": True  # Explicitly mark failure
+            })
+            stack_list.append(np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16))
+            empty_window_count += 1
+            continue
 
         # Add SCL band to the image
-        # Convert all 0 values in SCL to NO_DATA
-        scl_band[scl_band == 0] = NO_DATA
+        # Mask all problematic SCL classes to NO_DATA
+        scl_band = mask_scl_anomalies(scl_band)
         img_with_indices = np.concatenate(
             (img_with_indices, scl_band[None, :, :]),
             axis=0
@@ -454,7 +476,8 @@ def retrieve_time_series_stack(site_id, lat, lon, date):
             "cloud_fraction": float(combined_mask.mean()),
             "mean_ndvi": float(ndvi[ndvi != NO_DATA].mean()) if np.any(ndvi != NO_DATA) else NO_DATA,
             "mean_evi": float(evi[evi != NO_DATA].mean()) if np.any(evi != NO_DATA) else NO_DATA,
-            "mean_ndwi": float(ndwi[ndwi != NO_DATA].mean()) if np.any(ndwi != NO_DATA) else NO_DATA 
+            "mean_ndwi": float(ndwi[ndwi != NO_DATA].mean()) if np.any(ndwi != NO_DATA) else NO_DATA,
+            "cloud_mask_failed": False
         })
         stack_list.append(img_with_indices)
 
