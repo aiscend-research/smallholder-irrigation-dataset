@@ -1,7 +1,5 @@
 from sklearn.metrics import accuracy_score, f1_score
 
-from sklearn.metrics import accuracy_score, f1_score
-
 def model_metrics(y_pred, y_test):
     """
     Computes accuracy and F1 score for each label (column) in multi-label classification.
