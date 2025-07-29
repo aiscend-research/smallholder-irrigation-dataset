@@ -119,36 +119,28 @@ def process_survey_row(row, polygons, certainty_cutoff, idx):
 
 def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certainty_cutoff: Optional[int] = 3):
     """
-    Loads in and merges survey data with polygon data, performs consistency checks, and calculates percent coverage.
-    This function processes survey data and polygon data to ensure consistency between the two datasets.
-    It performs a series of checks to validate the relationship between survey rows and polygons, 
-    calculates the percentage of survey area covered by polygons, and generates a report of any issues found.
+    Loads, merges, and validates survey and polygon data, computes coverage statistics, and enriches polygons with site-level info.
+
+    This function:
+      - Loads survey data (CSV) and polygon data (GeoJSON)
+      - Calculates polygon area in square meters
+      - Updates the 'category' to 'industrial' for polygons marked 'small-scale' with area > 100,000 m^2
+      - Adds a 'site_id' to polygons based on survey matches
+      - For each survey row, matches polygons by internal_id (or site_id), year, month, and day
+      - Computes percent coverage and statistics for all and high-certainty polygons
+      - Checks for consistency between survey irrigation status and polygons, reporting any issues
+      - Merges survey and polygon data, saving:
+          * A merged survey CSV with coverage stats
+          * An enriched polygons GeoJSON with area and site-level info
+          * A report of any inconsistencies or issues
+
     Args:
-        survey (pd.DataFrame): A DataFrame containing survey data with columns:
-            - internal_id: Unique identifier for the survey.
-            - year, month, day: Date of the survey.
-            - irrigation: Irrigation status (1 = no irrigation, 2-5 = varying levels of irrigation certainty).
-            - x (longitude), y (latitude): Coordinates of the survey location.
-        polygons (gpd.GeoDataFrame): A GeoDataFrame containing polygon data with columns:
-            - internal_id: Unique identifier for the polygon.
-            - year, month, day: Date associated with the polygon.
-            - geometry: Polygon geometry.
-            - certainty: Certainty level of the polygon (1-5).
-        certainty_cutoff (int): How high does an irrigation certainty need to be to be considered "high certainty"?
+        survey_path (str): Path to the survey CSV file.
+        polygons_path (str, optional): Path to the polygons GeoJSON file. If not provided, uses the same base name as the survey CSV.
+        certainty_cutoff (int, optional): Certainty threshold for high-certainty polygon stats (default: 3).
+
     Returns:
-        gpd.GeoDataFrame: A GeoDataFrame containing the survey data with additional columns added using process_survey_row
-    Raises:
-        ValueError: If the input data does not meet the expected format or contains invalid values.
-    Notes:
-        - The function generates a report of any inconsistencies or issues found during processing.
-        - The report is printed to the console and includes details such as unmatched polygons, 
-          mismatched irrigation statuses, and polygons that do not overlap survey areas.
-        - Polygons are matched to survey rows based on spatial intersection and matching attributes 
-          (internal_id, year, month, day).
-    Example:
-        survey = pd.DataFrame({...})
-        polygons = gpd.GeoDataFrame({...})
-        result = merge_and_check(survey, polygons)
+        gpd.GeoDataFrame: Survey data with added coverage/statistics columns.
     """
 
     # Load the survey and polygon data.
@@ -170,6 +162,13 @@ def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certa
     # We will add a column for the overall location id to the geojson too
     # This will help us ensure that all polygons get matched to a location
     polygons["site_id"] = None 
+
+    # Enrich and save polygons GeoJSON with polygon size and site level info ---
+    # Calculate polygon area (in m^2)
+    polygons['polygon_area_m2'] = polygons.to_crs("EPSG:32735").geometry.area
+
+    # Update category to 'industrial' if small-scale and area > 100,000 m^2
+    polygons.loc[(polygons['category'] == 'small-scale') & (polygons['polygon_area_m2'] > 100000), 'category'] = 'industrial'
 
     # Process each survey row, collect results and reports
     results = []
@@ -212,11 +211,7 @@ def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certa
     survey_results.drop(columns="geometry").to_csv(results_path, index=False)
     print(f"Saved merged dataset at {results_path}")
 
-    # Enrich and save polygons GeoJSON with polygon size and site level info ---
-    # Calculate polygon area (in m^2)
-    polygons['polygon_area_m2'] = polygons.to_crs("EPSG:32735").geometry.area
-
-    # Select relevant site-level columns from survey_gdf
+    # Select relevant site-level columns from survey_gdf to add to the polygons
     survey_info_cols = ['site_id', 'internal_id', 'plot_file', 'x', 'y', 'water_source', 'year', 'month', 'day', 'source_file']
     survey_info = survey_gdf[survey_info_cols].drop_duplicates()
 

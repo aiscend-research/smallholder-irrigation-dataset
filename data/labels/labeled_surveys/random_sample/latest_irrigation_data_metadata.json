@@ -1,1 +1,1 @@
-{"date": "2025-07-15T12:57:05.551063", "file": "latest_irrigation_data.geojson", "description": "The latest labeled irrigation data with a bounding box", "file_format": "json", "source": "src/processing/batch_process.py"}
+{"date": "2025-07-29T15:18:27.695605", "file": "latest_irrigation_data.geojson", "description": "The latest labeled irrigation data with a bounding box", "file_format": "json", "source": "src/processing/batch_process.py"}

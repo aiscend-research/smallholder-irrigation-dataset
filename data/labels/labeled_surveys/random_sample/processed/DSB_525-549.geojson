@@ -749,7 +749,7 @@
         "day": 23,
         "year": 2017,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -3902,7 +3902,7 @@
         "day": 12,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -4137,7 +4137,7 @@
         "day": 12,
         "year": 2016,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -5080,7 +5080,7 @@
         "day": 28,
         "year": 2017,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -5249,7 +5249,7 @@
         "day": 28,
         "year": 2017,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -6430,7 +6430,7 @@
         "day": 28,
         "year": 2017,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -6511,7 +6511,7 @@
         "day": 28,
         "year": 2017,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -7558,7 +7558,7 @@
         "day": 28,
         "year": 2017,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {

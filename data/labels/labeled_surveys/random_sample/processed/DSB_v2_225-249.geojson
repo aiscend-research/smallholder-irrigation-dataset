@@ -1716,7 +1716,7 @@
         "day": 10,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -1818,7 +1818,7 @@
         "day": 7,
         "year": 2023,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -1932,7 +1932,7 @@
         "day": 5,
         "year": 2022,
         "certainty": 2,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -1989,7 +1989,7 @@
         "day": 5,
         "year": 2022,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -2130,7 +2130,7 @@
         "day": 5,
         "year": 2022,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -2280,7 +2280,7 @@
         "day": 13,
         "year": 2021,
         "certainty": 3,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -2426,7 +2426,7 @@
         "day": 11,
         "year": 2018,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -2539,7 +2539,7 @@
         "day": 19,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -2660,7 +2660,7 @@
         "day": 14,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {
@@ -3230,7 +3230,7 @@
         "day": 22,
         "year": 2020,
         "certainty": 4,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
@@ -3357,7 +3357,7 @@
         "day": 20,
         "year": 2018,
         "certainty": 4,
-        "uncertainty_explanation": "may naturally be green;uneven",
+        "uncertainty_explanation": "uneven;may naturally be green",
         "category": "small-scale"
       },
       "geometry": {

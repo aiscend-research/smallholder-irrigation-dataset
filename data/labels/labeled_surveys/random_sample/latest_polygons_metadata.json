@@ -1,1 +1,1 @@
-{"date": "2025-07-15T13:00:08.861932", "file": "latest_polygons.geojson", "description": "The latest labeled irrigation polygons (GeoJSON) for the most recent surveys.", "file_format": "json", "source": "src/processing/batch_process.py"}
+{"date": "2025-07-29T15:18:28.265720", "file": "latest_polygons.geojson", "description": "The latest labeled irrigation polygons (GeoJSON) for the most recent surveys.", "file_format": "json", "source": "src/processing/batch_process.py"}
