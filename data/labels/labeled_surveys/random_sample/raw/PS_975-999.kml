@@ -5,7 +5,7 @@
 	<StyleMap id="msn_ylw-pushpin">
 		<Pair>
 			<key>normal</key>
-			<styleUrl>#sn_ylw-pushpin0</styleUrl>
+			<styleUrl>#sn_ylw-pushpin1</styleUrl>
 		</Pair>
 		<Pair>
 			<key>highlight</key>
@@ -15,11 +15,11 @@
 	<StyleMap id="msn_ylw-pushpin0">
 		<Pair>
 			<key>normal</key>
-			<styleUrl>#sn_ylw-pushpin1</styleUrl>
+			<styleUrl>#sn_ylw-pushpin2</styleUrl>
 		</Pair>
 		<Pair>
 			<key>highlight</key>
-			<styleUrl>#sh_ylw-pushpin1</styleUrl>
+			<styleUrl>#sh_ylw-pushpin2</styleUrl>
 		</Pair>
 	</StyleMap>
 	<StyleMap id="msn_ylw-pushpin1">
@@ -30,6 +30,16 @@
 		<Pair>
 			<key>highlight</key>
 			<styleUrl>#sh_ylw-pushpin</styleUrl>
+		</Pair>
+	</StyleMap>
+	<StyleMap id="msn_ylw-pushpin2">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#sn_ylw-pushpin0</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#sh_ylw-pushpin1</styleUrl>
 		</Pair>
 	</StyleMap>
 	<Style id="sh_ylw-pushpin">
@@ -76,6 +86,23 @@
 		</IconStyle>
 		<BalloonStyle>
 		</BalloonStyle>
+		<LineStyle>
+			<color>ff0000aa</color>
+		</LineStyle>
+		<PolyStyle>
+			<fill>0</fill>
+		</PolyStyle>
+	</Style>
+	<Style id="sh_ylw-pushpin2">
+		<IconStyle>
+			<scale>1.3</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<BalloonStyle>
+		</BalloonStyle>
 		<PolyStyle>
 			<fill>0</fill>
 		</PolyStyle>
@@ -108,13 +135,30 @@
 		<BalloonStyle>
 		</BalloonStyle>
 		<LineStyle>
-			<color>ffffff55</color>
+			<color>ff0000aa</color>
 		</LineStyle>
 		<PolyStyle>
 			<fill>0</fill>
 		</PolyStyle>
 	</Style>
 	<Style id="sn_ylw-pushpin1">
+		<IconStyle>
+			<scale>1.1</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+			</Icon>
+			<hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<BalloonStyle>
+		</BalloonStyle>
+		<LineStyle>
+			<color>ffffff55</color>
+		</LineStyle>
+		<PolyStyle>
+			<fill>0</fill>
+		</PolyStyle>
+	</Style>
+	<Style id="sn_ylw-pushpin2">
 		<IconStyle>
 			<scale>1.1</scale>
 			<Icon>
@@ -131,6 +175,100 @@
 	<Folder>
 		<name>PS_975-999</name>
 		<Placemark>
+			<name>ps_20_10.8.2023</name>
+			<description>5</description>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34191308988582,-12.69454492748321,0 28.34193804288335,-12.69459548938463,0 28.34198686723499,-12.6945738459132,0 28.34188554421409,-12.69424276531054,0 28.34184820169038,-12.694246734215,0 28.34184023126138,-12.69428508228983,0 28.34176628444401,-12.69430191454817,0 28.34184858721473,-12.69456874203056,0 28.34191308988582,-12.69454492748321,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_20_10.8.2023</name>
+			<description>5</description>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34160152539497,-12.69476585242565,0 28.34175187192112,-12.69474770534366,0 28.34167387806153,-12.69431393997344,0 28.34153356941911,-12.69434964012136,0 28.34160152539497,-12.69476585242565,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_20_10.8.2023</name>
+			<description>4
+Only slightly green</description>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34129198012571,-12.69450447570007,0 28.34129126463347,-12.69456605218497,0 28.34132130870796,-12.6946084469766,0 28.34142490167568,-12.69459950349469,0 28.34141275304248,-12.69443885368106,0 28.34126732696854,-12.69446023363513,0 28.34129198012571,-12.69450447570007,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_20_10.8.2023</name>
+			<description>3
+Only slightly green</description>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34146667027436,-12.69480656196235,0 28.34159278319265,-12.69476949961493,0 28.34153368594603,-12.69437654535704,0 28.34141083764704,-12.69438991574025,0 28.34146667027436,-12.69480656196235,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_20_10.6.2022</name>
+			<description>4
+Only slightly green</description>
+			<styleUrl>#msn_ylw-pushpin2</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34185665997989,-12.69458775272334,0 28.34204664899475,-12.69453677398909,0 28.34203424455821,-12.69442400690485,0 28.34192957649769,-12.69439052432891,0 28.34190357902756,-12.69430015665904,0 28.34177820030469,-12.69432677734559,0 28.34185665997989,-12.69458775272334,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_22_7.4.2018</name>
+			<description>3
+May naturally be green</description>
+			<styleUrl>#msn_ylw-pushpin2</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							26.46572848778005,-12.27621751023795,0 26.46590870930912,-12.27621444749372,0 26.46587881624495,-12.27603616980851,0 26.46571705362122,-12.27603807753784,0 26.46572848778005,-12.27621751023795,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
 			<name>ps_7_9.12.2017</name>
 			<description>4
 Only slightly green</description>
@@ -141,6 +279,21 @@ Only slightly green</description>
 					<LinearRing>
 						<coordinates>
 							27.50598083283135,-14.89387594957836,0 27.50652067359812,-14.89387536960066,0 27.50649636562081,-14.89386323067896,0 27.50647681340572,-14.89365164453351,0 27.50594189034463,-14.89367762630709,0 27.50598083283135,-14.89387594957836,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_20_10.8.2023</name>
+			<description>5</description>
+			<styleUrl>#msn_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.34207940510947,-12.6945869035008,0 28.34225819244896,-12.69453259096404,0 28.34223401011561,-12.6944285627331,0 28.34238752847627,-12.69438832318886,0 28.34235738843673,-12.69423106912632,0 28.34209280458372,-12.69428250577114,0 28.3420295854372,-12.69435222919465,0 28.34207940510947,-12.6945869035008,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
