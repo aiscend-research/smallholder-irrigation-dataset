@@ -12,7 +12,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-#get datamodule function 
+#get datamodule function for terratorch example dataset
 def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2, n_timesteps: int = 3):
     datamodule = MultiTemporalCropClassificationDataModule(
         batch_size=batch_size,
@@ -36,43 +36,52 @@ def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2,
 #function to flatten tensors to a more "tabular" format
 def flatten_dataset(dataset, ignore_index=-1):
     """
-    Flattens multi-temporal dataset for sklearn models.
-    Supports both single-band and multi-band masks.
+    Flattens a multi-temporal crop dataset for ML.
+    Returns all image features and all mask bands (single/multi).
+
+    Args:
+        dataset: PyTorch Dataset where each sample is a dict:
+            'image': Tensor (C, T, H, W)
+            'mask' : Tensor (H, W) or (B, H, W)
+        ignore_index: Mask value to skip
 
     Returns:
-        X: np.ndarray of shape (N, T*C)
-        y: np.ndarray of shape (N,) for single-band or (N, B) for multi-band
+        X: np.ndarray, shape (N, C*T)
+        y: np.ndarray, shape (N,) or (N, B)
     """
     X_list = []
     y_list = []
 
     for sample in tqdm(dataset, desc="Flattening dataset"):
-        image = sample['image']  # shape: (C, T, H, W)
-        mask = sample['mask']    # shape: (H, W) or (B, H, W)
+        image = sample['image']  # (C, T, H, W)
+        mask = sample['mask']    # (H, W) or (B, H, W)
 
         C, T, H, W = image.shape
         image = image.permute(2, 3, 1, 0)  # (H, W, T, C)
-        image = image.reshape(H * W, T * C)
+        image_flat = image.reshape(H * W, T * C)
 
-        # Handle mask flattening
+        # Handle mask: always return all bands
         if mask.ndim == 2:
-            mask_flat = mask.reshape(H * W)
-            valid = mask_flat != ignore_index
-            y_valid = mask_flat[valid].numpy()
+            mask_flat = mask.reshape(H * W, 1)  # (N, 1) for consistency
         elif mask.ndim == 3:
             B = mask.shape[0]
-            mask_flat = mask.permute(1, 2, 0).reshape(H * W, B)  # (H*W, B)
-            valid = ~torch.any(mask_flat == ignore_index, dim=1)  # Exclude rows where *any* band is ignore_index
-            y_valid = mask_flat[valid].numpy()
+            mask_flat = mask.permute(1, 2, 0).reshape(H * W, B)  # (N, B)
         else:
-            raise ValueError(f"Unsupported mask shape: {mask.shape}")
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
 
-        X_valid = image[valid].numpy()
+        # Validity: ignore if *any* band is ignore_index in that pixel
+        valid = ~np.any(mask_flat.numpy() == ignore_index, axis=1)
+        X_valid = image_flat[valid].numpy()
+        y_valid = mask_flat[valid].numpy()
 
         X_list.append(X_valid)
         y_list.append(y_valid)
 
     X = np.concatenate(X_list, axis=0)
     y = np.concatenate(y_list, axis=0)
+
+    # If only one mask band, squeeze to (N,)
+    if y.shape[1] == 1:
+        y = y.squeeze(1)
 
     return X, y
