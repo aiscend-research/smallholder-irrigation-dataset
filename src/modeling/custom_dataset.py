@@ -60,11 +60,15 @@ class MultiTemporalCropDataset(Dataset):
             image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
                 If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
 
-        Note:
-            Expects image files to be named like 'image_*.tif' and corresponding mask files to be named like 'mask_*.tif'.
-            The sample names are derived from image filenames by removing the extension, and mask filenames are expected
-            to match after replacing 'image' with 'mask' in the filename.
-            Use image_band_names to select specific bands by name or index from the 14 bands.
+        This dataset finds all .tif files in image_dir and label_dir, extracts unique IDs from filenames
+        (for images: last underscore-separated field before '.tif'; for masks: first underscore-separated field),
+        and only keeps pairs that have both an image and a mask for the same unique ID.
+        It stores lists of paired image filenames, mask filenames, and integer unique IDs.
+
+        When fetching a sample, returns a dict with:
+            "image": Tensor of shape (bands, timesteps, H, W)
+            "mask": Tensor of shape (B, H, W) or (H, W)
+            "unique_id": Tensor of shape (H, W) filled with the integer unique ID of the sample
         """
         self.image_dir = image_dir
         self.label_dir = label_dir
@@ -74,24 +78,57 @@ class MultiTemporalCropDataset(Dataset):
         self.image_band_count = self.num_bands * self.num_timesteps  # = 518
         self.image_band_names = image_band_names
 
-        # Automatically get list of all sample base names (no extension)
-        self.sample_names = [
-            os.path.splitext(os.path.basename(f))[0]
-            for f in glob.glob(os.path.join(self.image_dir, "image_*.tif"))
-        ]
+        # Find all image and label .tif files
+        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*.tif")))
+        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*.tif")))
+
+        # Extract unique IDs for images: last underscore-separated field before .tif
+        image_id_to_file = {}
+        for f in image_files:
+            base = os.path.splitext(os.path.basename(f))[0]
+            parts = base.split('_')
+            if len(parts) < 2:
+                continue
+            unique_id = parts[-1]
+            image_id_to_file[unique_id] = f
+
+        # Extract unique IDs for masks: first underscore-separated field
+        mask_id_to_file = {}
+        for f in label_files:
+            base = os.path.splitext(os.path.basename(f))[0]
+            parts = base.split('_')
+            if len(parts) < 1:
+                continue
+            unique_id = parts[0]
+            mask_id_to_file[unique_id] = f
+
+        # Find intersection of IDs that have both image and mask (matching by unique_id)
+        paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
+        # Store lists of paired image filenames, mask filenames, and integer unique IDs
+        self.paired_image_files = []
+        self.paired_mask_files = []
+        self.paired_unique_ids = []
+        for i, uid in enumerate(paired_ids):
+            self.paired_image_files.append(image_id_to_file[uid])
+            self.paired_mask_files.append(mask_id_to_file[uid])
+            self.paired_unique_ids.append(int(uid) if uid.isdigit() else i)
 
     def __len__(self):
-        return len(self.sample_names)
+        return len(self.paired_image_files)
 
     def __getitem__(self, idx):
-        # Only use image files that start with 'image_'
-        sample_name = self.sample_names[idx]
-        if not sample_name.startswith('image_'):
-            raise ValueError(f"Sample name {sample_name} is not a valid image file. It should start with 'image_'.")
-        image_path = os.path.join(self.image_dir, f"{sample_name}.tif")
-        # Find the corresponding mask file
-        mask_sample_name = sample_name.replace('image_', 'mask_', 1)
-        label_path = os.path.join(self.label_dir, f"{mask_sample_name}.tif")
+        """
+        Args:
+            idx (int): Index of the sample.
+        Returns:
+            dict with:
+                "image": Tensor of shape (bands, timesteps, H, W)
+                "mask": Tensor of shape (B, H, W) or (H, W)
+                "unique_id": Tensor of shape (H, W) filled with the integer unique ID
+        """
+        image_path = self.paired_image_files[idx]
+        label_path = self.paired_mask_files[idx]
+        unique_id = self.paired_unique_ids[idx]
 
         # Load Sentinel-2 image
         with rasterio.open(image_path) as src:
@@ -115,9 +152,11 @@ class MultiTemporalCropDataset(Dataset):
             else:
                 mask_tensor = torch.from_numpy(mask_array).long()      # (B, H, W)
 
+        unique_id_tensor = torch.full(mask_tensor.shape[-2:], fill_value=unique_id, dtype=torch.long)
         return {
             "image": image_tensor,
-            "mask": mask_tensor
+            "mask": mask_tensor,
+            "unique_id": unique_id_tensor
         }
 
     @staticmethod 
@@ -251,10 +290,11 @@ class MultiTemporalCropDataset(Dataset):
         plt.show()     
 
 
+
 #---testing code---
-# --- 1. Setup paths and sample list ---
-image_dir = "multi-temporal-crop-classification-subset/image"  
-label_dir = "multi-temporal-crop-classification-subset/mask"
+#--- 1. Setup paths and sample list ---
+image_dir = "multi-temporal-crop-classification-subset/test_unique_id"  
+label_dir = "multi-temporal-crop-classification-subset/test_unique_id"
 
 # --- 2. Instantiate dataset ---
 dataset = MultiTemporalCropDataset(
@@ -263,16 +303,20 @@ dataset = MultiTemporalCropDataset(
     label_bands=list(range(1, 9)),  # or [1], [2], etc.
 )
 
-# --- 3. Fetch one sample and print shapes ---
-# sample = dataset[0]
-# image, mask = sample["image"], sample["mask"]
+#--- 3. Fetch one sample and print shapes ---
+sample = dataset[0]
+image, mask, unique_id = sample["image"], sample["mask"], sample["unique_id"]
 
-# print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
-# print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
+print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
+print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
+print("Unique_id Tensor:",  unique_id.shape)
+print(unique_id)
 
-# print("Image stats: min =", image.min().item(), "max =", image.max().item())
-# print("Mask unique values:", torch.unique(mask))
+print("Image stats: min =", image.min().item(), "max =", image.max().item())
+print("Mask unique values:", torch.unique(mask))
 
-# # --- Visualize all 8 mask bands ---
-# MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
-# MultiTemporalCropDataset.plot_all_bands_at_time(image)
+
+
+# --- Visualize all 8 mask bands ---
+MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
+MultiTemporalCropDataset.plot_all_bands_at_time(image)

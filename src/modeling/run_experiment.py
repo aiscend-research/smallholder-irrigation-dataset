@@ -88,6 +88,25 @@ def run_experiment(exp_cfg, config_path):
 
             # Predict and evaluate
             y_pred = clf.predict(X_val)
+
+            #reshape y_pred to original tensor shape for post-hoc 
+            # sample = val_dataset[0]
+            # H, W = sample['mask'].shape[-2:]
+
+            # mask = sample['mask']
+            # if mask.ndim == 2:
+            #     mask_flat = mask.reshape(H * W)
+            #     valid_mask = mask_flat != -1
+            # elif mask.ndim == 3:
+            #     mask_flat = mask.permute(1, 2, 0).reshape(H * W, mask.shape[0])
+            #     valid_mask = ~np.any(mask_flat == -1, axis=1)
+            # else:
+            #     raise ValueError("Unexpected mask shape.")
+
+            # full_pred = np.full((H * W, 2), fill_value=-1, dtype=y_pred.dtype)
+            # full_pred[valid_mask] = y_pred
+            # y_pred_reshaped = full_pred.reshape(H, W, 2)
+
             metrics = model_metrics(y_pred, y_val)
             with open(metrics_path, "w") as f:
                 json.dump(metrics, f, indent=2)
