@@ -5,10 +5,10 @@ import json
 import shutil
 from datetime import datetime
 from joblib import dump
-from ml_pipeline.build_features import get_datamodule ,flatten_dataset
 from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
-from ml_pipeline.visualization import print_confusion_matix, plot_ml_predictions
+from ml_pipeline.visualization import plot_ml_predictions
+from custom_dataset import MultiTemporalCropDataset
 
 #In order to access the get_data_root function form utils 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -53,25 +53,29 @@ def run_experiment(exp_cfg, config_path):
             print(f"[{timestamp}] Starting experiment: {base_name}")
             print(f"Saving outputs to: {experiment_dir}")
 
-            # Load and prepare data
-            #dataset_path = os.path.join(get_data_root(), "modeling", "test") #for data on the cluster 
-            dataset_path = exp_cfg["data"]["dataset_path"]
-            train_size = exp_cfg["data"].get("train_subset_size", None) # Default to use all data
-            val_size = exp_cfg["data"].get("val_subset_size", None)
+            # Prepare data
+            train_dir = exp_cfg["data"]["train_dir"]
+            val_dir = exp_cfg["data"]["val_dir"]
 
-            datamodule = get_datamodule(dataset_path)
-            datamodule.setup("fit")
-            train_dataset = datamodule.train_dataset
-            datamodule.setup("val")
-            val_dataset = datamodule.val_dataset # Because this is an experiment, we only want to use validation data
+            train_dataset = MultiTemporalCropDataset(
+                image_dir=train_dir,
+                label_dir=train_dir,
+                label_bands=exp_cfg["data"]["label_bands"]
+            )
+            val_dataset = MultiTemporalCropDataset(
+                image_dir=val_dir,
+                label_dir=val_dir,
+                label_bands=exp_cfg["data"]["label_bands"]
+            )
 
-            X_train, y_train = flatten_dataset(train_dataset) # Warning -- this will need to be changed for models that don't use flattened data
+            from ml_pipeline.build_features import flatten_dataset
+            X_train, y_train = flatten_dataset(train_dataset)
             X_val, y_val = flatten_dataset(val_dataset)
 
-            if train_size:
-                X_train, y_train = X_train[:train_size], y_train[:train_size]
-            if val_size:
-                X_val, y_val = X_val[:val_size], y_val[:val_size]
+            # Select only first two label bands for ML training/validation
+            # This restricts ML training to the first two bands, reserving other bands for post-hoc analysis
+            y_train = y_train[:, :2]
+            y_val = y_val[:, :2]
 
             # Train model
             model_type = exp_cfg["model"]["type"].lower()
@@ -85,21 +89,15 @@ def run_experiment(exp_cfg, config_path):
             # Predict and evaluate
             y_pred = clf.predict(X_val)
             metrics = model_metrics(y_pred, y_val)
-            metrics_dict = {
-                        "accuracy": metrics[0],
-                        "f1_score": metrics[1]}
             with open(metrics_path, "w") as f:
-                json.dump(metrics_dict, f, indent=2)
+                json.dump(metrics, f, indent=2)
             print("Metrics:", metrics)
 
             # Visualization
-            class_names = train_dataset.class_names
-            colors = exp_cfg["visualization"]["colors"]
             num_samples = exp_cfg["visualization"].get("num_samples", 2)
 
-            print_confusion_matix(y_val, y_pred)
             plot_ml_predictions(
-                val_dataset, clf, class_names, colors,
+                val_dataset, clf,
                 num_samples=num_samples, save_path=visualization_path
             )
             print(f"[{timestamp}] Experiment complete.")

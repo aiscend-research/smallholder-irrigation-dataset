@@ -2,9 +2,10 @@ name: "rf_baseline"
 
 data:
   dataset_path: "multi-temporal-crop-classification-subset"
-  train_subset_size: 1000 #subseting a 1000 pixels
-  test_subset_size: 1000
-  val_subset_size: 1000
+  train_dir: "multi-temporal-crop-classification-subset/training"
+  val_dir: "multi-temporal-crop-classification-subset/validation"
+  label_bands: [1,2]
+  image_bands: ["EVI"] # e.g. ["B2", "B3"]
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
@@ -24,20 +25,6 @@ model:
       random_state: 42
 
 visualization:
-  colors:
-    - "#0000FF"
-    - "#000088"
-    - "#00FF00"
-    - "#00FFFF"
-    - "#006600"
-    - "#A9A9A9"
-    - "#3399FF"
-    - "#FFFF00"
-    - "#FFCC00"
-    - "#FFA500"
-    - "#FF0000"
-    - "#990000"
-    - "#800000"
   num_samples: 2
 
 output:
