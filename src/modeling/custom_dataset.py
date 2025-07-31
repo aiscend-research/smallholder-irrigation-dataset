@@ -1,5 +1,6 @@
 import os
 import torch
+import glob
 import numpy as np
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
@@ -8,29 +9,40 @@ from matplotlib.colors import ListedColormap, BoundaryNorm
 import rasterio
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir, label_dir, sample_file_list, label_bands=list(range(1, 9))):
+    def __init__(self, image_dir, label_dir, label_bands=list(range(1, 9))):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
             label_dir (str): Path to directory containing label .tif files.
-            sample_file_list (list of str): List of sample base filenames (no extension).
-            label_bands (list of int): List of band indices (1-based) from the 8-band label .tif to use as target(s).
+            label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
+
+        Note:
+            Expects image files to be named like 'image_*.tif' and corresponding mask files to be named like 'mask_*.tif'.
+            The sample names are derived from image filenames by removing the extension, and mask filenames are expected
+            to match after replacing 'image' with 'mask' in the filename.
         """
         self.image_dir = image_dir
         self.label_dir = label_dir
-        self.sample_file_list = sample_file_list
         self.label_bands = label_bands
         self.num_bands = 14
         self.num_timesteps = 37
         self.image_band_count = self.num_bands * self.num_timesteps  # = 518
 
+        # Automatically get list of all sample base names (no extension)
+        self.sample_names = [
+            os.path.splitext(os.path.basename(f))[0]
+            for f in glob.glob(os.path.join(self.image_dir, "*.tif"))
+        ]
+
     def __len__(self):
-        return len(self.sample_file_list)
+        return len(self.sample_names)
 
     def __getitem__(self, idx):
-        sample_name = self.sample_file_list[idx]
+        sample_name = self.sample_names[idx]
         image_path = os.path.join(self.image_dir, f"{sample_name}.tif")
-        label_path = os.path.join(self.label_dir, f"{sample_name}.tif")
+        # Replace 'image' with 'mask' in sample_name to get mask filename
+        mask_sample_name = sample_name.replace('image', 'mask', 1)
+        label_path = os.path.join(self.label_dir, f"{mask_sample_name}.tif")
 
         # Load Sentinel-2 image
         with rasterio.open(image_path) as src:
@@ -124,6 +136,10 @@ class MultiTemporalCropDataset(Dataset):
             'Blues', 'Greens', 'Reds', 'Oranges', 'Purples', 'Greys', 'cividis',
             'YlGn', 'YlOrBr', 'PuRd', 'viridis', 'plasma', 'magma', 'cubehelix'
         ]
+        band_names = [
+        "B2", "B3", "B4", "B5", "B6", "B7", "B8",
+        "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"
+        ]  
         if band_cmaps is None:
             band_cmaps = default_cmaps
         if band_names is None:
@@ -144,12 +160,7 @@ class MultiTemporalCropDataset(Dataset):
             ax.axis('off')
         plt.tight_layout()
         plt.show()
-
-    # Usage example:
-    band_names = [
-        "B2", "B3", "B4", "B5", "B6", "B7", "B8",
-        "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"
-    ]    
+      
 
     @staticmethod
     def plot_band_over_time(image_tensor, band_idx=0, band_name=None, time_indices=None):
@@ -188,29 +199,27 @@ class MultiTemporalCropDataset(Dataset):
 
 
 #---testing code---
-# --- 1. Setup paths and sample list ---
-image_dir = "multi-temporal-crop-classification-subset"  
-label_dir = "multi-temporal-crop-classification-subset"
-sample_file_list = ["image_test"]  # No .tif extension
+# # --- 1. Setup paths and sample list ---
+# image_dir = "multi-temporal-crop-classification-subset/image"  
+# label_dir = "multi-temporal-crop-classification-subset/mask"
 
-# --- 2. Instantiate dataset ---
-dataset = MultiTemporalCropDataset(
-    image_dir=image_dir,
-    label_dir=label_dir,
-    sample_file_list=sample_file_list,
-    label_bands=list(range(1, 9)),  # or [1], [2], etc.
-)
+# # --- 2. Instantiate dataset ---
+# dataset = MultiTemporalCropDataset(
+#     image_dir=image_dir,
+#     label_dir=label_dir,
+#     label_bands=list(range(1, 9)),  # or [1], [2], etc.
+# )
 
-# --- 3. Fetch one sample and print shapes ---
-sample = dataset[0]
-image, mask = sample["image"], sample["mask"]
+# # --- 3. Fetch one sample and print shapes ---
+# sample = dataset[0]
+# image, mask = sample["image"], sample["mask"]
 
-print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
-print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
+# print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
+# print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
 
-print("Image stats: min =", image.min().item(), "max =", image.max().item())
-print("Mask unique values:", torch.unique(mask))
+# print("Image stats: min =", image.min().item(), "max =", image.max().item())
+# print("Mask unique values:", torch.unique(mask))
 
-# --- Visualize all 8 mask bands ---
-#MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
-MultiTemporalCropDataset.plot_all_bands_at_time(image)
+# # --- Visualize all 8 mask bands ---
+# MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
+# MultiTemporalCropDataset.plot_all_bands_at_time(image)
