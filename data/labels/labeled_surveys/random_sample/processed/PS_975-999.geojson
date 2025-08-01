@@ -981,6 +981,55 @@
     {
       "type": "Feature",
       "properties": {
+        "name": "ps_10_7.1.2023",
+        "operator_initials": "PS",
+        "internal_id": 10,
+        "month": 7,
+        "day": 1,
+        "year": 2023,
+        "certainty": 3,
+        "uncertainty_explanation": "only slightly green",
+        "category": "small-scale"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              27.02041488263954,
+              -14.56183043034514
+            ],
+            [
+              27.02028709831164,
+              -14.56176588467811
+            ],
+            [
+              27.02023255344731,
+              -14.5618467172723
+            ],
+            [
+              27.02031891678563,
+              -14.56188681620812
+            ],
+            [
+              27.02030379149158,
+              -14.56193085751331
+            ],
+            [
+              27.02038560034307,
+              -14.56195426828317
+            ],
+            [
+              27.02041488263954,
+              -14.56183043034514
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
         "name": "ps_7_9.12.2017",
         "operator_initials": "PS",
         "internal_id": 7,

@@ -1,2 +1,1 @@
-Row 13 (internal_id 7, 13/9/2017): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
-Row 18 (internal_id 10, 1/7/2023): survey marked irrigation 3 (possible irrigation) but no matching polygons found.
+All checks passed successfully.

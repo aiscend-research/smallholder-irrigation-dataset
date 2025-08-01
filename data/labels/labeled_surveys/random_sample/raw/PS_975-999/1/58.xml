@@ -1,5 +1,5 @@
 <?xml version='1.0' standalone='yes' ?>
-<plot step="1" created="2025-07-22T12:39:34.127+02:00" modified="2025-08-01T11:51:11.442+02:00">
+<plot step="1" created="2025-07-22T12:39:34.127+02:00" modified="2025-08-01T12:10:55.279+02:00">
   <id>
     <value>id_5162622</value>
   </id>
@@ -46,7 +46,7 @@
     <value>13</value>
   </day2>
   <irrigation2>
-    <code>4</code>
+    <code>5</code>
   </irrigation2>
   <uncertainty_reason2 />
   <year3>
