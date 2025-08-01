@@ -199,3 +199,4 @@ secrets/earthengine-key.json
 
 .RData
 .Rhistory
+data/labels/labeled_surveys/random_sample/images_districts_ag.csv
