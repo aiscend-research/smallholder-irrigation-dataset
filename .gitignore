@@ -183,6 +183,7 @@ src/modeling/prototyping.ipynb
 .ipynb_checkpoints/
 *.tar.gz
 *.zip
+!data/labels/labeled_surveys/random_sample/raw/*.zip
 *.pkl
 models/
 experiments/
