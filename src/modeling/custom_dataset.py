@@ -138,6 +138,7 @@ class MultiTemporalCropDataset(Dataset):
             image_tensor = torch.from_numpy(full_array).float()
             H, W = image_tensor.shape[1:]
             image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
+            # Convert -9999 values to NaN in image tensor
             image_tensor[image_tensor == -9999] = float('nan')
 
         if self.image_band_names is not None:
@@ -148,9 +149,13 @@ class MultiTemporalCropDataset(Dataset):
         with rasterio.open(label_path) as label_src:
             mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
             if mask_array.shape[0] == 1:
-                mask_tensor = torch.from_numpy(mask_array[0]).long()  # (H, W)
+                mask_tensor = torch.from_numpy(mask_array[0]).float()  # convert to float for NaN
+                # Convert -9999 values to NaN in mask tensor
+                mask_tensor[mask_tensor == -9999] = float('nan')
             else:
-                mask_tensor = torch.from_numpy(mask_array).long()      # (B, H, W)
+                mask_tensor = torch.from_numpy(mask_array).float()      # convert to float for NaN
+                # Convert -9999 values to NaN in mask tensor
+                mask_tensor[mask_tensor == -9999] = float('nan')
 
         unique_id_tensor = torch.full(mask_tensor.shape[-2:], fill_value=unique_id, dtype=torch.long)
         return {

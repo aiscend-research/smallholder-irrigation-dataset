@@ -34,7 +34,7 @@ from tqdm import tqdm
 
 
 #function to flatten tensors to a more "tabular" format
-def flatten_dataset(dataset, ignore_index=-1, ignore_value_in_image=None):
+def flatten_dataset(dataset, ignore_value_in_image=None):
     """
     Flattens a multi-temporal crop dataset for ML.
     Returns all image features and all mask bands (single/multi).
@@ -43,12 +43,14 @@ def flatten_dataset(dataset, ignore_index=-1, ignore_value_in_image=None):
         dataset: PyTorch Dataset where each sample is a dict:
             'image': Tensor (C, T, H, W)
             'mask' : Tensor (H, W) or (B, H, W)
-        ignore_index: Mask value to skip
         ignore_value_in_image: Optional value in image pixels to ignore (e.g., -9999 for clouds)
 
     Returns:
         X: np.ndarray, shape (N, C*T)
         y: np.ndarray, shape (N,) or (N, B)
+
+    Notes:
+        Pixels where either the mask or image contains NaN in any band are filtered out.
     """
     X_list = []
     y_list = []
@@ -70,14 +72,10 @@ def flatten_dataset(dataset, ignore_index=-1, ignore_value_in_image=None):
         else:
             raise ValueError(f"Unexpected mask shape: {mask.shape}")
 
-        # Validity: ignore if *any* band is ignore_index in that pixel
-        valid_mask = ~np.any(mask_flat.numpy() == ignore_index, axis=1)
-
-        if ignore_value_in_image is not None:
-            valid_image = ~np.any(image_flat.numpy() == ignore_value_in_image, axis=1)
-            valid = valid_mask & valid_image
-        else:
-            valid = valid_mask
+        # Validity: filter out pixels where mask or image contain NaN in any band
+        mask_nan = np.isnan(mask_flat.numpy())
+        image_nan = np.isnan(image_flat.numpy())
+        valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
 
         X_valid = image_flat[valid].numpy()
         y_valid = mask_flat[valid].numpy()
