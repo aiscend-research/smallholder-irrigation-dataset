@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
 <Document>
-	<name>PS_975-999 V1.kml</name>
+	<name>PS_975-999V1.kml</name>
 	<StyleMap id="msn_ylw-pushpin">
 		<Pair>
 			<key>normal</key>
@@ -564,6 +564,22 @@ Unclear signs of agriculture</description>
 					<LinearRing>
 						<coordinates>
 							27.50588732542877,-14.89343994637525,0 27.50595893392224,-14.89361448429239,0 27.50618684360703,-14.89360516557608,0 27.50617575295503,-14.89319904854622,0 27.50599100367318,-14.89318660589058,0 27.50588732542877,-14.89343994637525,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_10_7.1.2023</name>
+			<description>3
+Only slightly green</description>
+			<styleUrl>#msn_ylw-pushpin3</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							27.02041488263954,-14.56183043034514,0 27.02028709831164,-14.56176588467811,0 27.02023255344731,-14.5618467172723,0 27.02031891678563,-14.56188681620812,0 27.02030379149158,-14.56193085751331,0 27.02038560034307,-14.56195426828317,0 27.02041488263954,-14.56183043034514,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>

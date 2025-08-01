@@ -1,5 +1,5 @@
 <?xml version='1.0' standalone='yes' ?>
-<plot step="1" created="2025-07-29T11:50:18.237+02:00" modified="2025-07-29T11:50:18.341+02:00">
+<plot step="1" created="2025-07-29T11:50:18.237+02:00" modified="2025-08-01T10:19:41.444+02:00">
   <id>
     <value>id_1035612</value>
   </id>
@@ -12,31 +12,55 @@
     <value>PeterSiame</value>
   </operator>
   <actively_saved>
-    <value>false</value>
+    <value>true</value>
   </actively_saved>
   <actively_saved_on>
     <year>2025</year>
-    <month>7</month>
-    <day>29</day>
+    <month>8</month>
+    <day>1</day>
   </actively_saved_on>
   <plot_file>
     <value>Zambia_0.05_n_975-999.csv</value>
   </plot_file>
-  <year1 />
-  <month1 />
-  <day1 />
+  <year1>
+    <code>2024</code>
+  </year1>
+  <month1>
+    <code>7</code>
+  </month1>
+  <day1>
+    <value>9</value>
+  </day1>
   <day1_mc />
-  <irrigation1 />
+  <irrigation1>
+    <code>1</code>
+  </irrigation1>
   <uncertainty_reason1 />
-  <year2 />
-  <month2 />
-  <day2 />
-  <irrigation2 />
+  <year2>
+    <code>2019</code>
+  </year2>
+  <month2>
+    <code>8</code>
+  </month2>
+  <day2>
+    <value>5</value>
+  </day2>
+  <irrigation2>
+    <code>1</code>
+  </irrigation2>
   <uncertainty_reason2 />
-  <year3 />
-  <month3 />
-  <day3 />
-  <irrigation3 />
+  <year3>
+    <code>2016</code>
+  </year3>
+  <month3>
+    <code>8</code>
+  </month3>
+  <day3>
+    <value>1</value>
+  </day3>
+  <irrigation3>
+    <code>1</code>
+  </irrigation3>
   <uncertainty_reason3 />
   <year4 />
   <month4 />
@@ -63,7 +87,9 @@
   <day8 />
   <irrigation8 />
   <uncertainty_reason8 />
-  <natural_dicoloration />
+  <natural_dicoloration>
+    <value>true</value>
+  </natural_dicoloration>
   <year9 />
   <month9 />
   <day9 />
