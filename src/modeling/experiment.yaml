@@ -7,6 +7,16 @@ data:
   label_bands: [1,2]
   image_bands: ["EVI"] # e.g. ["B2", "B3"]
 
+  # time_step_selection: Specify which time steps to use from the image tensor.
+  # For example:
+  #   [1, 6, 10]         # Select only time steps 1, 6, and 10, in that order.
+  #   [[1,10], 18, [36,37,1]]  # Create 3 output time bands:
+  #      - the first is the average of time steps 1 to 10 (inclusive),
+  #      - the second is just time step 18,
+  #      - the third is the average of time steps 36, 37, and 1.
+  # If not specified or set to null, all time steps will be used as-is.
+  time_step_selection: null
+
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
   # Only the hyperparameters corresponding to the above model type will be used in the experiement designation
