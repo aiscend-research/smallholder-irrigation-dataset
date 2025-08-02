@@ -51,7 +51,7 @@ def get_band_indices(band_names):
     return indices
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir, label_dir, label_bands=list(range(1, 9)), image_band_names=None):
+    def __init__(self, image_dir, label_dir, label_bands=list(range(1, 9)), image_band_names=None, time_step_selection=None):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
@@ -59,6 +59,11 @@ class MultiTemporalCropDataset(Dataset):
             label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
             image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
                 If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
+            time_step_selection (list, optional): If set, a list where each element is either
+                - int: selects that time step (0-based)
+                - list of ints: averages those time steps.
+                Example: [0, [1,2,3], 4] => output will have three time slices per band:
+                    1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
 
         This dataset finds all .tif files in image_dir and label_dir, extracts unique IDs from filenames
         (for images: last underscore-separated field before '.tif'; for masks: first underscore-separated field),
@@ -75,8 +80,9 @@ class MultiTemporalCropDataset(Dataset):
         self.label_bands = label_bands
         self.num_bands = 14
         self.num_timesteps = 37
-        self.image_band_count = self.num_bands * self.num_timesteps  # = 518
+        self.image_band_count = self.num_bands * self.num_timesteps  # = default: 518
         self.image_band_names = image_band_names
+        self.time_step_selection = time_step_selection
 
         # Find all image and label .tif files
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*.tif")))
@@ -140,6 +146,18 @@ class MultiTemporalCropDataset(Dataset):
             image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
             # Convert -9999 values to NaN in image tensor
             image_tensor[image_tensor == -9999] = float('nan')
+
+        # --- Time step selection/averaging ---
+        if self.time_step_selection is not None:
+            selected = []
+            for sel in self.time_step_selection:
+                if isinstance(sel, int):
+                    selected.append(image_tensor[:, sel:sel+1, :, :])  # (C, 1, H, W)
+                elif isinstance(sel, list):
+                    selected.append(image_tensor[:, sel, :, :].mean(dim=1, keepdim=True))  # (C, 1, H, W)
+                else:
+                    raise ValueError(f"time_step_selection element must be int or list, got {type(sel)}")
+            image_tensor = torch.cat(selected, dim=1)  # (C, S, H, W) where S=len(selection)
 
         if self.image_band_names is not None:
             band_indices = get_band_indices(self.image_band_names)
