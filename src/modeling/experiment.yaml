@@ -1,9 +1,9 @@
 name: "rf_baseline"
 
 data:
-  dataset_path: "multi-temporal-crop-classification-subset"
-  train_dir: "multi-temporal-crop-classification-subset/training"
-  val_dir: "multi-temporal-crop-classification-subset/validation"
+  data_dir: "../../data/modeling"
+  train_files: ["site_-15.04_26.69_2023_1"]
+  val_files: ["site_-15.04_26.69_2023_1"]
   label_bands: [1,2]
   image_bands: ["EVI"] # e.g. ["B2", "B3"]
 

@@ -1,36 +1,55 @@
-import os
-import sys
-import torch
-import gdown
-import terratorch
-import albumentations
-import lightning.pytorch as pl
-import matplotlib.pyplot as plt
-from terratorch.datamodules import MultiTemporalCropClassificationDataModule
-import warnings
 import numpy as np
 from tqdm import tqdm
 
 
-#get datamodule function for terratorch example dataset
-# def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2, n_timesteps: int = 3):
-#     datamodule = MultiTemporalCropClassificationDataModule(
-#         batch_size=batch_size,
-#         num_workers=num_workers,
-#         data_root=dataset_path,
-#         train_transform=[
-#             terratorch.datasets.transforms.FlattenTemporalIntoChannels(),  # Required for temporal data
-#             albumentations.D4(), # Random flips and rotation
-#             albumentations.pytorch.transforms.ToTensorV2(),
-#             terratorch.datasets.transforms.UnflattenTemporalFromChannels(n_timesteps=3),
-#         ],
-#         val_transform=None,
-#         test_transform=None,
-#         expand_temporal_dimension=True,
-#         use_metadata=False,
-#         reduce_zero_label=True,
-#     )
-#     return datamodule
+def get_datasets(data_dir: str, train_files: list, val_files: list = None, test_files: list = None,
+                 label_bands: list = None):
+    """
+    Get custom datasets for irrigation classification.
+    
+    Args:
+        data_dir: Path to the data directory containing .tif and .json files
+        train_files: List of training sample filenames (without extension)
+        val_files: List of validation sample filenames (without extension)
+        test_files: List of test sample filenames (without extension)
+        label_bands: List of label band indices to use (1-based, default: [1,2])
+    
+    Returns:
+        dict: Contains 'train_dataset', 'val_dataset', 'test_dataset' (if provided)
+    """
+    # Import here to avoid circular imports
+    from custom_dataset import MultiTemporalCropDataset
+    
+    # Set default label bands if not provided
+    if label_bands is None:
+        label_bands = [1, 2]
+    
+    datasets = {}
+    
+    # Create train dataset
+    datasets['train_dataset'] = MultiTemporalCropDataset(
+        data_dir=data_dir,
+        sample_file_list=train_files,
+        label_bands=label_bands
+    )
+    
+    # Create validation dataset if provided
+    if val_files:
+        datasets['val_dataset'] = MultiTemporalCropDataset(
+            data_dir=data_dir,
+            sample_file_list=val_files,
+            label_bands=label_bands
+        )
+    
+    # Create test dataset if provided
+    if test_files:
+        datasets['test_dataset'] = MultiTemporalCropDataset(
+            data_dir=data_dir,
+            sample_file_list=test_files,
+            label_bands=label_bands
+        )
+    
+    return datasets
 
 
 #function to flatten tensors to a more "tabular" format

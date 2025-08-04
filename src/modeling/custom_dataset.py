@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import torch
 import glob
 import numpy as np
@@ -73,12 +75,12 @@ class MultiTemporalCropDataset(Dataset):
         When fetching a sample, returns a dict with:
             "image": Tensor of shape (bands, timesteps, H, W)
             "mask": Tensor of shape (B, H, W) or (H, W)
-            "unique_id": Tensor of shape (H, W) filled with the integer unique ID of the sample
+            "metadata": metadata dict for the sample
         """
         self.image_dir = image_dir
         self.label_dir = label_dir
         self.label_bands = label_bands
-        self.num_bands = 14
+        self.num_bands = 14  # 10 Sentinel-2 + NDVI + EVI + NDWI + SCL
         self.num_timesteps = 37
         self.image_band_count = self.num_bands * self.num_timesteps  # = default: 518
         self.image_band_names = image_band_names
@@ -110,7 +112,6 @@ class MultiTemporalCropDataset(Dataset):
 
         # Find intersection of IDs that have both image and mask (matching by unique_id)
         paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
-        # Store lists of paired image filenames, mask filenames, and integer unique IDs
         self.paired_image_files = []
         self.paired_mask_files = []
         self.paired_unique_ids = []
@@ -123,28 +124,24 @@ class MultiTemporalCropDataset(Dataset):
         return len(self.paired_image_files)
 
     def __getitem__(self, idx):
-        """
-        Args:
-            idx (int): Index of the sample.
-        Returns:
-            dict with:
-                "image": Tensor of shape (bands, timesteps, H, W)
-                "mask": Tensor of shape (B, H, W) or (H, W)
-                "unique_id": Tensor of shape (H, W) filled with the integer unique ID
-        """
         image_path = self.paired_image_files[idx]
-        label_path = self.paired_mask_files[idx]
-        unique_id = self.paired_unique_ids[idx]
+        mask_path = self.paired_mask_files[idx]
 
-        # Load Sentinel-2 image
+        # Load metadata (assume .json with same basename as image)
+        sample_name = os.path.splitext(os.path.basename(image_path))[0]
+        json_path = os.path.join(self.image_dir, f"{sample_name}.json")
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                metadata = json.load(f)
+        else:
+            metadata = {}
+
+        # Load Sentinel-2 time series stack
         with rasterio.open(image_path) as src:
-            full_array = src.read()  # shape: (518+, H, W)
-            if full_array.shape[0] != self.image_band_count:
-                raise ValueError(f"Image file {image_path} has {full_array.shape[0]} bands, expected {self.image_band_count}.")
+            full_array = src.read()  # shape: (518, H, W)
             image_tensor = torch.from_numpy(full_array).float()
             H, W = image_tensor.shape[1:]
             image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
-            # Convert -9999 values to NaN in image tensor
             image_tensor[image_tensor == -9999] = float('nan')
 
         # --- Time step selection/averaging ---
@@ -163,23 +160,19 @@ class MultiTemporalCropDataset(Dataset):
             band_indices = get_band_indices(self.image_band_names)
             image_tensor = image_tensor[band_indices, ...]
 
-        # Load mask (single band or stacked)
-        with rasterio.open(label_path) as label_src:
+        # Load mask (single block, correct naming)
+        with rasterio.open(mask_path) as label_src:
             mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
-            if mask_array.shape[0] == 1:
-                mask_tensor = torch.from_numpy(mask_array[0]).float()  # convert to float for NaN
-                # Convert -9999 values to NaN in mask tensor
-                mask_tensor[mask_tensor == -9999] = float('nan')
-            else:
-                mask_tensor = torch.from_numpy(mask_array).float()      # convert to float for NaN
-                # Convert -9999 values to NaN in mask tensor
-                mask_tensor[mask_tensor == -9999] = float('nan')
+            mask_tensor = torch.from_numpy(mask_array).float()
+            mask_tensor[mask_tensor == -9999] = float('nan')
+            # If only one band, squeeze to (H, W)
+            if mask_tensor.shape[0] == 1:
+                mask_tensor = mask_tensor[0]
 
-        unique_id_tensor = torch.full(mask_tensor.shape[-2:], fill_value=unique_id, dtype=torch.long)
         return {
             "image": image_tensor,
             "mask": mask_tensor,
-            "unique_id": unique_id_tensor
+            "metadata": metadata
         }
 
     @staticmethod 

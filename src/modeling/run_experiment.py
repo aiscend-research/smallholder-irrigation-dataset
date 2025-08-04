@@ -10,9 +10,7 @@ from ml_pipeline.evaluation import model_metrics
 from ml_pipeline.visualization import plot_ml_predictions
 from custom_dataset import MultiTemporalCropDataset
 
-#In order to access the get_data_root function form utils 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils.utils import get_data_root
+
 
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
@@ -54,18 +52,20 @@ def run_experiment(exp_cfg, config_path):
             print(f"Saving outputs to: {experiment_dir}")
 
             # Prepare data
-            train_dir = exp_cfg["data"]["train_dir"]
-            val_dir = exp_cfg["data"]["val_dir"]
+            data_dir = exp_cfg["data"]["data_dir"]
+            train_files = exp_cfg["data"]["train_files"]
+            val_files = exp_cfg["data"]["val_files"]
+            label_bands = exp_cfg["data"]["label_bands"]
 
             train_dataset = MultiTemporalCropDataset(
-                image_dir=train_dir,
-                label_dir=train_dir,
-                label_bands=exp_cfg["data"]["label_bands"]
+                data_dir=data_dir,
+                sample_file_list=train_files,
+                label_bands=label_bands
             )
             val_dataset = MultiTemporalCropDataset(
-                image_dir=val_dir,
-                label_dir=val_dir,
-                label_bands=exp_cfg["data"]["label_bands"]
+                data_dir=data_dir,
+                sample_file_list=val_files,
+                label_bands=label_bands
             )
 
             from ml_pipeline.build_features import flatten_dataset
@@ -123,7 +123,7 @@ def run_experiment(exp_cfg, config_path):
 
         finally:
             sys.stdout = original_stdout
-            print(f"✅ Logged output to {log_path}")
+            print(f"Logged output to {log_path}")
 
 
 if __name__ == "__main__":
