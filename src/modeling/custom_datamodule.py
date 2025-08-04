@@ -1,5 +1,7 @@
+import os
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
+from custom_dataset import MultiTemporalCropDataset
 
 
 class MultiTemporalCropDataModule(LightningDataModule):
@@ -11,8 +13,7 @@ class MultiTemporalCropDataModule(LightningDataModule):
         test_files=None,
         batch_size=4,
         num_workers=0,
-        image_band=1,
-        mask_band=2
+        label_bands=list(range(1, 9))
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -21,24 +22,25 @@ class MultiTemporalCropDataModule(LightningDataModule):
         self.test_files = test_files
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_band = image_band
-        self.mask_band = mask_band
+        self.label_bands = label_bands
+        
+        # Data directory contains both .tif and .json files
+        self.data_dir = data_dir
 
     def setup(self, stage=None):
-        from custom_dataset import MultiTemporalCropDataset
         if stage in (None, "fit"):
             self.train_dataset = MultiTemporalCropDataset(
-                self.data_dir, self.train_files, self.image_band, self.mask_band
+                self.data_dir, self.train_files, self.label_bands
             )
         if stage in (None, "fit", "validate"):
             if self.val_files:
                 self.val_dataset = MultiTemporalCropDataset(
-                    self.data_dir, self.val_files, self.image_band, self.mask_band
+                    self.data_dir, self.val_files, self.label_bands
                 )
         if stage in (None, "test"):
             if self.test_files:
                 self.test_dataset = MultiTemporalCropDataset(
-                    self.data_dir, self.test_files, self.image_band, self.mask_band
+                    self.data_dir, self.test_files, self.label_bands
                 )
 
     def train_dataloader(self):
@@ -52,4 +54,4 @@ class MultiTemporalCropDataModule(LightningDataModule):
     def test_dataloader(self):
         if hasattr(self, "test_dataset"):
             return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-        return None
+        return None 

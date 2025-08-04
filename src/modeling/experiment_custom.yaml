@@ -1,0 +1,54 @@
+name: "rf_baseline_custom"
+
+data:
+  dataset_path: "path/to/your/custom/dataset"  # Update this path
+  train_subset_size: 1000 #subseting a 1000 pixels
+  test_subset_size: 1000
+  val_subset_size: 1000
+  datamodule:
+    type: "custom"  # Using custom datamodule
+    batch_size: 4
+    num_workers: 0
+    # Custom datamodule specific parameters
+    custom_params:
+      train_files: ["site_12.34_56.78_2023_123", "site_12.35_56.79_2023_124", "site_12.36_56.80_2023_125"]  # List of training file names (without .tif extension)
+      val_files: ["site_12.37_56.81_2023_126", "site_12.38_56.82_2023_127"]                               # List of validation file names
+      test_files: ["site_12.39_56.83_2023_128", "site_12.40_56.84_2023_129"]                              # List of test file names
+      label_bands: [1, 2, 3, 4, 5, 6, 7, 8]  # List of label band indices to use (when labels are implemented)
+
+model:
+  type: "random_forest" # options: "gradient_boosting", "random_forest"
+  # Only the hyperparameters corresponding to the above model type will be used in the experiement designation
+  hyperparameters: # ignored if not a random_forest model
+    random_forest: 
+      n_estimators: 100
+      random_state: 42
+    
+    gradient_boosting: # ignored if not a gradient_boosting model
+      n_estimators: 200
+      learning_rate: 0.05
+      max_depth: 4
+      subsample: 0.8
+      min_samples_split: 5
+      min_samples_leaf: 3
+      random_state: 42
+
+visualization:
+  colors:
+    - "#0000FF"
+    - "#000088"
+    - "#00FF00"
+    - "#00FFFF"
+    - "#006600"
+    - "#A9A9A9"
+    - "#3399FF"
+    - "#FFFF00"
+    - "#FFCC00"
+    - "#FFA500"
+    - "#FF0000"
+    - "#990000"
+    - "#800000"
+  num_samples: 2
+
+output:
+  base_dir: "./experiments" 

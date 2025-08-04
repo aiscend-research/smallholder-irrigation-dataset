@@ -53,6 +53,7 @@ def run_experiment(exp_cfg, config_path):
             print(f"[{timestamp}] Starting experiment: {base_name}")
             print(f"Saving outputs to: {experiment_dir}")
 
+<<<<<<< Updated upstream
             # Prepare data
             train_dir = exp_cfg["data"]["train_dir"]
             val_dir = exp_cfg["data"]["val_dir"]
@@ -67,6 +68,36 @@ def run_experiment(exp_cfg, config_path):
                 label_dir=val_dir,
                 label_bands=exp_cfg["data"]["label_bands"]
             )
+=======
+            # Load and prepare data
+            #dataset_path = os.path.join(get_data_root(), "modeling", "test") #for data on the cluster 
+            dataset_path = exp_cfg["data"]["dataset_path"]
+            train_size = exp_cfg["data"].get("train_subset_size", None) # Default to use all data
+            val_size = exp_cfg["data"].get("val_subset_size", None)
+            
+            # Get datamodule configuration
+            datamodule_config = exp_cfg["data"].get("datamodule", {})
+            datamodule_type = datamodule_config.get("type", "terratorch")
+            batch_size = datamodule_config.get("batch_size", 8)
+            num_workers = datamodule_config.get("num_workers", 2)
+            
+            # Get custom datamodule specific parameters if using custom
+            custom_params = {}
+            if datamodule_type == "custom":
+                custom_params = datamodule_config.get("custom_params", {})
+
+            datamodule = get_datamodule(
+                dataset_path, 
+                batch_size=batch_size,
+                num_workers=num_workers,
+                datamodule_type=datamodule_type,
+                **custom_params
+            )
+            datamodule.setup("fit")
+            train_dataset = datamodule.train_dataset
+            datamodule.setup("val")
+            val_dataset = datamodule.val_dataset # Because this is an experiment, we only want to use validation data
+>>>>>>> Stashed changes
 
             from ml_pipeline.build_features import flatten_dataset
             X_train, y_train = flatten_dataset(train_dataset)

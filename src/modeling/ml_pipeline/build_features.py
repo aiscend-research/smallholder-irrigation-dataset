@@ -12,25 +12,60 @@ import numpy as np
 from tqdm import tqdm
 
 
-#get datamodule function for terratorch example dataset
-# def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2, n_timesteps: int = 3):
-#     datamodule = MultiTemporalCropClassificationDataModule(
-#         batch_size=batch_size,
-#         num_workers=num_workers,
-#         data_root=dataset_path,
-#         train_transform=[
-#             terratorch.datasets.transforms.FlattenTemporalIntoChannels(),  # Required for temporal data
-#             albumentations.D4(), # Random flips and rotation
-#             albumentations.pytorch.transforms.ToTensorV2(),
-#             terratorch.datasets.transforms.UnflattenTemporalFromChannels(n_timesteps=3),
-#         ],
-#         val_transform=None,
-#         test_transform=None,
-#         expand_temporal_dimension=True,
-#         use_metadata=False,
-#         reduce_zero_label=True,
-#     )
-#     return datamodule
+#get datamodule function 
+def get_datamodule(dataset_path: str, batch_size: int = 8, num_workers: int = 2, n_timesteps: int = 3, 
+                   datamodule_type: str = "terratorch", **kwargs):
+    """
+    Get datamodule based on specified type.
+    
+    Args:
+        dataset_path: Path to the dataset
+        batch_size: Batch size for dataloaders
+        num_workers: Number of workers for dataloaders
+        n_timesteps: Number of timesteps (for terratorch)
+        datamodule_type: Either "terratorch" or "custom"
+        **kwargs: Additional arguments for custom datamodule
+    """
+    if datamodule_type.lower() == "terratorch":
+        datamodule = MultiTemporalCropClassificationDataModule(
+            batch_size=batch_size,
+            num_workers=num_workers,
+            data_root=dataset_path,
+            train_transform=[
+                terratorch.datasets.transforms.FlattenTemporalIntoChannels(),  # Required for temporal data
+                albumentations.D4(), # Random flips and rotation
+                albumentations.pytorch.transforms.ToTensorV2(),
+                terratorch.datasets.transforms.UnflattenTemporalFromChannels(n_timesteps=3),
+            ],
+            val_transform=None,
+            test_transform=None,
+            expand_temporal_dimension=True,
+            use_metadata=False,
+            reduce_zero_label=True,
+        )
+    elif datamodule_type.lower() == "custom":
+        # Import here to avoid circular imports
+        from custom_datamodule import MultiTemporalCropDataModule
+        
+        # Extract custom datamodule specific parameters
+        train_files = kwargs.get('train_files', [])
+        val_files = kwargs.get('val_files', None)
+        test_files = kwargs.get('test_files', None)
+        label_bands = kwargs.get('label_bands', list(range(1, 9)))
+        
+        datamodule = MultiTemporalCropDataModule(
+            data_dir=dataset_path,
+            train_files=train_files,
+            val_files=val_files,
+            test_files=test_files,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            label_bands=label_bands
+        )
+    else:
+        raise ValueError(f"Unknown datamodule_type: {datamodule_type}. Must be 'terratorch' or 'custom'")
+    
+    return datamodule
 
 
 #function to flatten tensors to a more "tabular" format
