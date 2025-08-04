@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """
-Comprehensive data splitting module for irrigation classification.
-
 This module implements spatial-aware data splitting strategies that:
 1. Split by location to avoid spatial data leakage
 2. Maintain class balance through stratified sampling
 3. Support experimentation with different label bands
 4. Handle the 8-band irrigation label structure
-
-Based on the methodology described in the IOP Science article.
 """
 
 import pandas as pd
@@ -74,14 +70,21 @@ class IrrigationDataSplitter:
         missing_locations = []
         
         for _, row in self.df.iterrows():
-            site_id = f"site_{row['y']:.2f}_{row['x']:.2f}_{row['year']}_{row['unique_id']}"
-            tif_path = os.path.join(self.data_dir, f"{site_id}.tif")
-            json_path = os.path.join(self.data_dir, f"{site_id}.json")
+            # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
+            site_id_number = row['site_id'].replace('id_', '')
+            
+            # Use the new naming convention: {unique_id}_{site_id}_{date}_{type}.tif
+            # For now, we'll use a placeholder date since we don't have the exact date
+            image_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.tif"
+            json_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.json"
+            
+            tif_path = os.path.join(self.data_dir, image_filename)
+            json_path = os.path.join(self.data_dir, json_filename)
             
             if os.path.exists(tif_path) and os.path.exists(json_path):
-                existing_files.append(site_id)
+                existing_files.append(image_filename.replace('.tif', ''))
             else:
-                missing_locations.append(site_id)
+                missing_locations.append(image_filename)
         
         print(f"Found {len(existing_files)} complete data files")
         print(f"Missing {len(missing_locations)} data files")
@@ -90,7 +93,7 @@ class IrrigationDataSplitter:
         self.df = self.df[self.df.apply(
             lambda row: os.path.exists(os.path.join(
                 self.data_dir, 
-                f"site_{row['y']:.2f}_{row['x']:.2f}_{row['year']}_{row['unique_id']}.tif"
+                f"{row['unique_id']}_{row['site_id'].replace('id_', '')}_2023.09.06_image.tif"
             )), axis=1
         )]
         
@@ -192,7 +195,10 @@ class IrrigationDataSplitter:
             # For now, use the first survey's irrigation status
             # In practice, you might want to aggregate across multiple surveys
             primary_survey = loc_data.iloc[0]
-            site_id = f"site_{primary_survey['y']:.2f}_{primary_survey['x']:.2f}_{primary_survey['year']}_{primary_survey['unique_id']}"
+            
+            # Use the new naming convention: {unique_id}_{site_id}_{date}_{type}
+            site_id_number = primary_survey['site_id'].replace('id_', '')
+            site_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
             
             # Use irrigation presence (band 2) for stratification by default
             # This can be modified based on your specific needs

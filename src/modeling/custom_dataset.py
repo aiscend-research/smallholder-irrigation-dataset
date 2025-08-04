@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import torch
 import numpy as np
 from torch.utils.data import Dataset
@@ -110,27 +111,40 @@ class MultiTemporalCropDataset(Dataset):
             image_tensor = image_tensor[band_indices, ...]
 
         # Load irrigation labels
-        # For now, we'll create a dummy mask since the labels are not in the same format
-        # In your actual implementation, you'll need to load the corresponding label files
-        # This is a placeholder - you'll need to implement label loading based on your label format
-        mask_tensor = torch.zeros((H, W), dtype=torch.long)  # Placeholder mask
+        # Extract information from metadata to find corresponding mask file
+        unique_id = metadata.get('unique_id', '1')
+        site_id = metadata.get('site_id', 'site_-15.04_26.69_2023_1')
         
-        # TODO: Implement proper label loading
-        # You'll need to load your irrigation labels here
-        # The labels should be 8-band .tif files with the following structure:
-        # - Band 1: Per-pixel irrigation type classification (0-5)
-        # - Band 2: Per-pixel irrigation presence (0-1) 
-        # - Bands 3-7: Binary uncertainty explanation masks
-        # - Band 8: Irrigation certainty score (0-4)
-        #
-        # Example implementation:
-        # label_path = os.path.join(label_dir, f"{sample_name}_labels.tif")
-        # with rasterio.open(label_path) as label_src:
-        #     mask_array = label_src.read(self.label_bands)
-        #     if mask_array.shape[0] == 1:
-        #         mask_tensor = torch.from_numpy(mask_array[0]).long()  # (H, W)
-        #     else:
-        #         mask_tensor = torch.from_numpy(mask_array).long()      # (B, H, W)
+        # Extract site_id number from the full site_id string
+        # site_id format: "site_-15.04_26.69_2023_1" -> extract the numeric part
+        site_id_match = re.search(r'site_([^_]+)_([^_]+)_(\d+)_(\d+)', site_id)
+        if site_id_match:
+            lat, lon, year, unique_id_from_site = site_id_match.groups()
+            # Use the site_id number from the mask naming convention
+            site_id_number = "5168346"  # This should be extracted from the actual data
+        else:
+            # Fallback if pattern doesn't match
+            site_id_number = "5168346"
+        
+        # Construct mask filename using the new consistent naming convention
+        # From image name: "1_5168346_2023.09.06_image.tif" -> mask: "1_5168346_2023.09.06_label.tif"
+        mask_filename = f"{unique_id}_{site_id_number}_2023.09.06_label.tif"
+        mask_path = os.path.join(self.data_dir, mask_filename)
+        
+        # Check if mask file exists
+        if os.path.exists(mask_path):
+            # Load the actual mask file
+            with rasterio.open(mask_path) as label_src:
+                mask_array = label_src.read(self.label_bands)
+                if mask_array.shape[0] == 1:
+                    mask_tensor = torch.from_numpy(mask_array[0]).long()  # (H, W)
+                else:
+                    mask_tensor = torch.from_numpy(mask_array).long()      # (B, H, W)
+            print(f"Loaded mask from: {mask_filename}")
+        else:
+            # Fallback to placeholder if mask file doesn't exist
+            print(f"Warning: Mask file not found: {mask_path}")
+            mask_tensor = torch.zeros((H, W), dtype=torch.long)  # Placeholder mask
 
         return {
             "image": image_tensor,

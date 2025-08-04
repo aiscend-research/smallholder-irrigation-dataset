@@ -1,27 +1,11 @@
 name: "rf_baseline"
 
 data:
-  dataset_path: "multi-temporal-crop-classification-subset"
-<<<<<<< Updated upstream
-  train_dir: "multi-temporal-crop-classification-subset/training"
-  val_dir: "multi-temporal-crop-classification-subset/validation"
+  data_dir: "../../data/modeling"
+  train_files: ["site_-15.04_26.69_2023_1"]
+  val_files: ["site_-15.04_26.69_2023_1"]
   label_bands: [1,2]
   image_bands: ["EVI"] # e.g. ["B2", "B3"]
-=======
-  train_subset_size: 1000 #subseting a 1000 pixels
-  test_subset_size: 1000
-  val_subset_size: 1000
-  datamodule:
-    type: "terratorch"  # Options: "terratorch" or "custom"
-    batch_size: 8
-    num_workers: 2
-    # Custom datamodule specific parameters (only used when type: "custom")
-    custom_params:
-      train_files: []  # List of training file names
-      val_files: []    # List of validation file names  
-      test_files: []   # List of test file names
-      label_bands: [1, 2, 3, 4, 5, 6, 7, 8]  # List of label band indices to use
->>>>>>> Stashed changes
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
