@@ -126,7 +126,12 @@
     {
       "type": "Feature",
       "properties": {
-        "name": "ps_10.30.2018",
+        "name": "ps_10_30.2018",
+        "operator_initials": "PS",
+        "internal_id": 10,
+        "month": "ps_10_30.2018",
+        "day": "ps_10_30.2018",
+        "year": "ps_10_30.2018",
         "certainty": 5,
         "uncertainty_explanation": "",
         "category": "small-scale"
