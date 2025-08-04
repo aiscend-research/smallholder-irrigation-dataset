@@ -466,20 +466,117 @@ class IrrigationDataSplitter:
                 with open(output_path, 'w') as f:
                     json.dump(split_info[f'{split_type}_files'], f, indent=2)
         
-        # Save metadata
+        # Save metadata - convert numpy types to Python types for JSON serialization
+        metadata = split_info['metadata'].copy()
+        
+        # Convert numpy int64 to regular int for JSON serialization
+        def convert_numpy_types(obj):
+            if isinstance(obj, dict):
+                return {str(k): convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(v) for v in obj]
+            elif hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            else:
+                return obj
+        
+        metadata = convert_numpy_types(metadata)
+        
         metadata_path = os.path.join(output_dir, f"{name}_metadata.json")
         with open(metadata_path, 'w') as f:
-            json.dump(split_info['metadata'], f, indent=2)
+            json.dump(metadata, f, indent=2)
         
         print(f"Saved splits to {output_dir}")
+
+    def create_folder_structure(self, split_info: Dict, output_dir: str, 
+                              copy_files: bool = True, create_symlinks: bool = False) -> str:
+        """
+        Create train/val/test folder structure and organize files.
+        
+        Args:
+            split_info: Dictionary containing train/val/test file lists
+            output_dir: Directory to create the folder structure in
+            copy_files: If True, copy files to new structure. If False, create symlinks
+            create_symlinks: If True, create symlinks instead of copying (only if copy_files=False)
+            
+        Returns:
+            Path to the created folder structure
+        """
+        # Create main output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create train/val/test subdirectories
+        for split_type in ['train', 'val', 'test']:
+            split_dir = os.path.join(output_dir, split_type)
+            os.makedirs(split_dir, exist_ok=True)
+            
+            if f'{split_type}_files' in split_info:
+                files = split_info[f'{split_type}_files']
+                print(f"Processing {len(files)} files for {split_type} set...")
+                
+                for file_base in files:
+                    # Define source files (image, label, json)
+                    image_src = os.path.join(self.data_dir, f"{file_base}.tif")
+                    label_src = os.path.join(self.data_dir, f"{file_base.replace('_image', '_label')}.tif")
+                    json_src = os.path.join(self.data_dir, f"{file_base}.json")
+                    
+                    # Define destination files
+                    image_dst = os.path.join(split_dir, f"{file_base}.tif")
+                    label_dst = os.path.join(split_dir, f"{file_base.replace('_image', '_label')}.tif")
+                    json_dst = os.path.join(split_dir, f"{file_base}.json")
+                    
+                    # Copy or link files
+                    for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
+                        if os.path.exists(src):
+                            if copy_files:
+                                import shutil
+                                shutil.copy2(src, dst)
+                            elif create_symlinks:
+                                if os.path.exists(dst):
+                                    os.remove(dst)
+                                os.symlink(os.path.abspath(src), dst)
+                            else:
+                                # Just create empty files as placeholders
+                                with open(dst, 'w') as f:
+                                    f.write(f"# Placeholder for {os.path.basename(src)}")
+                        else:
+                            print(f"Warning: Source file not found: {src}")
+        
+        print(f"Created folder structure at: {output_dir}")
+        print(f"  - train/: {len(split_info.get('train_files', []))} files")
+        print(f"  - val/: {len(split_info.get('val_files', []))} files")
+        print(f"  - test/: {len(split_info.get('test_files', []))} files")
+        
+        return output_dir
+
+    def save_splits_with_structure(self, split_info: Dict, output_dir: str, 
+                                  name: str = "default", copy_files: bool = True) -> str:
+        """
+        Save split information and create folder structure.
+        
+        Args:
+            split_info: Dictionary containing train/val/test file lists
+            output_dir: Directory to save splits and create structure
+            name: Name prefix for saved files
+            copy_files: If True, copy files to new structure. If False, create symlinks
+            
+        Returns:
+            Path to the created folder structure
+        """
+        # Save split information
+        self.save_splits(split_info, output_dir, name)
+        
+        # Create folder structure
+        structure_dir = os.path.join(output_dir, f"{name}_structure")
+        return self.create_folder_structure(split_info, structure_dir, copy_files=copy_files)
 
 
 def main():
     """Example usage of the IrrigationDataSplitter."""
     
     # Initialize splitter
-    csv_path = "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
-    data_dir = "data/features/"
+    csv_path = "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+    data_dir = "../../data/modeling"
     
     splitter = IrrigationDataSplitter(csv_path, data_dir)
     
@@ -502,8 +599,27 @@ def main():
     # Visualize splits
     splitter.visualize_splits(split_info)
     
-    # Save splits
-    splitter.save_splits(split_info, "splits/", "irrigation_binary")
+    # Save splits with folder structure
+    print("\n" + "="*50)
+    print("Creating folder structure...")
+    structure_path = splitter.save_splits_with_structure(
+        split_info, 
+        "splits/", 
+        "irrigation_binary",
+        copy_files=True  # Set to False to create symlinks instead
+    )
+    
+    print(f"\nFolder structure created at: {structure_path}")
+    print("Structure:")
+    print(f"  {structure_path}/")
+    print(f"    ├── train/")
+    print(f"    │   ├── 1_5168346_2023.09.06_image.tif")
+    print(f"    │   ├── 1_5168346_2023.09.06_label.tif")
+    print(f"    │   └── 1_5168346_2023.09.06_image.json")
+    print(f"    ├── val/")
+    print(f"    │   └── ...")
+    print(f"    └── test/")
+    print(f"        └── ...")
     
     # Experiment with different bands
     print("\n" + "="*50)
