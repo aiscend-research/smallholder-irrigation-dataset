@@ -10,9 +10,7 @@ from ml_pipeline.evaluation import model_metrics
 from ml_pipeline.visualization import plot_ml_predictions
 from custom_dataset import MultiTemporalCropDataset
 
-#In order to access the get_data_root function form utils 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils.utils import get_data_root
+
 
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
@@ -53,51 +51,22 @@ def run_experiment(exp_cfg, config_path):
             print(f"[{timestamp}] Starting experiment: {base_name}")
             print(f"Saving outputs to: {experiment_dir}")
 
-<<<<<<< Updated upstream
             # Prepare data
-            train_dir = exp_cfg["data"]["train_dir"]
-            val_dir = exp_cfg["data"]["val_dir"]
+            data_dir = exp_cfg["data"]["data_dir"]
+            train_files = exp_cfg["data"]["train_files"]
+            val_files = exp_cfg["data"]["val_files"]
+            label_bands = exp_cfg["data"]["label_bands"]
 
             train_dataset = MultiTemporalCropDataset(
-                image_dir=train_dir,
-                label_dir=train_dir,
-                label_bands=exp_cfg["data"]["label_bands"]
+                data_dir=data_dir,
+                sample_file_list=train_files,
+                label_bands=label_bands
             )
             val_dataset = MultiTemporalCropDataset(
-                image_dir=val_dir,
-                label_dir=val_dir,
-                label_bands=exp_cfg["data"]["label_bands"]
+                data_dir=data_dir,
+                sample_file_list=val_files,
+                label_bands=label_bands
             )
-=======
-            # Load and prepare data
-            #dataset_path = os.path.join(get_data_root(), "modeling", "test") #for data on the cluster 
-            dataset_path = exp_cfg["data"]["dataset_path"]
-            train_size = exp_cfg["data"].get("train_subset_size", None) # Default to use all data
-            val_size = exp_cfg["data"].get("val_subset_size", None)
-            
-            # Get datamodule configuration
-            datamodule_config = exp_cfg["data"].get("datamodule", {})
-            datamodule_type = datamodule_config.get("type", "terratorch")
-            batch_size = datamodule_config.get("batch_size", 8)
-            num_workers = datamodule_config.get("num_workers", 2)
-            
-            # Get custom datamodule specific parameters if using custom
-            custom_params = {}
-            if datamodule_type == "custom":
-                custom_params = datamodule_config.get("custom_params", {})
-
-            datamodule = get_datamodule(
-                dataset_path, 
-                batch_size=batch_size,
-                num_workers=num_workers,
-                datamodule_type=datamodule_type,
-                **custom_params
-            )
-            datamodule.setup("fit")
-            train_dataset = datamodule.train_dataset
-            datamodule.setup("val")
-            val_dataset = datamodule.val_dataset # Because this is an experiment, we only want to use validation data
->>>>>>> Stashed changes
 
             from ml_pipeline.build_features import flatten_dataset
             X_train, y_train = flatten_dataset(train_dataset)
@@ -154,7 +123,7 @@ def run_experiment(exp_cfg, config_path):
 
         finally:
             sys.stdout = original_stdout
-            print(f"✅ Logged output to {log_path}")
+            print(f"Logged output to {log_path}")
 
 
 if __name__ == "__main__":

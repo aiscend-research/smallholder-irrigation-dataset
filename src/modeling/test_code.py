@@ -79,45 +79,41 @@ def test_custom_dataset():
         traceback.print_exc()
         return False
 
-def test_custom_datamodule():
-    """Test the custom datamodule functionality"""
+def test_dataset_factory():
+    """Test the dataset factory functionality"""
     print("\n" + "=" * 50)
-    print("Testing Custom Datamodule...")
+    print("Testing Dataset Factory...")
     
     try:
-        from custom_datamodule import MultiTemporalCropDataModule
+        from ml_pipeline.build_features import get_datasets
         
         data_dir = "../../data/modeling"
         train_files = ["site_-15.04_26.69_2023_1"]
+        val_files = ["site_-15.04_26.69_2023_1"]
         
-        datamodule = MultiTemporalCropDataModule(
+        datasets = get_datasets(
             data_dir=data_dir,
             train_files=train_files,
-            val_files=[],
-            test_files=[],
-            batch_size=1,
-            num_workers=0
+            val_files=val_files,
+            label_bands=[1, 2]
         )
-        print("Datamodule initialized successfully!")
+        print("Datasets created successfully!")
+        print(f"   Available datasets: {list(datasets.keys())}")
         
-        # Test setup
-        datamodule.setup(stage="fit")
-        print("Datamodule setup completed!")
+        # Test train dataset
+        train_dataset = datasets['train_dataset']
+        sample = train_dataset[0]
+        print(f"   Train sample loaded: {sample['image'].shape}")
         
-        # Test dataloader
-        train_loader = datamodule.train_dataloader()
-        print("     Train dataloader created successfully!")
-        
-        # Test loading a batch
-        batch = next(iter(train_loader))
-        print(f"   Batch loaded successfully!")
-        print(f"   Batch keys: {list(batch.keys())}")
-        print(f"   Batch image shape: {batch['image'].shape}")
+        # Test validation dataset
+        val_dataset = datasets['val_dataset']
+        sample = val_dataset[0]
+        print(f"   Val sample loaded: {sample['image'].shape}")
         
         return True
         
     except Exception as e:
-        print(f"Custom datamodule test failed: {e}")
+        print(f"Dataset factory test failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -128,32 +124,21 @@ def test_build_features():
     print("Testing Build Features...")
     
     try:
-        from ml_pipeline.build_features import get_datamodule
+        from ml_pipeline.build_features import get_datasets
         
         data_dir = "../../data/modeling"
         train_files = ["site_-15.04_26.69_2023_1"]
         
-        # Test custom datamodule creation
-        datamodule = get_datamodule(
-            dataset_path=data_dir,
-            batch_size=1,
-            num_workers=0,
-            datamodule_type="custom",
+        # Test custom datasets creation
+        datasets = get_datasets(
+            data_dir=data_dir,
             train_files=train_files,
             val_files=[],
             test_files=[],
             label_bands=[2]
         )
-        print("Custom datamodule created via factory!")
-        
-        # Test terratorch datamodule creation
-        terratorch_datamodule = get_datamodule(
-            dataset_path=data_dir,
-            batch_size=1,
-            num_workers=0,
-            datamodule_type="terratorch"
-        )
-        print("Terratorch datamodule created via factory!")
+        print("Custom datasets created via factory!")
+        print(f"   Available datasets: {list(datasets.keys())}")
         
         return True
         
@@ -171,7 +156,7 @@ def main():
     tests = [
         test_data_splitting,
         test_custom_dataset,
-        test_custom_datamodule,
+        test_dataset_factory,
         test_build_features
     ]
     
