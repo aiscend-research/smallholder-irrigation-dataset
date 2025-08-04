@@ -2,6 +2,7 @@
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
 <Document>
 	<name>PS_825-849.kml</name>
+	<open>1</open>
 	<atom:link rel="app" href="https://www.google.com/earth/about/versions/#earth-pro" title="Google Earth Pro 7.3.6.10201"></atom:link>
 	<StyleMap id="m_ylw-pushpin">
 		<Pair>
@@ -79,7 +80,6 @@
 	</Style>
 	<Folder>
 		<name>PS_825-849</name>
-		<open>1</open>
 		<Placemark>
 			<name>ps_2_9.8.2021</name>
 			<description>4
@@ -91,6 +91,52 @@ Only slightly green</description>
 					<LinearRing>
 						<coordinates>
 							26.51026610987483,-17.00578976624092,0 26.51032321379296,-17.00578521241873,0 26.51033548163782,-17.00585294447932,0 26.5102850346223,-17.00586856653583,0 26.51031227195393,-17.00592823647323,0 26.51041323607195,-17.00590578539714,0 26.51043147448281,-17.00585803059811,0 26.51039299547731,-17.00581718144778,0 26.51038606014069,-17.00564482107988,0 26.51024513045031,-17.00565545325112,0 26.51026610987483,-17.00578976624092,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_22_6.13.2023</name>
+			<description>4
+Only slightly green</description>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							28.82444408877799,-10.7186968965285,0 28.82448877026045,-10.71873723551081,0 28.82446330105111,-10.71879506416721,0 28.82450518045453,-10.71881332981658,0 28.82453308546611,-10.7187620756504,0 28.82451548718468,-10.71872936036826,0 28.82454546893644,-10.71866727306709,0 28.82448476716827,-10.71863501961131,0 28.82444408877799,-10.7186968965285,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_10.30.2018</name>
+			<description>5</description>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							32.56556256501624,-13.7071018050401,0 32.56561916772716,-13.7070395732706,0 32.56551777789037,-13.70695833677011,0 32.56546148114661,-13.70701975885072,0 32.56556256501624,-13.7071018050401,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>ps_13_10.30.2018</name>
+			<description>5</description>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							32.56533708045232,-13.70715296138873,0 32.56558973206847,-13.70682467634555,0 32.56549830583162,-13.70676187366676,0 32.56553781313134,-13.70671855035283,0 32.56546397492851,-13.70666787189108,0 32.56519311880556,-13.70698168509477,0 32.56533708045232,-13.70715296138873,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
