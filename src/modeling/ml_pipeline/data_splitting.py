@@ -58,7 +58,6 @@ class IrrigationDataSplitter:
         self.df = None
         self.label_encoder = LabelEncoder()
         
-        # Load and prepare data
         self._load_data()
         
     def _load_data(self):
@@ -70,7 +69,6 @@ class IrrigationDataSplitter:
             lambda row: f"{row['y']:.2f}_{row['x']:.2f}", axis=1
         )
         
-        # Check which files exist in the data directory
         self._validate_data_files()
         
     def _validate_data_files(self):
@@ -82,8 +80,6 @@ class IrrigationDataSplitter:
             # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
             site_id_number = row['site_id'].replace('id_', '')
             
-            # Use the new naming convention: {unique_id}_{site_id}_{date}_{type}.tif
-            # For now, we'll use a placeholder date since we don't have the exact date
             image_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.tif"
             json_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.json"
             
@@ -174,6 +170,39 @@ class IrrigationDataSplitter:
             }
         }
     
+    def _get_location_labels_and_files(self, stratification_band: int = 2):
+        """
+        Get location-level labels and file IDs for stratification.
+        
+        Args:
+            stratification_band: Which band to use for stratification (1-8)
+            
+        Returns:
+            Tuple of (location_labels, location_files) as numpy arrays
+        """
+        unique_locations = self.df['location_id'].unique()
+        
+        location_labels = []
+        location_files = []
+        
+        for loc_id in unique_locations:
+            loc_data = self.df[self.df['location_id'] == loc_id]
+            primary_survey = loc_data.iloc[0]
+            site_id_number = primary_survey['site_id'].replace('id_', '')
+            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
+            
+            # Use irrigation presence (band 2) for stratification by default
+            if stratification_band == 2:
+                label = primary_survey['irrigation']  # Binary irrigation presence
+            else:
+                # For other bands, load the actual label files
+                label = primary_survey['irrigation']
+            
+            location_labels.append(label)
+            location_files.append(file_id)
+        
+        return np.array(location_labels), np.array(location_files)
+    
     def spatial_stratified_split(self,
                                 test_size: float = 0.2,
                                 val_size: float = 0.2,
@@ -191,39 +220,8 @@ class IrrigationDataSplitter:
         Returns:
             Dictionary with train/val/test file lists and metadata
         """
-        # Get unique locations
-        unique_locations = self.df['location_id'].unique()
-        
-        # Create location-level labels for stratification
-        location_labels = []
-        location_files = []
-        
-        for loc_id in unique_locations:
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            
-            # For now, use the first survey's irrigation status
-            # In practice, you might want to aggregate across multiple surveys
-            primary_survey = loc_data.iloc[0]
-            
-            # Use the new naming convention: {unique_id}_{site_id}_{date}_{type}
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            site_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
-            
-            # Use irrigation presence (band 2) for stratification by default
-            # This can be modified based on your specific needs
-            if stratification_band == 2:
-                label = primary_survey['irrigation']  # Binary irrigation presence
-            else:
-                # For other bands, you'd need to load the actual label files
-                # For now, use irrigation as proxy
-                label = primary_survey['irrigation']
-            
-            location_labels.append(label)
-            location_files.append(site_id)
-        
-        # Convert to arrays
-        location_labels = np.array(location_labels)
-        location_files = np.array(location_files)
+        # Get location-level labels and files
+        location_labels, location_files = self._get_location_labels_and_files(stratification_band)
         
         # Check class balance
         unique_labels, counts = np.unique(location_labels, return_counts=True)
@@ -231,7 +229,6 @@ class IrrigationDataSplitter:
         for label, count in zip(unique_labels, counts):
             logger.info(f"  Class {label}: {count} locations")
         
-        # Filter classes with too few samples
         valid_classes = unique_labels[counts >= min_samples_per_class]
         valid_mask = np.isin(location_labels, valid_classes)
         
@@ -240,7 +237,6 @@ class IrrigationDataSplitter:
             location_labels = location_labels[valid_mask]
             location_files = location_files[valid_mask]
         
-        # Handle case where we have too few samples for splitting
         if len(location_files) < 3:
             logger.warning(f"Warning: Only {len(location_files)} locations available. Using all for training.")
             return {
@@ -271,12 +267,11 @@ class IrrigationDataSplitter:
         # Split train into train/val
         train_locations, val_locations, train_labels, val_labels = train_test_split(
             train_locations, train_labels,
-            test_size=val_size / (1 - test_size),  # Adjust for the fact that we already split out test
+            test_size=val_size / (1 - test_size), 
             stratify=train_labels,
             random_state=self.random_state
         )
         
-        # Convert to lists
         train_files = train_locations.tolist()
         val_files = val_locations.tolist()
         test_files = test_locations.tolist()
@@ -315,25 +310,8 @@ class IrrigationDataSplitter:
         Returns:
             List of dictionaries, each containing train/val splits for one fold
         """
-        # Get unique locations
-        unique_locations = self.df['location_id'].unique()
-        
-        # Create location-level labels
-        location_labels = []
-        location_files = []
-        
-        for loc_id in unique_locations:
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            primary_survey = loc_data.iloc[0]
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
-            
-            label = primary_survey['irrigation']
-            location_labels.append(label)
-            location_files.append(file_id)
-        
-        location_labels = np.array(location_labels)
-        location_files = np.array(location_files)
+        # Get location-level labels and files
+        location_labels, location_files = self._get_location_labels_and_files(stratification_band)
         
         # Handle insufficient samples for CV
         if len(location_files) < n_splits:
@@ -399,8 +377,7 @@ class IrrigationDataSplitter:
         for band in target_bands:
             logger.info(f"\nCreating split for Band {band}")
             
-            # For now, use irrigation presence as proxy for all bands
-            # In practice, you'd load the actual label files to get band-specific labels
+            # use irrigation presence as proxy for all bands
             split_info = self.spatial_stratified_split(
                 test_size=test_size,
                 stratification_band=band
@@ -446,17 +423,15 @@ class IrrigationDataSplitter:
         axes[0, 0].set_ylabel('Number of Locations')
         axes[0, 0].legend()
         
-        # Split sizes
         split_sizes = [metadata['train_locations'], metadata['val_locations'], metadata['test_locations']]
         axes[0, 1].pie(split_sizes, labels=['Train', 'Val', 'Test'], autopct='%1.1f%%')
         axes[0, 1].set_title('Split Proportions')
         
-        # Spatial distribution (if coordinates available)
+        # Spatial distribution
         if 'spatial_info' in metadata:
             # This would show the spatial distribution of splits
             pass
         
-        # Summary statistics
         summary_text = f"""
         Total Locations: {metadata['total_locations']}
         Train: {metadata['train_locations']} ({metadata['train_locations']/metadata['total_locations']:.1%})
@@ -489,7 +464,6 @@ class IrrigationDataSplitter:
         """Save split information to files."""
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save file lists
         for split_type in ['train', 'val', 'test']:
             if f'{split_type}_files' in split_info:
                 output_path = os.path.join(output_dir, f"{name}_{split_type}_files.json")
@@ -532,7 +506,6 @@ class IrrigationDataSplitter:
         Returns:
             Path to the created folder structure
         """
-        # Create main output directory
         os.makedirs(output_dir, exist_ok=True)
         
         # Create train/val/test subdirectories
@@ -566,7 +539,6 @@ class IrrigationDataSplitter:
                                     os.remove(dst)
                                 os.symlink(os.path.abspath(src), dst)
                             else:
-                                # Just create empty files as placeholders
                                 with open(dst, 'w') as f:
                                     f.write(f"# Placeholder for {os.path.basename(src)}")
                         else:
@@ -593,10 +565,8 @@ class IrrigationDataSplitter:
         Returns:
             Path to the created folder structure
         """
-        # Save split information
         self.save_splits(split_info, output_dir, name)
         
-        # Create folder structure
         structure_dir = os.path.join(output_dir, f"{name}_structure")
         return self.create_folder_structure(split_info, structure_dir, copy_files=copy_files)
 
@@ -625,7 +595,6 @@ class IrrigationDataSplitter:
         logger.info(f"  - Stratification band: {stratification_band}")
         logger.info(f"  - Min samples per class: {min_samples_per_class}")
         
-        # Create splits
         split_info = self.spatial_stratified_split(
             test_size=test_size,
             val_size=val_size,
@@ -633,7 +602,6 @@ class IrrigationDataSplitter:
             min_samples_per_class=min_samples_per_class
         )
         
-        # Create folder structure if requested
         if exp_cfg["data"].get("create_folder_structure", True):
             splits_dir = exp_cfg["data"].get("splits_dir", "./splits")
             structure_name = exp_cfg["name"]
@@ -686,7 +654,6 @@ class IrrigationDataSplitter:
         Returns:
             Path to the created structure
         """
-        # Create CV splits
         cv_splits = self.cross_validation_split(n_splits=n_splits)
         
         # Create main output directory
@@ -789,17 +756,14 @@ class IrrigationDataSplitter:
     def _copy_files_to_fold(self, file_list: List[str], target_dir: str):
         """Helper method to copy files to a fold directory."""
         for file_id in file_list:
-            # Define source files
             image_src = os.path.join(self.data_dir, f"{file_id}.tif")
             label_src = os.path.join(self.data_dir, f"{file_id.replace('_image', '_label')}.tif")
             json_src = os.path.join(self.data_dir, f"{file_id}.json")
             
-            # Define destination files
             image_dst = os.path.join(target_dir, f"{file_id}.tif")
             label_dst = os.path.join(target_dir, f"{file_id.replace('_image', '_label')}.tif")
             json_dst = os.path.join(target_dir, f"{file_id}.json")
             
-            # Copy files
             for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
                 if os.path.exists(src):
                     import shutil
@@ -811,7 +775,6 @@ class IrrigationDataSplitter:
 def main():
     """Example usage of the IrrigationDataSplitter."""
     
-    # Initialize splitter
     csv_path = "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
     data_dir = "../../data/modeling"
     
@@ -830,7 +793,6 @@ def main():
         stratification_band=2  # Use irrigation presence
     )
     
-    # Visualize splits
     splitter.visualize_splits(split_info)
     
     # Save splits with folder structure

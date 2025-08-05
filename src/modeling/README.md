@@ -35,7 +35,6 @@ data/modeling/
 ├── final_test.py              # (WIP) Test a final/best model
 ├── experiment.yaml            # Config file for experiments
 ├── custom_dataset.py          # PyTorch Dataset for multi-temporal Sentinel-2 data
-├── test_code.py               # (gitignored) Test script for validation
 ├── ml_pipeline/               # Core ML pipeline
 │   ├── data_splitting.py      # Spatial-aware data splitting
 │   ├── build_features.py      # Data flattening
@@ -70,7 +69,6 @@ data/modeling/
 ### Experiment Runner
 - **run_experiment.py:**  
   Main experiment runner that loads configuration from YAML and orchestrates the entire pipeline.
-
 
 ## Data Splitting
 
@@ -149,5 +147,6 @@ data/modeling/splits/
 ## Best Practices
 
 - Commit code before running experiments.
-
----
+- Use file lists for cross-validation to save disk space.
+- Choose appropriate bands based on your classification task.
+- Validate data splits visually using the built-in visualization tools.

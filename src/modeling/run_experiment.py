@@ -34,11 +34,9 @@ def run_experiment(exp_cfg, config_path):
     base_name = exp_cfg["name"]
     run_name = f"{base_name}_{timestamp}"
 
-    # Resolve paths
     base_dir = exp_cfg["output"]["base_dir"]
     experiment_dir = os.path.join(base_dir, run_name)
 
-    # Skip if directory already exists (prevent duplicates)
     if os.path.exists(experiment_dir):
         logger.info(f"Skipping: {run_name} already exists.")
         return
@@ -55,7 +53,6 @@ def run_experiment(exp_cfg, config_path):
     # Copy the config file used for this experiment
     shutil.copyfile(config_path, config_snapshot_path)
 
-    # Log file setup
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     original_stdout = sys.stdout
     with open(log_path, 'w') as log_file:
@@ -81,7 +78,6 @@ def run_experiment(exp_cfg, config_path):
 
 def run_single_experiment(exp_cfg, experiment_dir):
     """Run a single train/validation experiment."""
-    # Prepare data splits
     use_auto_splitting = exp_cfg["data"].get("use_auto_splitting", True)
     
     if use_auto_splitting:
@@ -108,7 +104,6 @@ def run_single_experiment(exp_cfg, experiment_dir):
             
     else:
         logger.info("Using manual file lists from config...")
-        # Use existing hardcoded lists
         train_files = exp_cfg["data"]["train_files"]
         val_files = exp_cfg["data"]["val_files"]
         split_metadata = None
@@ -170,7 +165,6 @@ def run_single_experiment(exp_cfg, experiment_dir):
         json.dump(metrics, f, indent=2)
     logger.info("Metrics:", metrics)
 
-    # Visualization
     num_samples = exp_cfg["visualization"].get("num_samples", 2)
     visualization_path = os.path.join(experiment_dir, "visualization.png")
 
@@ -250,7 +244,6 @@ def run_cv_experiment(exp_cfg, experiment_dir):
             label_bands=label_bands
         )
         
-        # Check for empty datasets
         if len(train_dataset) == 0:
             logger.error(f"Fold {fold_idx}: Train dataset is empty!")
             continue
