@@ -308,3 +308,67 @@ class MultiTemporalCropDataset(Dataset):
         plt.suptitle(f"{band_name or band_names[band_idx]} Over Time", fontsize=16)
         plt.tight_layout()
         plt.show()
+
+
+
+#### TESTS ####
+# # # Set your data directory to wherever you duplicated your samples
+# data_dir = "../../data/modeling"
+
+# # Test case 1: Load the full dataset (all bands, all times)
+# print("\n=== Load dataset: All bands, all timesteps ===")
+# ds = MultiTemporalCropDataset(data_dir=data_dir)
+# print(f"Dataset length: {len(ds)}")
+
+# # Check the first sample
+# sample = ds[0]
+# img = sample["image"]
+# mask = sample["mask"]
+# meta = sample["metadata"]
+
+# print("First sample shapes:")
+# print("  image:", img.shape)  # (14, 37, H, W)
+# print("  mask:", mask.shape)  # (8, H, W) or (H, W)
+# print("  metadata:", meta)
+
+# # Plot first band at t=0
+# print("\nShow all bands at first timepoint:")
+# MultiTemporalCropDataset.plot_all_bands_at_time(img, time_idx=0)
+
+# # Plot NDVI band (band 10) over time
+# print("\nShow NDVI (band 10) over time:")
+# MultiTemporalCropDataset.plot_band_over_time(img, band_idx=10)
+
+# # Plot mask tensor
+# if isinstance(mask, torch.Tensor):
+#     print("\nShow mask tensor bands:")
+#     if mask.ndim == 3 and mask.shape[0] == 8:
+#         MultiTemporalCropDataset.plot_mask_tensor(mask)
+
+# # Test case 2: Only select a subset of bands (e.g., just NDVI and SCL)
+# print("\n=== Load dataset: Only NDVI and SCL bands ===")
+# ds2 = MultiTemporalCropDataset(data_dir=data_dir, image_band_names=["NDVI", "SCL"])
+# sample2 = ds2[0]
+# print("  image shape:", sample2["image"].shape)  # Should be (2, 37, H, W)
+
+# # Test case 3: Time step selection (e.g., [0, [1,2,3], 4])
+# print("\n=== Load dataset: Select specific timesteps ===")
+# time_sel = [0, [1,2,3], 4]
+# ds3 = MultiTemporalCropDataset(data_dir=data_dir, time_step_selection=time_sel)
+# sample3 = ds3[0]
+# print("  image shape (band, selected time, H, W):", sample3["image"].shape)
+# print("  Should be (14, 3, H, W) because you selected 3 time slots per band.")
+
+# # Test case 4: Both band and timestep selection
+# print("\n=== Load dataset: NDVI and SCL, custom time selection ===")
+# ds4 = MultiTemporalCropDataset(data_dir=data_dir, image_band_names=["NDVI", "SCL"], time_step_selection=[0, [1,2,3], 4])
+# sample4 = ds4[0]
+# print("  image shape:", sample4["image"].shape)  # Should be (2, 3, H, W)
+
+# # Edge case: test all samples, print their shapes
+# print("\n=== Loop through all samples and print shapes ===")
+# for i in range(len(ds)):
+#     s = ds[i]
+#     print(f"Sample {i}: image {s['image'].shape}, mask {s['mask'].shape}, metadata keys: {list(s['metadata'].keys())}")
+
+# print("If all shapes are as expected, your dataset class is working! 🚀")        

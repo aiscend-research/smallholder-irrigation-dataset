@@ -16,7 +16,7 @@ data:
   test_size: 0.2          # 20% for test
   val_size: 0.2           # 20% for validation
   stratification_band: 2   # Use irrigation presence for stratification
-  min_samples_per_class: 5 # Minimum samples per class
+  min_samples_per_class: 1 # Minimum samples per class (set to 1 for testing/small/imbalanced datasets)
   random_state: 42        # For reproducible splits
   
   # Folder structure options

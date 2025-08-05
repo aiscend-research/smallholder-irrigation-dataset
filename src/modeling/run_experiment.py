@@ -7,6 +7,7 @@ import logging
 import numpy as np
 from datetime import datetime
 from joblib import dump
+from tqdm import tqdm
 from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
 from ml_pipeline.evaluation import export_feature_importances
@@ -150,15 +151,18 @@ def run_single_experiment(exp_cfg, experiment_dir):
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
 
-    logger.info(f"Training {model_type} model with hyperparameters: {hyperparams}")
+    tqdm.write(f"Training {model_type} model with hyperparameters: {hyperparams}")
     clf = train_model(X_train, y_train, model_type, **hyperparams)
+    tqdm.write("Model training complete.")
 
     model_path = os.path.join(experiment_dir, "model.pkl")
     dump(clf, model_path)
     logger.info(f"Model saved to {model_path}")
 
     # Predict and evaluate
+    tqdm.write("Predicting on validation set...")
     y_pred = clf.predict(X_val)
+    tqdm.write("Prediction complete.")
     metrics = model_metrics(y_pred, y_val)
     metrics_path = os.path.join(experiment_dir, "metrics.json")
     with open(metrics_path, "w") as f:
@@ -187,7 +191,7 @@ def run_single_experiment(exp_cfg, experiment_dir):
                     n_timesteps=N_TIMESTEPS,
                     save_path=heatmap_path
         )
-    logger.info(f"Experiment complete.")
+    tqdm.write("Experiment complete.")
 
 
 def run_cv_experiment(exp_cfg, experiment_dir):
@@ -220,11 +224,12 @@ def run_cv_experiment(exp_cfg, experiment_dir):
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
     
     # Run experiments on each fold
-    logger.info(f"Running experiments on {n_folds} folds...")
+    tqdm_bar = tqdm(total=n_folds, desc="Cross-validation folds")
     fold_results = []
     
     for fold_idx in range(1, n_folds + 1):
-        logger.info(f"\n--- Fold {fold_idx} ---")
+        tqdm_bar.set_description(f"Fold {fold_idx}")
+        tqdm.write(f"\n--- Fold {fold_idx} ---")
         
         # Load fold file lists
         fold_dir = os.path.join(cv_dir, "train", f"fold_{fold_idx}")
@@ -233,12 +238,14 @@ def run_cv_experiment(exp_cfg, experiment_dir):
         
         # Check if fold directory exists
         if not os.path.exists(fold_dir):
-            logger.warning(f"Fold {fold_idx} directory not found, skipping...")
+            tqdm.write(f"Fold {fold_idx} directory not found, skipping...")
+            tqdm_bar.update(1)
             continue
             
         # Load train files
         if not os.path.exists(train_file_path):
-            logger.warning(f"Train files not found for fold {fold_idx}, skipping...")
+            tqdm.write(f"Train files not found for fold {fold_idx}, skipping...")
+            tqdm_bar.update(1)
             continue
             
         with open(train_file_path, 'r') as f:
@@ -250,7 +257,7 @@ def run_cv_experiment(exp_cfg, experiment_dir):
             with open(val_file_path, 'r') as f:
                 val_files = [line.strip() for line in f.readlines()]
         
-        logger.info(f"Fold {fold_idx}: {len(train_files)} train, {len(val_files)} val")
+        tqdm.write(f"Fold {fold_idx}: {len(train_files)} train, {len(val_files)} val")
         
         # Create datasets
         train_dataset = MultiTemporalCropDataset(
@@ -259,7 +266,8 @@ def run_cv_experiment(exp_cfg, experiment_dir):
         )
         
         if len(train_dataset) == 0:
-            logger.error(f"Fold {fold_idx}: Train dataset is empty!")
+            tqdm.write(f"Fold {fold_idx}: Train dataset is empty!")
+            tqdm_bar.update(1)
             continue
             
         val_dataset = MultiTemporalCropDataset(
@@ -268,10 +276,10 @@ def run_cv_experiment(exp_cfg, experiment_dir):
         )
         
         if len(val_dataset) == 0:
-            logger.warning(f"Fold {fold_idx}: Val dataset is empty, skipping evaluation")
+            tqdm.write(f"Fold {fold_idx}: Val dataset is empty, skipping evaluation")
+            tqdm_bar.update(1)
             continue
         
-        # Flatten datasets
         X_train, y_train = flatten_dataset(train_dataset)
         X_val, y_val = flatten_dataset(val_dataset)
         
@@ -280,8 +288,9 @@ def run_cv_experiment(exp_cfg, experiment_dir):
         y_val = y_val[:, :2]
         
         # Train model
-        logger.info(f"Training {model_type} model for fold {fold_idx}")
+        tqdm.write(f"Training {model_type} model for fold {fold_idx}")
         clf = train_model(X_train, y_train, model_type, **hyperparams)
+        tqdm.write(f"Model training complete for fold {fold_idx}")
         
         # Evaluate model
         y_pred = clf.predict(X_val)
@@ -295,8 +304,11 @@ def run_cv_experiment(exp_cfg, experiment_dir):
             'val_size': len(val_dataset)
         })
         
-        logger.info(f"Fold {fold_idx} metrics: {metrics}")
-    
+        tqdm.write(f"Fold {fold_idx} metrics: {metrics}")
+        tqdm_bar.update(1)
+    tqdm_bar.close()
+    tqdm.write("All folds processed.")
+
     # Aggregate results
     if fold_results:
         # Calculate mean and std of metrics across folds
