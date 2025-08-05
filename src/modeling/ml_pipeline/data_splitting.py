@@ -70,6 +70,10 @@ class IrrigationDataSplitter:
         )
         
         self._validate_data_files()
+    
+    def _get_date_string(self, row):
+        """Generate date string from row data in format YYYY.MM.DD."""
+        return f"{row['year']}.{row['month']:02d}.{row['day']:02d}"
         
     def _validate_data_files(self):
         """Validate that downloaded files exist for each survey location."""
@@ -79,9 +83,10 @@ class IrrigationDataSplitter:
         for _, row in self.df.iterrows():
             # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
             site_id_number = row['site_id'].replace('id_', '')
-            
-            image_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.tif"
-            json_filename = f"{row['unique_id']}_{site_id_number}_2023.09.06_image.json"
+            date_str = self._get_date_string(row)
+
+            image_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.tif"
+            json_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.json"
             
             tif_path = os.path.join(self.data_dir, image_filename)
             json_path = os.path.join(self.data_dir, json_filename)
@@ -98,7 +103,7 @@ class IrrigationDataSplitter:
         self.df = self.df[self.df.apply(
             lambda row: os.path.exists(os.path.join(
                 self.data_dir, 
-                f"{row['unique_id']}_{row['site_id'].replace('id_', '')}_2023.09.06_image.tif"
+                f"{row['unique_id']}_{row['site_id'].replace('id_', '')}_{date_str}_image.tif"
             )), axis=1
         )]
         
@@ -189,7 +194,8 @@ class IrrigationDataSplitter:
             loc_data = self.df[self.df['location_id'] == loc_id]
             primary_survey = loc_data.iloc[0]
             site_id_number = primary_survey['site_id'].replace('id_', '')
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
+            date_str = self._get_date_string(primary_survey)
+            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
             
             # Use irrigation presence (band 2) for stratification by default
             if stratification_band == 2:
@@ -666,7 +672,8 @@ class IrrigationDataSplitter:
             loc_data = self.df[self.df['location_id'] == loc_id]
             primary_survey = loc_data.iloc[0]
             site_id_number = primary_survey['site_id'].replace('id_', '')
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
+            date_str = self._get_date_string(primary_survey)
+            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
             all_files.append(file_id)
         
         # Handle insufficient samples for train/test split
