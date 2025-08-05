@@ -57,11 +57,12 @@ def get_band_indices(band_names):
     return indices
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir, label_dir, label_bands=None, image_band_names=None, time_step_selection=None):
+    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
             label_dir (str): Path to directory containing label .tif files.
+            data_dir (str, optional): If provided, overrides both image_dir and label_dir.
             label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
             image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
                 If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
@@ -71,66 +72,57 @@ class MultiTemporalCropDataset(Dataset):
                 Example: [0, [1,2,3], 4] => output will have three time slices per band:
                     1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
 
-        This dataset finds all .tif files in image_dir and label_dir, extracts unique IDs from filenames
-        (for images: last underscore-separated field before '.tif'; for masks: first underscore-separated field),
-        and only keeps pairs that have both an image and a mask for the same unique ID.
-        It stores lists of paired image filenames, mask filenames, and integer unique IDs.
-
-        When fetching a sample, returns a dict with:
-            "image": Tensor of shape (bands, timesteps, H, W)
-            "mask": Tensor of shape (B, H, W) or (H, W)
-            "metadata": metadata dict for the sample
+        Note:
+            If data_dir is provided, it overrides both image_dir and label_dir.
         """
+        # Override image_dir and label_dir if data_dir is provided
+        if data_dir is not None:
+            image_dir = data_dir
+            label_dir = data_dir
+
         self.image_dir = image_dir
         self.label_dir = label_dir
-        # Default image_band_names: all bands if None/empty
         if not image_band_names:
             self.image_band_names = S2_BAND_NAMES
         else:
             self.image_band_names = image_band_names
-        # Default label_bands: all 8 mask bands if None/empty
         if not label_bands:
             self.label_bands = list(range(1, 9))
         else:
             self.label_bands = label_bands
-        self.num_bands = 14  # 10 Sentinel-2 + NDVI + EVI + NDWI + SCL
+        self.num_bands = 14
         self.num_timesteps = 37
-        self.image_band_count = self.num_bands * self.num_timesteps  # = default: 518
+        self.image_band_count = self.num_bands * self.num_timesteps
         self.time_step_selection = time_step_selection
 
-        # Find all image and label .tif files
-        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*.tif")))
-        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*.tif")))
+        # Find *_image.tif and *_label.tif files according to new naming convention
+        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
+        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
 
-        # Extract unique IDs for images: last underscore-separated field before .tif
-        image_id_to_file = {}
+        # The prefix is everything before '_image.tif' or '_label.tif'
+        def extract_prefix(filename, suffix):
+            base = os.path.basename(filename)
+            if base.endswith(suffix):
+                return base[:-len(suffix)]
+            return None
+
+        image_prefix_to_file = {}
         for f in image_files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            parts = base.split('_')
-            if len(parts) < 2:
-                continue
-            unique_id = parts[-1]
-            image_id_to_file[unique_id] = f
+            prefix = extract_prefix(f, "_image.tif")
+            if prefix:
+                image_prefix_to_file[prefix] = f
 
-        # Extract unique IDs for masks: first underscore-separated field
-        mask_id_to_file = {}
+        label_prefix_to_file = {}
         for f in label_files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            parts = base.split('_')
-            if len(parts) < 1:
-                continue
-            unique_id = parts[0]
-            mask_id_to_file[unique_id] = f
+            prefix = extract_prefix(f, "_label.tif")
+            if prefix:
+                label_prefix_to_file[prefix] = f
 
-        # Find intersection of IDs that have both image and mask (matching by unique_id)
-        paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
-        self.paired_image_files = []
-        self.paired_mask_files = []
-        self.paired_unique_ids = []
-        for i, uid in enumerate(paired_ids):
-            self.paired_image_files.append(image_id_to_file[uid])
-            self.paired_mask_files.append(mask_id_to_file[uid])
-            self.paired_unique_ids.append(int(uid) if uid.isdigit() else i)
+        # Pair files that share the exact prefix
+        paired_prefixes = sorted(set(image_prefix_to_file.keys()) & set(label_prefix_to_file.keys()))
+        self.paired_image_files = [image_prefix_to_file[p] for p in paired_prefixes]
+        self.paired_mask_files = [label_prefix_to_file[p] for p in paired_prefixes]
+        self.paired_unique_ids = paired_prefixes  # string unique id for each sample
 
     def __len__(self):
         return len(self.paired_image_files)

@@ -122,12 +122,10 @@ def run_single_experiment(exp_cfg, experiment_dir):
 
     train_dataset = MultiTemporalCropDataset(
         data_dir=data_dir,
-        sample_file_list=train_files,
         label_bands=label_bands
     )
     val_dataset = MultiTemporalCropDataset(
         data_dir=data_dir,
-        sample_file_list=val_files,
         label_bands=label_bands
     )
 
@@ -257,7 +255,6 @@ def run_cv_experiment(exp_cfg, experiment_dir):
         # Create datasets
         train_dataset = MultiTemporalCropDataset(
             data_dir=data_dir,
-            sample_file_list=train_files,
             label_bands=label_bands
         )
         
@@ -267,7 +264,6 @@ def run_cv_experiment(exp_cfg, experiment_dir):
             
         val_dataset = MultiTemporalCropDataset(
             data_dir=data_dir,
-            sample_file_list=val_files,
             label_bands=label_bands
         )
         

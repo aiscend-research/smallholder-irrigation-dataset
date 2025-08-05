@@ -2,7 +2,7 @@ name: "rf_baseline"
 
 data:
   # Cross-validation configuration
-  use_cross_validation: true  # Set to true for CV, false for single train/val
+  use_cross_validation: false  # Set to true for CV, false for single train/val
   n_folds: 5                   # Number of CV folds (only used if use_cross_validation: true)
   cv_structure_name: "band2_cv"  # Name for CV structure (only used if use_cross_validation: true)
   
@@ -24,15 +24,9 @@ data:
   copy_files: false              # Use symlinks instead of copying (saves space)
   
   # Data processing
-  label_bands: [2]      # Which label bands to use
-  image_bands: ["EVI"]    # e.g. ["B3"]
+  label_bands: Null     # Which label bands to use
+  image_bands: ["EVI"]    # e.g. ["B3"], use null for default
   
-  # Fallback manual configuration (if use_auto_splitting: false)
-  train_files: ["site_-15.04_26.69_2023_1"]
-  val_files: ["site_-15.04_26.69_2023_1"]
-  label_bands: [1,2]
-  image_bands: null
-  #image_bands: ["EVI"] # e.g. ["B2", "B3"]
 
   # time_step_selection: Specify which time steps to use from the image tensor.
   # For example:
