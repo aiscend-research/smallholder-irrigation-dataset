@@ -175,8 +175,8 @@ def run_single_experiment(exp_cfg, experiment_dir):
         num_samples=num_samples, save_path=visualization_path
             )
             # Optionally save feature importance
-            save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-            if save_feat_imp and hasattr(clf, "estimators_"):
+    save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
+    if save_feat_imp and hasattr(clf, "estimators_"):
                 BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
                 N_TIMESTEPS = 37  # Or set dynamically from dataset if needed
                 featimp_path = os.path.join(experiment_dir, "feature_importance.csv")
