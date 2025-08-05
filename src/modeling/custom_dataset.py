@@ -53,7 +53,7 @@ def get_band_indices(band_names):
     return indices
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir, label_dir, label_bands=list(range(1, 9)), image_band_names=None, time_step_selection=None):
+    def __init__(self, image_dir, label_dir, label_bands=None, image_band_names=None, time_step_selection=None):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
@@ -79,11 +79,19 @@ class MultiTemporalCropDataset(Dataset):
         """
         self.image_dir = image_dir
         self.label_dir = label_dir
-        self.label_bands = label_bands
+        # Default image_band_names: all bands if None/empty
+        if not image_band_names:
+            self.image_band_names = S2_BAND_NAMES
+        else:
+            self.image_band_names = image_band_names
+        # Default label_bands: all 8 mask bands if None/empty
+        if not label_bands:
+            self.label_bands = list(range(1, 9))
+        else:
+            self.label_bands = label_bands
         self.num_bands = 14  # 10 Sentinel-2 + NDVI + EVI + NDWI + SCL
         self.num_timesteps = 37
         self.image_band_count = self.num_bands * self.num_timesteps  # = default: 518
-        self.image_band_names = image_band_names
         self.time_step_selection = time_step_selection
 
         # Find all image and label .tif files

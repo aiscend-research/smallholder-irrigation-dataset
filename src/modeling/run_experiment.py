@@ -7,6 +7,8 @@ from datetime import datetime
 from joblib import dump
 from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
+from ml_pipeline.evaluation import export_feature_importances
+from ml_pipeline.evaluation import plot_band_time_importance
 from ml_pipeline.visualization import plot_ml_predictions
 from custom_dataset import MultiTemporalCropDataset
 
@@ -119,6 +121,21 @@ def run_experiment(exp_cfg, config_path):
                 val_dataset, clf,
                 num_samples=num_samples, save_path=visualization_path
             )
+            # Optionally save feature importance
+            save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
+            if save_feat_imp and hasattr(clf, "estimators_"):
+                BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
+                N_TIMESTEPS = 37  # Or set dynamically from dataset if needed
+                featimp_path = os.path.join(experiment_dir, "feature_importance.csv")
+                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, featimp_path)
+                # Generate and save band-by-time importance heatmap
+                heatmap_path = os.path.join(experiment_dir, "band_time_importance.png")
+                plot_band_time_importance(
+                    featimp_path,
+                    band_names=BAND_NAMES,
+                    n_timesteps=N_TIMESTEPS,
+                    save_path=heatmap_path
+                )
             print(f"[{timestamp}] Experiment complete.")
 
         finally:
