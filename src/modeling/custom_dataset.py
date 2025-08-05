@@ -4,13 +4,17 @@ import re
 import torch
 import glob
 import numpy as np
+import logging
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import rasterio
 
- # Sentinel-2 and derived band names for 14-band cubes
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Sentinel-2 and derived band names for 14-band cubes
 S2_BAND_NAMES = [
     "B2 (Blue)",
     "B3 (Green)",
@@ -311,36 +315,4 @@ class MultiTemporalCropDataset(Dataset):
             ax.axis('off')
         plt.suptitle(f"{band_name or band_names[band_idx]} Over Time", fontsize=16)
         plt.tight_layout()
-        plt.show()     
-
-
-
-# #---testing code---
-# #--- 1. Setup paths and sample list ---
-# image_dir = "multi-temporal-crop-classification-subset/test_unique_id"  
-# label_dir = "multi-temporal-crop-classification-subset/test_unique_id"
-
-# # --- 2. Instantiate dataset ---
-# dataset = MultiTemporalCropDataset(
-#     image_dir=image_dir,
-#     label_dir=label_dir,
-#     label_bands=list(range(1, 9)),  # or [1], [2], etc.
-# )
-
-# #--- 3. Fetch one sample and print shapes ---
-# sample = dataset[0]
-# image, mask, unique_id = sample["image"], sample["mask"], sample["unique_id"]
-
-# print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
-# print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
-# print("Unique_id Tensor:",  unique_id.shape)
-# print(unique_id)
-
-# print("Image stats: min =", image.min().item(), "max =", image.max().item())
-# print("Mask unique values:", torch.unique(mask))
-
-
-
-# # --- Visualize all 8 mask bands ---
-# MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
-# MultiTemporalCropDataset.plot_all_bands_at_time(image)
+        plt.show()
