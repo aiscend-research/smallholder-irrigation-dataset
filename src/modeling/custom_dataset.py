@@ -3,13 +3,17 @@ import json
 import re
 import torch
 import numpy as np
+import logging
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import rasterio
 
- # Sentinel-2 and derived band names for 14-band cubes
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Sentinel-2 and derived band names for 14-band cubes
 S2_BAND_NAMES = [
     "B2 (Blue)",
     "B3 (Green)",
@@ -77,9 +81,9 @@ class MultiTemporalCropDataset(Dataset):
             if os.path.exists(tif_path) and os.path.exists(json_path):
                 self.valid_files.append(sample_name)
             else:
-                print(f"Warning: Missing .tif or .json for {sample_name}. Skipping.")
+                logger.warning(f"Missing .tif or .json for {sample_name}. Skipping.")
         
-        print(f"Found {len(self.valid_files)} valid files out of {len(sample_file_list)} requested")
+        logger.info(f"Found {len(self.valid_files)} valid files out of {len(sample_file_list)} requested")
 
     def __len__(self):
         return len(self.valid_files)
@@ -98,30 +102,19 @@ class MultiTemporalCropDataset(Dataset):
             # Read the full stack: shape (T*B, H, W) = (518, 100, 100)
             full_array = src.read()  # shape: (518, H, W)
             
-            # Reshape to (B, T, H, W) = (14, 37, 100, 100)
-            # The data is stored as (T*B, H, W), so we need to reshape it
-            image_tensor = torch.from_numpy(full_array).float()
-            H, W = image_tensor.shape[1:]
-            image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
-            image_tensor[image_tensor == -9999] = float('nan')
+            # Reshape to (T, B, H, W) = (37, 14, 100, 100)
+            full_array = full_array.reshape(self.num_timesteps, self.num_bands, full_array.shape[1], full_array.shape[2])
+            
+            # Convert to torch tensor and permute to (B, T, H, W) = (14, 37, 100, 100)
+            image_tensor = torch.from_numpy(full_array).permute(1, 0, 2, 3).float()
 
-        # Apply band filtering if specified
-        if self.image_band_names is not None:
-            band_indices = get_band_indices(self.image_band_names)
-            image_tensor = image_tensor[band_indices, ...]
-
-        # Load irrigation labels
-        # Extract information from metadata to find corresponding mask file
-        unique_id = metadata.get('unique_id', '1')
-        site_id = metadata.get('site_id', 'site_-15.04_26.69_2023_1')
-        
-        # Extract site_id number from the full site_id string
-        # site_id format: "site_-15.04_26.69_2023_1" -> extract the numeric part
-        site_id_match = re.search(r'site_([^_]+)_([^_]+)_(\d+)_(\d+)', site_id)
-        if site_id_match:
-            lat, lon, year, unique_id_from_site = site_id_match.groups()
-            # Use the site_id number from the mask naming convention
-            site_id_number = "5168346"  # This should be extracted from the actual data
+        # Load mask/label data
+        # Extract unique_id and site_id from sample name
+        # Sample name format: "1_5168346_2023.09.06_image"
+        parts = sample_name.split('_')
+        if len(parts) >= 3:
+            unique_id = parts[0]
+            site_id_number = parts[1]
         else:
             # Fallback if pattern doesn't match
             site_id_number = "5168346"
@@ -140,11 +133,11 @@ class MultiTemporalCropDataset(Dataset):
                     mask_tensor = torch.from_numpy(mask_array[0]).long()  # (H, W)
                 else:
                     mask_tensor = torch.from_numpy(mask_array).long()      # (B, H, W)
-            print(f"Loaded mask from: {mask_filename}")
+            logger.debug(f"Loaded mask from: {mask_filename}")
         else:
             # Fallback to placeholder if mask file doesn't exist
-            print(f"Warning: Mask file not found: {mask_path}")
-            mask_tensor = torch.zeros((H, W), dtype=torch.long)  # Placeholder mask
+            logger.warning(f"Mask file not found: {mask_path}")
+            mask_tensor = torch.zeros((100, 100), dtype=torch.long)  # Placeholder mask
 
         return {
             "image": image_tensor,
@@ -280,36 +273,4 @@ class MultiTemporalCropDataset(Dataset):
             ax.axis('off')
         plt.suptitle(f"{band_name or band_names[band_idx]} Over Time", fontsize=16)
         plt.tight_layout()
-        plt.show()     
-
-
-
-# #---testing code---
-# #--- 1. Setup paths and sample list ---
-# image_dir = "multi-temporal-crop-classification-subset/test_unique_id"  
-# label_dir = "multi-temporal-crop-classification-subset/test_unique_id"
-
-# # --- 2. Instantiate dataset ---
-# dataset = MultiTemporalCropDataset(
-#     image_dir=image_dir,
-#     label_dir=label_dir,
-#     label_bands=list(range(1, 9)),  # or [1], [2], etc.
-# )
-
-# #--- 3. Fetch one sample and print shapes ---
-# sample = dataset[0]
-# image, mask, unique_id = sample["image"], sample["mask"], sample["unique_id"]
-
-# print("Image tensor shape:", image.shape)  # Should be (14, 37, H, W)
-# print("Mask tensor shape:", mask.shape)    # (8, H, W) if label_bands=[1,2,3,4,5,6,7,8], else (H, W)
-# print("Unique_id Tensor:",  unique_id.shape)
-# print(unique_id)
-
-# print("Image stats: min =", image.min().item(), "max =", image.max().item())
-# print("Mask unique values:", torch.unique(mask))
-
-
-
-# # --- Visualize all 8 mask bands ---
-# MultiTemporalCropDataset.plot_mask_tensor(mask)   # Will plot all bands by default
-# MultiTemporalCropDataset.plot_all_bands_at_time(image)
+        plt.show()

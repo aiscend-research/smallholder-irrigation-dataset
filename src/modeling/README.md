@@ -71,28 +71,55 @@ data/modeling/
 - **run_experiment.py:**  
   Main experiment runner that loads configuration from YAML and orchestrates the entire pipeline.
 
----
 
-### Data Splitting
+## Data Splitting
 
-#### Folder Structure
+The pipeline supports cross-validation experiments with file-list based organization (no file duplication). Each experiment can have its own CV structure.
+
+### CV Folder Structure
 ```
-splits/irrigation_binary_structure/
-├── train/
-│   ├── 1_5168346_2023.09.06_image.tif
-│   ├── 1_5168346_2023.09.06_label.tif
-│   ├── 1_5168346_2023.09.06_image.json
-│   └── ...
-├── val/
-│   ├── 2_5168347_2023.09.06_image.tif
-│   ├── 2_5168347_2023.09.06_label.tif
-│   ├── 2_5168347_2023.09.06_image.json
-│   └── ...
-└── test/
-    ├── 3_5168348_2023.09.06_image.tif
-    ├── 3_5168348_2023.09.06_label.tif
-    ├── 3_5168348_2023.09.06_image.json
-    └── ...
+data/modeling/splits/
+└── irrigation_cv/                    # ← cv_structure_name
+    ├── train/
+    │   ├── fold_1/
+    │   │   ├── inner_train/
+    │   │   │   └── train_files.txt  # ← File list for training
+    │   │   └── inner_val/
+    │   │       └── val_files.txt    # ← File list for validation
+    │   ├── fold_2/
+    │   │   ├── inner_train/
+    │   │   │   └── train_files.txt
+    │   │   └── inner_val/
+    │   │       └── val_files.txt
+    │   └── ...
+    ├── test/
+    │   └── test_files.txt           # ← Held-out test set
+    └── cv_metadata.json             # ← CV metadata
+```
+
+### Different Experiment Configurations
+
+For different experiments (e.g., different bands), use different `cv_structure_name`:
+
+```yaml
+# Experiment 1: Band 2 (irrigation presence)
+name: "rf_band2_experiment"
+data:
+  cv_structure_name: "band2_cv"
+  label_bands: [2]
+
+# Experiment 2: Band 1 (irrigation type)  
+name: "rf_band1_experiment"
+data:
+  cv_structure_name: "band1_cv"
+  label_bands: [1]
+```
+
+This creates separate CV structures:
+```
+data/modeling/splits/
+├── band2_cv/              # For irrigation presence experiments
+└── band1_cv/              # For irrigation type experiments
 ```
 
 ---

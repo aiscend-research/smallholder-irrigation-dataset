@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import logging
 from pathlib import Path
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
@@ -18,6 +19,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Tuple, Optional
 import warnings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 class IrrigationDataSplitter:
@@ -86,8 +95,8 @@ class IrrigationDataSplitter:
             else:
                 missing_locations.append(image_filename)
         
-        print(f"Found {len(existing_files)} complete data files")
-        print(f"Missing {len(missing_locations)} data files")
+        logger.info(f"Found {len(existing_files)} complete data files")
+        logger.warning(f"Missing {len(missing_locations)} data files")
         
         # Filter to only include locations with complete data
         self.df = self.df[self.df.apply(
@@ -97,7 +106,7 @@ class IrrigationDataSplitter:
             )), axis=1
         )]
         
-        print(f"Final dataset size: {len(self.df)} locations")
+        logger.info(f"Final dataset size: {len(self.df)} locations")
         
     def get_band_info(self) -> Dict:
         """
@@ -218,22 +227,22 @@ class IrrigationDataSplitter:
         
         # Check class balance
         unique_labels, counts = np.unique(location_labels, return_counts=True)
-        print(f"Class distribution in {len(location_labels)} locations:")
+        logger.info(f"Class distribution in {len(location_labels)} locations:")
         for label, count in zip(unique_labels, counts):
-            print(f"  Class {label}: {count} locations")
+            logger.info(f"  Class {label}: {count} locations")
         
         # Filter classes with too few samples
         valid_classes = unique_labels[counts >= min_samples_per_class]
         valid_mask = np.isin(location_labels, valid_classes)
         
         if not valid_mask.all():
-            print(f"Warning: {np.sum(~valid_mask)} locations removed due to insufficient class samples")
+            logger.warning(f"Warning: {np.sum(~valid_mask)} locations removed due to insufficient class samples")
             location_labels = location_labels[valid_mask]
             location_files = location_files[valid_mask]
         
         # Handle case where we have too few samples for splitting
         if len(location_files) < 3:
-            print(f"Warning: Only {len(location_files)} locations available. Using all for training.")
+            logger.warning(f"Warning: Only {len(location_files)} locations available. Using all for training.")
             return {
                 'train_files': location_files.tolist(),
                 'val_files': [],
@@ -316,14 +325,35 @@ class IrrigationDataSplitter:
         for loc_id in unique_locations:
             loc_data = self.df[self.df['location_id'] == loc_id]
             primary_survey = loc_data.iloc[0]
-            site_id = f"site_{primary_survey['y']:.2f}_{primary_survey['x']:.2f}_{primary_survey['year']}_{primary_survey['unique_id']}"
+            site_id_number = primary_survey['site_id'].replace('id_', '')
+            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
             
             label = primary_survey['irrigation']
             location_labels.append(label)
-            location_files.append(site_id)
+            location_files.append(file_id)
         
         location_labels = np.array(location_labels)
         location_files = np.array(location_files)
+        
+        # Handle insufficient samples for CV
+        if len(location_files) < n_splits:
+            logger.warning(f"Insufficient samples ({len(location_files)}) for {n_splits}-fold CV. Using all samples for training.")
+            # Return a single fold with all data
+            return [{
+                'fold': 1,
+                'train_files': location_files.tolist(),
+                'val_files': [],
+                'metadata': {
+                    'train_locations': len(location_files),
+                    'val_locations': 0,
+                    'stratification_band': stratification_band,
+                    'class_distribution': {
+                        'train': dict(zip(*np.unique(location_labels, return_counts=True))),
+                        'val': {}
+                    },
+                    'warning': f'Insufficient samples for {n_splits}-fold CV'
+                }
+            }]
         
         # Perform stratified k-fold
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
@@ -367,7 +397,7 @@ class IrrigationDataSplitter:
         experiments = {}
         
         for band in target_bands:
-            print(f"\nCreating split for Band {band}")
+            logger.info(f"\nCreating split for Band {band}")
             
             # For now, use irrigation presence as proxy for all bands
             # In practice, you'd load the actual label files to get band-specific labels
@@ -486,7 +516,7 @@ class IrrigationDataSplitter:
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        print(f"Saved splits to {output_dir}")
+        logger.info(f"Saved splits to {output_dir}")
 
     def create_folder_structure(self, split_info: Dict, output_dir: str, 
                               copy_files: bool = True, create_symlinks: bool = False) -> str:
@@ -512,7 +542,7 @@ class IrrigationDataSplitter:
             
             if f'{split_type}_files' in split_info:
                 files = split_info[f'{split_type}_files']
-                print(f"Processing {len(files)} files for {split_type} set...")
+                logger.info(f"Processing {len(files)} files for {split_type} set...")
                 
                 for file_base in files:
                     # Define source files (image, label, json)
@@ -540,12 +570,12 @@ class IrrigationDataSplitter:
                                 with open(dst, 'w') as f:
                                     f.write(f"# Placeholder for {os.path.basename(src)}")
                         else:
-                            print(f"Warning: Source file not found: {src}")
+                            logger.warning(f"Warning: Source file not found: {src}")
         
-        print(f"Created folder structure at: {output_dir}")
-        print(f"  - train/: {len(split_info.get('train_files', []))} files")
-        print(f"  - val/: {len(split_info.get('val_files', []))} files")
-        print(f"  - test/: {len(split_info.get('test_files', []))} files")
+        logger.info(f"Created folder structure at: {output_dir}")
+        logger.info(f"  - train/: {len(split_info.get('train_files', []))} files")
+        logger.info(f"  - val/: {len(split_info.get('val_files', []))} files")
+        logger.info(f"  - test/: {len(split_info.get('test_files', []))} files")
         
         return output_dir
 
@@ -570,6 +600,213 @@ class IrrigationDataSplitter:
         structure_dir = os.path.join(output_dir, f"{name}_structure")
         return self.create_folder_structure(split_info, structure_dir, copy_files=copy_files)
 
+    def prepare_experiment_splits(self, 
+                                 exp_cfg: Dict,
+                                 experiment_dir: str = None) -> Tuple[List[str], List[str], Dict]:
+        """
+        Prepare data splits for an experiment based on configuration.
+        
+        Args:
+            exp_cfg: Experiment configuration dictionary
+            experiment_dir: Directory to save split metadata (optional)
+            
+        Returns:
+            Tuple of (train_files, val_files, split_metadata)
+        """
+        # Get split parameters from config
+        test_size = exp_cfg["data"].get("test_size", 0.2)
+        val_size = exp_cfg["data"].get("val_size", 0.2)
+        stratification_band = exp_cfg["data"].get("stratification_band", 2)
+        min_samples_per_class = exp_cfg["data"].get("min_samples_per_class", 5)
+        
+        logger.info(f"Creating spatial stratified split:")
+        logger.info(f"  - Test size: {test_size}")
+        logger.info(f"  - Val size: {val_size}")
+        logger.info(f"  - Stratification band: {stratification_band}")
+        logger.info(f"  - Min samples per class: {min_samples_per_class}")
+        
+        # Create splits
+        split_info = self.spatial_stratified_split(
+            test_size=test_size,
+            val_size=val_size,
+            stratification_band=stratification_band,
+            min_samples_per_class=min_samples_per_class
+        )
+        
+        # Create folder structure if requested
+        if exp_cfg["data"].get("create_folder_structure", True):
+            splits_dir = exp_cfg["data"].get("splits_dir", "./splits")
+            structure_name = exp_cfg["name"]
+            copy_files = exp_cfg["data"].get("copy_files", False)
+            
+            logger.info(f"Creating folder structure at: {splits_dir}")
+            structure_path = self.save_splits_with_structure(
+                split_info, 
+                splits_dir, 
+                structure_name,
+                copy_files=copy_files
+            )
+            logger.info(f"Folder structure created at: {structure_path}")
+        
+        # Prepare split metadata
+        split_metadata = {
+            "split_info": split_info,
+            "splitter_params": {
+                "test_size": test_size,
+                "val_size": val_size,
+                "stratification_band": stratification_band,
+                "min_samples_per_class": min_samples_per_class
+            }
+        }
+        
+        train_files = split_info["train_files"]
+        val_files = split_info["val_files"]
+        
+        logger.info(f"Split created:")
+        logger.info(f"  - Train files: {len(train_files)}")
+        logger.info(f"  - Val files: {len(val_files)}")
+        logger.info(f"  - Test files: {len(split_info['test_files'])}")
+        
+        return train_files, val_files, split_metadata
+
+    def create_cv_folder_structure(self, 
+                                  n_splits: int = 5,
+                                  output_dir: str = "./splits",
+                                  structure_name: str = "cv_structure",
+                                  copy_files: bool = False) -> str:
+        """
+        Create cross-validation folder structure with file lists.
+        
+        Args:
+            n_splits: Number of CV folds
+            output_dir: Directory to save the structure
+            structure_name: Name for the structure
+            copy_files: If True, copy files. If False, create symlinks or file lists
+            
+        Returns:
+            Path to the created structure
+        """
+        # Create CV splits
+        cv_splits = self.cross_validation_split(n_splits=n_splits)
+        
+        # Create main output directory
+        cv_dir = os.path.join(output_dir, f"{structure_name}")
+        os.makedirs(cv_dir, exist_ok=True)
+        
+        # Get all available files
+        all_files = []
+        for loc_id in self.df['location_id'].unique():
+            loc_data = self.df[self.df['location_id'] == loc_id]
+            primary_survey = loc_data.iloc[0]
+            site_id_number = primary_survey['site_id'].replace('id_', '')
+            file_id = f"{primary_survey['unique_id']}_{site_id_number}_2023.09.06_image"
+            all_files.append(file_id)
+        
+        # Handle insufficient samples for train/test split
+        if len(all_files) < 2:
+            logger.warning(f"Insufficient samples ({len(all_files)}) for train/test split. Using all data for training.")
+            train_files = all_files
+            test_files = []
+        else:
+            # Split into train and test
+            test_size = 0.2
+            train_files, test_files = train_test_split(
+                all_files, 
+                test_size=test_size, 
+                random_state=self.random_state
+            )
+        
+        # Save test files list
+        test_dir = os.path.join(cv_dir, "test")
+        os.makedirs(test_dir, exist_ok=True)
+        
+        with open(os.path.join(test_dir, "test_files.txt"), 'w') as f:
+            for file_id in test_files:
+                f.write(f"{file_id}\n")
+        
+        # Create CV folds for training data
+        train_dir = os.path.join(cv_dir, "train")
+        os.makedirs(train_dir, exist_ok=True)
+        
+        for fold_idx, split_info in enumerate(cv_splits, 1):
+            fold_dir = os.path.join(train_dir, f"fold_{fold_idx}")
+            os.makedirs(fold_dir, exist_ok=True)
+            
+            # Create inner train/val directories
+            inner_train_dir = os.path.join(fold_dir, "inner_train")
+            inner_val_dir = os.path.join(fold_dir, "inner_val")
+            os.makedirs(inner_train_dir, exist_ok=True)
+            os.makedirs(inner_val_dir, exist_ok=True)
+            
+            # Save file lists (not copy files)
+            with open(os.path.join(inner_train_dir, "train_files.txt"), 'w') as f:
+                for file_id in split_info['train_files']:
+                    f.write(f"{file_id}\n")
+            
+            with open(os.path.join(inner_val_dir, "val_files.txt"), 'w') as f:
+                for file_id in split_info['val_files']:
+                    f.write(f"{file_id}\n")
+            
+            # If copy_files is True, actually copy the files
+            if copy_files:
+                logger.info(f"Copying files for fold {fold_idx}...")
+                self._copy_files_to_fold(split_info['train_files'], inner_train_dir)
+                self._copy_files_to_fold(split_info['val_files'], inner_val_dir)
+        
+        # Save metadata
+        metadata = {
+            "n_splits": n_splits,
+            "test_size": len(test_files) / len(all_files) if all_files else 0,
+            "total_files": len(all_files),
+            "train_files": len(train_files),
+            "test_files": len(test_files),
+            "cv_splits": cv_splits
+        }
+        
+        # Convert numpy types for JSON serialization
+        def convert_numpy_types(obj):
+            if isinstance(obj, dict):
+                return {str(k): convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(v) for v in obj]
+            elif hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            else:
+                return obj
+        
+        metadata = convert_numpy_types(metadata)
+        
+        with open(os.path.join(cv_dir, "cv_metadata.json"), 'w') as f:
+            json.dump(metadata, f, indent=2, default=str)
+        
+        logger.info(f"Created CV structure at: {cv_dir}")
+        logger.info(f"  - {n_splits} folds created")
+        logger.info(f"  - Test set: {len(test_files)} files")
+        logger.info(f"  - Train set: {len(train_files)} files")
+        
+        return cv_dir
+    
+    def _copy_files_to_fold(self, file_list: List[str], target_dir: str):
+        """Helper method to copy files to a fold directory."""
+        for file_id in file_list:
+            # Define source files
+            image_src = os.path.join(self.data_dir, f"{file_id}.tif")
+            label_src = os.path.join(self.data_dir, f"{file_id.replace('_image', '_label')}.tif")
+            json_src = os.path.join(self.data_dir, f"{file_id}.json")
+            
+            # Define destination files
+            image_dst = os.path.join(target_dir, f"{file_id}.tif")
+            label_dst = os.path.join(target_dir, f"{file_id.replace('_image', '_label')}.tif")
+            json_dst = os.path.join(target_dir, f"{file_id}.json")
+            
+            # Copy files
+            for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
+                if os.path.exists(src):
+                    import shutil
+                    shutil.copy2(src, dst)
+                else:
+                    logger.warning(f"Source file not found: {src}")
+
 
 def main():
     """Example usage of the IrrigationDataSplitter."""
@@ -580,16 +817,13 @@ def main():
     
     splitter = IrrigationDataSplitter(csv_path, data_dir)
     
-    # Print band information
-    print("Band Information:")
+    # Show band information
+    logger.info("Band Information:")
     for band_name, info in splitter.get_band_info().items():
-        print(f"\n{band_name}: {info['name']}")
-        print(f"  Type: {info['type']}")
-        print(f"  Values: {info['values']}")
+        logger.info(f"{band_name}: {info['name']} ({info['type']})")
     
     # Create basic split
-    print("\n" + "="*50)
-    print("Creating spatial stratified split...")
+    logger.info("Creating spatial stratified split...")
     split_info = splitter.spatial_stratified_split(
         test_size=0.2,
         val_size=0.2,
@@ -600,8 +834,7 @@ def main():
     splitter.visualize_splits(split_info)
     
     # Save splits with folder structure
-    print("\n" + "="*50)
-    print("Creating folder structure...")
+    logger.info("Creating folder structure...")
     structure_path = splitter.save_splits_with_structure(
         split_info, 
         "splits/", 
@@ -609,29 +842,15 @@ def main():
         copy_files=True  # Set to False to create symlinks instead
     )
     
-    print(f"\nFolder structure created at: {structure_path}")
-    print("Structure:")
-    print(f"  {structure_path}/")
-    print(f"    ├── train/")
-    print(f"    │   ├── 1_5168346_2023.09.06_image.tif")
-    print(f"    │   ├── 1_5168346_2023.09.06_label.tif")
-    print(f"    │   └── 1_5168346_2023.09.06_image.json")
-    print(f"    ├── val/")
-    print(f"    │   └── ...")
-    print(f"    └── test/")
-    print(f"        └── ...")
+    logger.info(f"Folder structure created at: {structure_path}")
     
     # Experiment with different bands
-    print("\n" + "="*50)
-    print("Creating experimental splits for different bands...")
+    logger.info("Creating experimental splits for different bands...")
     experiments = splitter.experiment_with_bands(target_bands=[1, 2, 8])
     
     for band, exp_info in experiments.items():
-        print(f"\n{band}: {exp_info['band_description']['name']}")
-        print(f"  Recommendation: {exp_info['recommended_use']}")
-        print(f"  Train/Val/Test: {exp_info['split_info']['metadata']['train_locations']}/"
-              f"{exp_info['split_info']['metadata']['val_locations']}/"
-              f"{exp_info['split_info']['metadata']['test_locations']}")
+        logger.info(f"Band {band}: {exp_info['band_description']['name']}")
+        logger.info(f"  Recommendation: {exp_info['recommended_use']}")
 
 
 if __name__ == "__main__":

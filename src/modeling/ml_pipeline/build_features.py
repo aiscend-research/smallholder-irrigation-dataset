@@ -2,57 +2,6 @@ import numpy as np
 from tqdm import tqdm
 
 
-def get_datasets(data_dir: str, train_files: list, val_files: list = None, test_files: list = None,
-                 label_bands: list = None):
-    """
-    Get custom datasets for irrigation classification.
-    
-    Args:
-        data_dir: Path to the data directory containing .tif and .json files
-        train_files: List of training sample filenames (without extension)
-        val_files: List of validation sample filenames (without extension)
-        test_files: List of test sample filenames (without extension)
-        label_bands: List of label band indices to use (1-based, default: [1,2])
-    
-    Returns:
-        dict: Contains 'train_dataset', 'val_dataset', 'test_dataset' (if provided)
-    """
-    # Import here to avoid circular imports
-    from custom_dataset import MultiTemporalCropDataset
-    
-    # Set default label bands if not provided
-    if label_bands is None:
-        label_bands = [1, 2]
-    
-    datasets = {}
-    
-    # Create train dataset
-    datasets['train_dataset'] = MultiTemporalCropDataset(
-        data_dir=data_dir,
-        sample_file_list=train_files,
-        label_bands=label_bands
-    )
-    
-    # Create validation dataset if provided
-    if val_files:
-        datasets['val_dataset'] = MultiTemporalCropDataset(
-            data_dir=data_dir,
-            sample_file_list=val_files,
-            label_bands=label_bands
-        )
-    
-    # Create test dataset if provided
-    if test_files:
-        datasets['test_dataset'] = MultiTemporalCropDataset(
-            data_dir=data_dir,
-            sample_file_list=test_files,
-            label_bands=label_bands
-        )
-    
-    return datasets
-
-
-#function to flatten tensors to a more "tabular" format
 def flatten_dataset(dataset, ignore_index=-1, ignore_value_in_image=None):
     """
     Flattens a multi-temporal crop dataset for ML.
