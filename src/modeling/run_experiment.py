@@ -3,36 +3,24 @@ import sys
 import yaml
 import json
 import shutil
-import logging
-import numpy as np
 from datetime import datetime
 from joblib import dump
+import torch
+import numpy as np
 from tqdm import tqdm
+import pandas as pd
 from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
 from ml_pipeline.evaluation import export_feature_importances
-from ml_pipeline.evaluation import plot_band_time_importance
+import glob  # Place at the top of the file if not already present
 from ml_pipeline.visualization import plot_ml_predictions
-from ml_pipeline.build_features import flatten_dataset  # ← Moved to top
 from custom_dataset import MultiTemporalCropDataset
-from ml_pipeline.data_splitting import IrrigationDataSplitter
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger(__name__)
-
 
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
-
 def run_experiment(exp_cfg, config_path):
-    # Timestamped experiment name
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base_name = exp_cfg["name"]
     run_name = f"{base_name}_{timestamp}"
@@ -41,7 +29,7 @@ def run_experiment(exp_cfg, config_path):
     experiment_dir = os.path.join(base_dir, run_name)
 
     if os.path.exists(experiment_dir):
-        logger.info(f"Skipping: {run_name} already exists.")
+        print(f"Skipping: {run_name} already exists.")
         return
 
     os.makedirs(experiment_dir, exist_ok=True)
@@ -51,9 +39,7 @@ def run_experiment(exp_cfg, config_path):
     visualization_path = os.path.join(experiment_dir, "visualization.png")
     config_snapshot_path = os.path.join(experiment_dir, "experiment.yaml")
     log_path = os.path.join(experiment_dir, "run.log")
-    split_metadata_path = os.path.join(experiment_dir, "split_metadata.json")
 
-    # Copy the config file used for this experiment
     shutil.copyfile(config_path, config_snapshot_path)
 
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -61,285 +47,154 @@ def run_experiment(exp_cfg, config_path):
     with open(log_path, 'w') as log_file:
         sys.stdout = log_file
         try:
-            logger.info(f"[{timestamp}] Starting experiment: {base_name}")
-            logger.info(f"Saving outputs to: {experiment_dir}")
+            print(f"[{timestamp}] Starting experiment: {base_name}")
+            print(f"Saving outputs to: {experiment_dir}")
 
-            # Check if cross-validation is enabled
-            use_cross_validation = exp_cfg["data"].get("use_cross_validation", False)
-            
-            if use_cross_validation:
-                logger.info("Running cross-validation experiment...")
-                return run_cv_experiment(exp_cfg, experiment_dir)
+            data_dir = exp_cfg["data"]["data_dir"]
+            image_bands = exp_cfg["data"]["image_bands"]
+
+            print("Loading full dataset...")
+            full_dataset = MultiTemporalCropDataset(data_dir=data_dir, image_band_names=image_bands)
+            total_samples = len(full_dataset)
+            print(f"Dataset loaded. Total samples: {total_samples}")
+
+            train_indices = list(range(8))
+            val_indices = list(range(8, 10))
+            train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+            val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+
+            print(f"Loaded full dataset: {total_samples} samples")
+            print(f"Train dataset length: {len(train_dataset)}")
+            print(f"Val dataset length: {len(val_dataset)}")
+            if len(train_dataset) > 0:
+                sample_train = train_dataset[0]
+                print(f"First train sample image shape: {sample_train['image'].shape}, mask shape: {sample_train['mask'].shape}")
+            if len(val_dataset) > 0:
+                sample_val = val_dataset[0]
+                print(f"First val sample image shape: {sample_val['image'].shape}, mask shape: {sample_val['mask'].shape}")
+
+            from ml_pipeline.build_features import flatten_dataset
+
+            print("Flattening train dataset...")
+            # Wrap flatten_dataset with tqdm progress bar if possible
+            X_train, y_train = flatten_dataset(train_dataset)
+            print(f"[DEBUG] X_train shape: {X_train.shape}")
+            print(f"[DEBUG] y_train shape: {y_train.shape}")
+            if X_train.size:
+                print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
+                print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
             else:
-                logger.info("Running single train/val experiment...")
-                return run_single_experiment(exp_cfg, experiment_dir)
+                print("[DEBUG] X_train is EMPTY")
+            if y_train.size:
+                print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
+                print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
+            else:
+                print("[DEBUG] y_train is EMPTY")
+            print(f"After flatten_dataset(train_dataset):")
+            print(f"  X_train shape: {X_train.shape}")
+            print(f"  y_train shape: {y_train.shape}")
+            if isinstance(X_train, np.ndarray):
+                print(f"  X_train dtype: {X_train.dtype}")
+            if isinstance(y_train, np.ndarray):
+                print(f"  y_train dtype: {y_train.dtype}")
+            print(f"  X_train min: {np.nanmin(X_train) if X_train.size > 0 else 'EMPTY'}")
+            print(f"  X_train max: {np.nanmax(X_train) if X_train.size > 0 else 'EMPTY'}")
+            print(f"  y_train min: {np.nanmin(y_train) if y_train.size > 0 else 'EMPTY'}")
+            print(f"  y_train max: {np.nanmax(y_train) if y_train.size > 0 else 'EMPTY'}")
+
+            print("Flattening val dataset...")
+            X_val, y_val = flatten_dataset(val_dataset)
+            print(f"[DEBUG] X_val shape: {X_val.shape}")
+            print(f"[DEBUG] y_val shape: {y_val.shape}")
+            if X_val.size:
+                print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
+                print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
+            else:
+                print("[DEBUG] X_val is EMPTY")
+            if y_val.size:
+                print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
+                print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
+            else:
+                print("[DEBUG] y_val is EMPTY")
+            print(f"After flatten_dataset(val_dataset):")
+            print(f"  X_val shape: {X_val.shape}")
+            print(f"  y_val shape: {y_val.shape}")
+            if isinstance(X_val, np.ndarray):
+                print(f"  X_val dtype: {X_val.dtype}")
+            if isinstance(y_val, np.ndarray):
+                print(f"  y_val dtype: {y_val.dtype}")
+            print(f"  X_val min: {np.nanmin(X_val) if X_val.size > 0 else 'EMPTY'}")
+            print(f"  X_val max: {np.nanmax(X_val) if X_val.size > 0 else 'EMPTY'}")
+            print(f"  y_val min: {np.nanmin(y_val) if y_val.size > 0 else 'EMPTY'}")
+            print(f"  y_val max: {np.nanmax(y_val) if y_val.size > 0 else 'EMPTY'}")
+
+            y_train = y_train[:, :2]
+            y_val = y_val[:, :2]
+            print(f"y_train (first two bands) shape: {y_train.shape}")
+            print(f"y_val (first two bands) shape: {y_val.shape}")
+
+            model_type = exp_cfg["model"]["type"].lower()
+            hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
+
+            print("Training model...")
+            clf = train_model(X_train, y_train, model_type, **hyperparams)
+            print("Model training complete.")
+
+            dump(clf, model_path)
+            print(f"Model saved to {model_path}")
+
+            print("Running predictions...")
+            y_pred = clf.predict(X_val)
+            print(f"y_pred shape: {y_pred.shape}")
+
+            metrics = model_metrics(y_pred, y_val)
+            with open(metrics_path, "w") as f:
+                json.dump(metrics, f, indent=2)
+            print("Metrics:", metrics)
+
+            num_samples = exp_cfg["visualization"].get("num_samples", 2)
+            print("Generating prediction visualizations...")
+            plot_ml_predictions(
+                val_dataset, clf,
+                num_samples=num_samples, save_path=visualization_path
+            )
+
+            save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
+            if save_feat_imp and hasattr(clf, "estimators_"):
+                BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
+                N_TIMESTEPS = 37
+                # --- Export and plot all feature importance CSVs in the experiment_dir ---
+                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, experiment_dir)
+                fi_csvs = glob.glob(os.path.join(experiment_dir, "feature_importance*.csv"))
+                print(f"Found feature importance CSV files: {fi_csvs}")
+                if not fi_csvs:
+                    print(f"Warning: No feature importance files found in {experiment_dir}.")
+                else:
+                    from ml_pipeline.evaluation import plot_feature_importance_from_df
+                    for fi_csv in fi_csvs:
+                        try:
+                            base = os.path.splitext(os.path.basename(fi_csv))[0]
+                            png_path = os.path.join(experiment_dir, base + ".png")
+                            plot_feature_importance_from_df(
+                                fi_csv,
+                                band_names=BAND_NAMES,
+                                num_timesteps=N_TIMESTEPS,
+                                save_path=png_path
+                            )
+                            print(f"Plotted feature importance for {fi_csv} to {png_path}")
+                        except Exception as e:
+                            print(f"Failed to plot feature importance for {fi_csv}: {e}")
+            elif save_feat_imp:
+                print("Warning: Requested to save feature importances, but model does not support 'estimators_'. Skipping feature importance export.")
+            print(f"[{timestamp}] Experiment complete.")
 
         finally:
             sys.stdout = original_stdout
-            logger.info(f"Logged output to {log_path}")
-
-
-def run_single_experiment(exp_cfg, experiment_dir):
-    """Run a single train/validation experiment."""
-    use_auto_splitting = exp_cfg["data"].get("use_auto_splitting", True)
-    
-    if use_auto_splitting:
-        logger.info("Using automatic data splitting...")
-        
-        # Initialize data splitter
-        splitter = IrrigationDataSplitter(
-            csv_path=exp_cfg["data"]["csv_path"],
-            data_dir=exp_cfg["data"]["data_dir"],
-            random_state=exp_cfg["data"].get("random_state", 42)
-        )
-        
-        # Use the splitter's integration method
-        train_files, val_files, split_metadata = splitter.prepare_experiment_splits(
-            exp_cfg, experiment_dir
-        )
-        
-        # Save split metadata
-        if split_metadata:
-            split_metadata_path = os.path.join(experiment_dir, "split_metadata.json")
-            with open(split_metadata_path, "w") as f:
-                json.dump(split_metadata, f, indent=2, default=str)
-            logger.info(f"Split metadata saved to: {split_metadata_path}")
-            
-    else:
-        logger.info("Using manual file lists from config...")
-        train_files = exp_cfg["data"]["train_files"]
-        val_files = exp_cfg["data"]["val_files"]
-        split_metadata = None
-
-    # Prepare data
-    data_dir = exp_cfg["data"]["data_dir"]
-    label_bands = exp_cfg["data"]["label_bands"]
-
-    logger.info(f"Creating datasets:")
-    logger.info(f"  - Data directory: {data_dir}")
-    logger.info(f"  - Train files: {len(train_files)}")
-    logger.info(f"  - Val files: {len(val_files)}")
-    logger.info(f"  - Label bands: {label_bands}")
-
-    train_dataset = MultiTemporalCropDataset(
-        data_dir=data_dir,
-        label_bands=label_bands
-    )
-    val_dataset = MultiTemporalCropDataset(
-        data_dir=data_dir,
-        label_bands=label_bands
-    )
-
-    logger.info(f"Dataset sizes:")
-    logger.info(f"  - Train dataset: {len(train_dataset)} samples")
-    logger.info(f"  - Val dataset: {len(val_dataset)} samples")
-
-    X_train, y_train = flatten_dataset(train_dataset)
-    X_val, y_val = flatten_dataset(val_dataset)
-
-    logger.info(f"Flattened data shapes:")
-    logger.info(f"  - X_train: {X_train.shape}")
-    logger.info(f"  - y_train: {y_train.shape}")
-    logger.info(f"  - X_val: {X_val.shape}")
-    logger.info(f"  - y_val: {y_val.shape}")
-
-    # Select only first two label bands for ML training/validation
-    y_train = y_train[:, :2]
-    y_val = y_val[:, :2]
-
-    # Train model
-    model_type = exp_cfg["model"]["type"].lower()
-    hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
-
-    tqdm.write(f"Training {model_type} model with hyperparameters: {hyperparams}")
-    clf = train_model(X_train, y_train, model_type, **hyperparams)
-    tqdm.write("Model training complete.")
-
-    model_path = os.path.join(experiment_dir, "model.pkl")
-    dump(clf, model_path)
-    logger.info(f"Model saved to {model_path}")
-
-    # Predict and evaluate
-    tqdm.write("Predicting on validation set...")
-    y_pred = clf.predict(X_val)
-    tqdm.write("Prediction complete.")
-    metrics = model_metrics(y_pred, y_val)
-    metrics_path = os.path.join(experiment_dir, "metrics.json")
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
-    logger.info("Metrics:", metrics)
-
-    num_samples = exp_cfg["visualization"].get("num_samples", 2)
-    visualization_path = os.path.join(experiment_dir, "visualization.png")
-
-    plot_ml_predictions(
-        val_dataset, clf,
-        num_samples=num_samples, save_path=visualization_path
-            )
-            # Optionally save feature importance
-    save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-    if save_feat_imp and hasattr(clf, "estimators_"):
-                BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
-                N_TIMESTEPS = 37  # Or set dynamically from dataset if needed
-                featimp_path = os.path.join(experiment_dir, "feature_importance.csv")
-                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, featimp_path)
-                # Generate and save band-by-time importance heatmap
-                heatmap_path = os.path.join(experiment_dir, "band_time_importance.png")
-                plot_band_time_importance(
-                    featimp_path,
-                    band_names=BAND_NAMES,
-                    n_timesteps=N_TIMESTEPS,
-                    save_path=heatmap_path
-        )
-    tqdm.write("Experiment complete.")
-
-
-def run_cv_experiment(exp_cfg, experiment_dir):
-    """Run cross-validation experiment."""
-    # Initialize data splitter
-    splitter = IrrigationDataSplitter(
-        csv_path=exp_cfg["data"]["csv_path"],
-        data_dir=exp_cfg["data"]["data_dir"],
-        random_state=exp_cfg["data"].get("random_state", 42)
-    )
-    
-    # Get CV parameters
-    n_folds = exp_cfg["data"].get("n_folds", 5)
-    cv_structure_name = exp_cfg["data"].get("cv_structure_name", "irrigation_cv")
-    splits_dir = exp_cfg["data"].get("splits_dir", "./splits")
-    
-    # Create CV folder structure
-    cv_dir = splitter.create_cv_folder_structure(
-        n_splits=n_folds,
-        output_dir=splits_dir,
-        structure_name=cv_structure_name,
-        copy_files=False  # Use file lists for memory efficiency
-    )
-    logger.info(f"CV structure created at: {cv_dir}")
-    
-    # Prepare data processing parameters
-    data_dir = exp_cfg["data"]["data_dir"]
-    label_bands = exp_cfg["data"]["label_bands"]
-    model_type = exp_cfg["model"]["type"].lower()
-    hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
-    
-    # Run experiments on each fold
-    tqdm_bar = tqdm(total=n_folds, desc="Cross-validation folds")
-    fold_results = []
-    
-    for fold_idx in range(1, n_folds + 1):
-        tqdm_bar.set_description(f"Fold {fold_idx}")
-        tqdm.write(f"\n--- Fold {fold_idx} ---")
-        
-        # Load fold file lists
-        fold_dir = os.path.join(cv_dir, "train", f"fold_{fold_idx}")
-        train_file_path = os.path.join(fold_dir, "inner_train", "train_files.txt")
-        val_file_path = os.path.join(fold_dir, "inner_val", "val_files.txt")
-        
-        # Check if fold directory exists
-        if not os.path.exists(fold_dir):
-            tqdm.write(f"Fold {fold_idx} directory not found, skipping...")
-            tqdm_bar.update(1)
-            continue
-            
-        # Load train files
-        if not os.path.exists(train_file_path):
-            tqdm.write(f"Train files not found for fold {fold_idx}, skipping...")
-            tqdm_bar.update(1)
-            continue
-            
-        with open(train_file_path, 'r') as f:
-            train_files = [line.strip() for line in f.readlines()]
-        
-        # Load val files (might be empty for small datasets)
-        val_files = []
-        if os.path.exists(val_file_path):
-            with open(val_file_path, 'r') as f:
-                val_files = [line.strip() for line in f.readlines()]
-        
-        tqdm.write(f"Fold {fold_idx}: {len(train_files)} train, {len(val_files)} val")
-        
-        # Create datasets
-        train_dataset = MultiTemporalCropDataset(
-            data_dir=data_dir,
-            label_bands=label_bands
-        )
-        
-        if len(train_dataset) == 0:
-            tqdm.write(f"Fold {fold_idx}: Train dataset is empty!")
-            tqdm_bar.update(1)
-            continue
-            
-        val_dataset = MultiTemporalCropDataset(
-            data_dir=data_dir,
-            label_bands=label_bands
-        )
-        
-        if len(val_dataset) == 0:
-            tqdm.write(f"Fold {fold_idx}: Val dataset is empty, skipping evaluation")
-            tqdm_bar.update(1)
-            continue
-        
-        X_train, y_train = flatten_dataset(train_dataset)
-        X_val, y_val = flatten_dataset(val_dataset)
-        
-        # Select only first two label bands
-        y_train = y_train[:, :2]
-        y_val = y_val[:, :2]
-        
-        # Train model
-        tqdm.write(f"Training {model_type} model for fold {fold_idx}")
-        clf = train_model(X_train, y_train, model_type, **hyperparams)
-        tqdm.write(f"Model training complete for fold {fold_idx}")
-        
-        # Evaluate model
-        y_pred = clf.predict(X_val)
-        metrics = model_metrics(y_pred, y_val)
-        
-        # Store results
-        fold_results.append({
-            'fold': fold_idx,
-            'metrics': metrics,
-            'train_size': len(train_dataset),
-            'val_size': len(val_dataset)
-        })
-        
-        tqdm.write(f"Fold {fold_idx} metrics: {metrics}")
-        tqdm_bar.update(1)
-    tqdm_bar.close()
-    tqdm.write("All folds processed.")
-
-    # Aggregate results
-    if fold_results:
-        # Calculate mean and std of metrics across folds
-        all_metrics = {}
-        for metric_name in fold_results[0]['metrics'].keys():
-            values = [result['metrics'][metric_name] for result in fold_results]
-            all_metrics[f"{metric_name}_mean"] = np.mean(values)
-            all_metrics[f"{metric_name}_std"] = np.std(values)
-        
-        # Add fold details
-        all_metrics['n_folds_completed'] = len(fold_results)
-        all_metrics['fold_details'] = fold_results
-        
-        # Save CV results
-        cv_results_path = os.path.join(experiment_dir, "cv_results.json")
-        with open(cv_results_path, "w") as f:
-            json.dump(all_metrics, f, indent=2, default=str)
-        
-        logger.info(f"CV experiment complete. Results saved to {cv_results_path}")
-        logger.info(f"Mean metrics across {len(fold_results)} folds:")
-        for key, value in all_metrics.items():
-            if key.endswith('_mean'):
-                logger.info(f"  {key}: {value:.4f}")
-    else:
-        logger.error("No folds completed successfully!")
-
+            print(f"Logged output to {log_path}")
 
 if __name__ == "__main__":
     config_path = "experiment.yaml"
     experiments = load_experiment(config_path)
-    # If the config is a list of experiments, iterate; else, wrap in a list
     if isinstance(experiments, list):
         for exp_cfg in experiments:
             run_experiment(exp_cfg, config_path)

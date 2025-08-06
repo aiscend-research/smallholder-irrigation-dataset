@@ -237,7 +237,8 @@ class IrrigationDataSplitter:
                                 test_size: float = 0.2,
                                 val_size: float = 0.2,
                                 stratification_band: int = 2,
-                                min_samples_per_class: int = 5) -> Dict:
+                                min_samples_per_class: int = 5,
+                                random_split_only: bool = False) -> Dict:
         """
         Perform spatial stratified split by location.
         
@@ -246,10 +247,75 @@ class IrrigationDataSplitter:
             val_size: Proportion of remaining locations for validation
             stratification_band: Which band to use for stratification (1-8)
             min_samples_per_class: Minimum samples per class for stratification
+            random_split_only: If True, performs a basic random split (no stratification or class balance).
             
         Returns:
             Dictionary with train/val/test file lists and metadata
         """
+        # Option for fast, non-stratified random split for quick pipeline testing
+        if random_split_only:
+            logger.info("Performing basic random split (no stratification or class balance).")
+            # Get unique location files (no labels needed)
+            location_labels, location_files = self._get_location_labels_and_files(stratification_band)
+            total = len(location_files)
+            if total < 3:
+                logger.warning(f"Warning: Only {total} locations available. Using all for training. No test/val splits possible.")
+                metadata = {
+                    'total_locations': int(total),
+                    'train_locations': int(total),
+                    'val_locations': 0,
+                    'test_locations': 0,
+                    'stratification_band': int(stratification_band),
+                    'class_distribution': {
+                        'train': {},
+                        'val': {},
+                        'test': {}
+                    },
+                    'warning': 'Insufficient samples for proper train/val/test split'
+                }
+                split_info = {
+                    'train_files': location_files.tolist() if total > 0 else [],
+                    'val_files': [],
+                    'test_files': [],
+                    'metadata': convert_numpy_types(metadata)
+                }
+                return split_info
+            # Perform random split
+            train_files, test_files = train_test_split(
+                location_files, test_size=test_size, random_state=self.random_state, shuffle=True
+            )
+            if len(train_files) > 1:
+                # Split train into train/val
+                train_files, val_files = train_test_split(
+                    train_files, test_size=val_size / (1 - test_size), random_state=self.random_state, shuffle=True
+                )
+            else:
+                val_files = []
+            train_files = train_files.tolist() if len(train_files) > 0 else []
+            val_files = val_files.tolist() if len(val_files) > 0 else []
+            test_files = test_files.tolist() if len(test_files) > 0 else []
+            metadata = {
+                'total_locations': int(total),
+                'train_locations': int(len(train_files)),
+                'val_locations': int(len(val_files)),
+                'test_locations': int(len(test_files)),
+                'stratification_band': int(stratification_band),
+                'class_distribution': {
+                    'train': {},
+                    'val': {},
+                    'test': {}
+                },
+                'note': 'Random split only, no stratification or class balance'
+            }
+            split_info = {
+                'train_files': train_files,
+                'val_files': val_files,
+                'test_files': test_files,
+                'metadata': convert_numpy_types(metadata)
+            }
+            return split_info
+
+        # --- Existing logic below ---
         # Get location-level labels and files
         location_labels, location_files = self._get_location_labels_and_files(stratification_band)
 

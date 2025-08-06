@@ -1,42 +1,11 @@
+# NOTE: Data splitting logic is disabled for this test config. Manual split in use.
 name: "rf_baseline"
 
 data:
-  # Cross-validation configuration
-  use_cross_validation: false  # Set to true for CV, false for single train/val
-  n_folds: 5                   # Number of CV folds (only used if use_cross_validation: true)
-  cv_structure_name: "band2_cv"  # Name for CV structure (only used if use_cross_validation: true)
-  
-  # Automatic data splitting configuration
-  use_auto_splitting: true  # Enable automatic splitting
-  csv_path: "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
   data_dir: "../../data/modeling"
-  splits_dir: "../../data/modeling/splits"  # Where to save splits
-  
-  # Split parameters
-  test_size: 0.2          # 20% for test
-  val_size: 0.2           # 20% for validation
-  stratification_band: 2   # Use irrigation presence for stratification
-  min_samples_per_class: 1 # Minimum samples per class (set to 1 for testing/small/imbalanced datasets)
-  random_state: 42        # For reproducible splits
-  
-  # Folder structure options
-  create_folder_structure: true  # Create train/val/test folders
-  copy_files: false              # Use symlinks instead of copying (saves space)
-  
-  # Data processing
-  label_bands: Null     # Which label bands to use
-  image_bands: ["EVI"]    # e.g. ["B3"], use null for default
-  
-
-  # time_step_selection: Specify which time steps to use from the image tensor.
-  # For example:
-  #   [1, 6, 10]         # Select only time steps 1, 6, and 10, in that order.
-  #   [[1,10], 18, [36,37,1]]  # Create 3 output time bands:
-  #      - the first is the average of time steps 1 to 10 (inclusive),
-  #      - the second is just time step 18,
-  #      - the third is the average of time steps 36, 37, and 1.
-  # If not specified or set to null, all time steps will be used as-is.
+  image_bands: ["SCL", "NDWI"]    # e.g. ["B3"], use null for default
   time_step_selection: null
+
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"

@@ -66,6 +66,9 @@ def export_feature_importances(clf, band_names, num_timesteps, out_dir="./", pre
         out_dir: where to save csvs
         prefix: optional, filename prefix
     """
+    # Ensure output directory exists
+    os.makedirs(out_dir, exist_ok=True)
+
     # Get base estimator (works for MultiOutputClassifier)
     if hasattr(clf, "estimators_"):
         # Multioutput: average importances across outputs
@@ -79,6 +82,13 @@ def export_feature_importances(clf, band_names, num_timesteps, out_dir="./", pre
     for t in range(num_timesteps):
         for b in range(num_bands):
             feature_names.append(f"{band_names[b]}_t{t+1}")
+
+    # --- NEW: Ensure feature_names matches importances in length ---
+    if len(feature_names) != len(importances):
+        print(f"[WARNING] Mismatch in feature_names ({len(feature_names)}) and importances ({len(importances)}); truncating to match shorter length.")
+        min_len = min(len(feature_names), len(importances))
+        feature_names = feature_names[:min_len]
+        importances = importances[:min_len]
 
     df = pd.DataFrame({
         "feature": feature_names,
@@ -124,6 +134,11 @@ def plot_band_time_importance(
         title: Title for the plot
         save_path: Optional path to save figure
     """
+    # NEW: If a path is given instead of a DataFrame, load it
+    if isinstance(importance_df, str):
+        import pandas as pd
+        importance_df = pd.read_csv(importance_df)
+
     # Get unique bands and time steps in order
     bands = band_names or sorted(importance_df['band'].unique(), key=lambda x: str(x))
     timesteps = sorted(importance_df['time_step'].unique())
@@ -151,3 +166,116 @@ def plot_band_time_importance(
         print(f"Saved feature importance heatmap to {save_path}")
     else:
         plt.show()
+
+def plot_band_importance(df, band_names=None, title="Feature Importance by Band", save_path=None):
+    """
+    Plots a bar chart of feature importances aggregated by band.
+
+    Args:
+        df: DataFrame with columns ['band', 'importance'] or at least 'band' and 'importance'
+        band_names: Optional list of band names in desired order
+        title: Title for the plot
+        save_path: Optional path to save the plot
+
+    Usage:
+        Pass a DataFrame with 'band' and 'importance' columns.
+        If band_names is provided, bars will be ordered accordingly.
+    """
+    if isinstance(df, str):
+        df = pd.read_csv(df)
+
+    if 'band' not in df.columns or 'importance' not in df.columns:
+        raise ValueError("DataFrame must contain 'band' and 'importance' columns for band importance plotting.")
+
+    agg = df.groupby('band')['importance'].sum().reset_index()
+    if band_names:
+        # Ensure all band_names are present, fill missing with 0 importance
+        missing_bands = set(band_names) - set(agg['band'])
+        if missing_bands:
+            for mb in missing_bands:
+                agg = agg.append({'band': mb, 'importance': 0}, ignore_index=True)
+        agg['band'] = pd.Categorical(agg['band'], categories=band_names, ordered=True)
+        agg = agg.sort_values('band')
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(agg['band'], agg['importance'], color='skyblue')
+    plt.xlabel('Band')
+    plt.ylabel('Importance')
+    plt.title(title)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Saved band importance plot to {save_path}")
+    else:
+        plt.show()
+
+def plot_time_importance(df, num_timesteps=None, title="Feature Importance by Time Step", save_path=None):
+    """
+    Plots a bar chart of feature importances aggregated by time step.
+
+    Args:
+        df: DataFrame with columns ['time_step', 'importance'] or at least 'time_step' and 'importance'
+        num_timesteps: Optional, number of time steps to display in order
+        title: Title for the plot
+        save_path: Optional path to save the plot
+
+    Usage:
+        Pass a DataFrame with 'time_step' and 'importance' columns.
+        If num_timesteps is provided, ensures x-axis covers all time steps from 1 to num_timesteps.
+    """
+    if isinstance(df, str):
+        df = pd.read_csv(df)
+
+    if 'time_step' not in df.columns or 'importance' not in df.columns:
+        raise ValueError("DataFrame must contain 'time_step' and 'importance' columns for time importance plotting.")
+
+    agg = df.groupby('time_step')['importance'].sum().reset_index()
+    if num_timesteps:
+        all_steps = pd.DataFrame({'time_step': list(range(1, num_timesteps+1))})
+        agg = all_steps.merge(agg, on='time_step', how='left').fillna(0)
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(agg['time_step'], agg['importance'], color='coral')
+    plt.xlabel('Time Step')
+    plt.ylabel('Importance')
+    plt.title(title)
+    plt.xticks(agg['time_step'])
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Saved time importance plot to {save_path}")
+    else:
+        plt.show()
+
+def plot_feature_importance_from_df(df, band_names=None, num_timesteps=None,
+                                    title_prefix="Feature Importance",
+                                    save_path=None):
+    """
+    Utility to automatically detect the type of feature importance DataFrame and plot accordingly.
+
+    Args:
+        df: DataFrame or path to CSV containing feature importance data.
+        band_names: Optional list of band names (for band or band_time plots).
+        num_timesteps: Optional number of time steps (for time or band_time plots).
+        title_prefix: Prefix string for plot titles.
+        save_path: Optional path to save the plot as PNG.
+    """
+    if isinstance(df, str):
+        import pandas as pd
+        df = pd.read_csv(df)
+
+    has_band = 'band' in df.columns
+    has_time = 'time_step' in df.columns
+
+    if has_band and has_time:
+        plot_band_time_importance(df, band_names=band_names, num_timesteps=num_timesteps,
+                                 title=f"{title_prefix} by Band and Time Step", save_path=save_path)
+    elif has_band:
+        plot_band_importance(df, band_names=band_names,
+                             title=f"{title_prefix} by Band", save_path=save_path)
+    elif has_time:
+        plot_time_importance(df, num_timesteps=num_timesteps,
+                             title=f"{title_prefix} by Time Step", save_path=save_path)
+    else:
+        raise ValueError("DataFrame must contain at least 'band' or 'time_step' column for plotting.")

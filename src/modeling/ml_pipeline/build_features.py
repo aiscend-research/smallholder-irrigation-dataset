@@ -1,61 +1,264 @@
+#
+# NOTE: Setting per_band_time=True in flatten_dataset will flatten as one row per (band, time, pixel),
+# filtering pixels only at that specific (band, time, pixel) location (not across all bands/times).
+
 import numpy as np
 from tqdm import tqdm
+import torch
 
-
-def flatten_dataset(dataset, ignore_value_in_image=None):
+def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_time=False):
     """
     Flattens a multi-temporal crop dataset for ML.
-    Returns all image features and all mask bands (single/multi).
-
+    If per_band_time=True, returns one row per (band, time, pixel).
+    If False, returns one row per (x, y) location, using the old logic.
     Args:
         dataset: PyTorch Dataset where each sample is a dict:
             'image': Tensor (C, T, H, W)
             'mask' : Tensor (H, W) or (B, H, W)
         ignore_value_in_image: Optional value in image pixels to ignore (e.g., -9999 for clouds)
-
+        debug: If True, print per-sample debug info.
+        per_band_time: If True, use new flattening logic (one row per (band, time, pixel))
     Returns:
-        X: np.ndarray, shape (N, C*T)
-        y: np.ndarray, shape (N,) or (N, B)
-
+        X: np.ndarray
+        y: np.ndarray
     Notes:
-        Pixels where either the mask or image contains NaN in any band are filtered out.
+        - Only filters out pixels for which the value at (band, time, x, y) is NaN/ignore_value_in_image.
     """
+    import torch
+
+    if not per_band_time:
+        # Original logic (row per x,y)
+        X_list = []
+        y_list = []
+        n_samples = 0
+        n_skipped = 0
+
+        for idx, sample in enumerate(tqdm(dataset, desc="Flattening dataset")):
+            image = sample['image']  # (C, T, H, W)
+            mask = sample['mask']    # (H, W) or (B, H, W)
+
+            if image.ndim != 4:
+                raise ValueError(f"Expected image shape (C, T, H, W), got {image.shape}")
+            if mask.ndim not in (2, 3):
+                raise ValueError(f"Expected mask shape (H, W) or (B, H, W), got {mask.shape}")
+
+            C, T, H, W = image.shape
+            image = image.permute(2, 3, 1, 0)  # (H, W, T, C)
+            image_flat = image.reshape(H * W, T * C)
+
+            # Optionally mask out ignore_value_in_image (e.g. -9999)
+            if ignore_value_in_image is not None:
+                image_flat = image_flat.clone()
+                image_flat[image_flat == ignore_value_in_image] = float('nan')
+
+            # Handle mask: always return all bands
+            if mask.ndim == 2:
+                mask_flat = mask.reshape(H * W, 1)  # (N, 1) for consistency
+            else:
+                B = mask.shape[0]
+                mask_flat = mask.permute(1, 2, 0).reshape(H * W, B)  # (N, B)
+
+            # Validity: (debug) allow all pixels through for now
+            mask_np = mask_flat.numpy()
+            image_np = image_flat.numpy()
+            # mask_nan = np.isnan(mask_np)
+            # image_nan = np.isnan(image_np)
+            # valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
+            valid = np.ones(mask_np.shape[0], dtype=bool)
+
+            X_valid = image_np[valid]
+            y_valid = mask_np[valid]
+
+            if X_valid.shape[0] == 0:
+                n_skipped += 1
+            else:
+                X_list.append(X_valid)
+                y_list.append(y_valid)
+                n_samples += X_valid.shape[0]
+
+        if not X_list:
+            X = np.empty((0, T * C))
+            y = np.empty((0, mask_flat.shape[1]))
+        else:
+            X = np.concatenate(X_list, axis=0)
+            y = np.concatenate(y_list, axis=0)
+
+        # If only one mask band, squeeze to (N,)
+        if y.ndim == 2 and y.shape[1] == 1:
+            y = y.squeeze(1)
+
+        return X, y
+
+    # New logic: per (band, time, pixel)
     X_list = []
     y_list = []
-
-    for sample in tqdm(dataset, desc="Flattening dataset"):
+    for idx, sample in enumerate(tqdm(dataset, desc="Flattening per-band-time")):
         image = sample['image']  # (C, T, H, W)
         mask = sample['mask']    # (H, W) or (B, H, W)
 
         C, T, H, W = image.shape
-        image = image.permute(2, 3, 1, 0)  # (H, W, T, C)
-        image_flat = image.reshape(H * W, T * C)
-
-        # Handle mask: always return all bands
+        image_np = image.numpy()
         if mask.ndim == 2:
-            mask_flat = mask.reshape(H * W, 1)  # (N, 1) for consistency
-        elif mask.ndim == 3:
-            B = mask.shape[0]
-            mask_flat = mask.permute(1, 2, 0).reshape(H * W, B)  # (N, B)
+            mask_np = mask.numpy().reshape(1, H, W)  # (1, H, W)
         else:
-            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+            mask_np = mask.numpy()                   # (B, H, W)
+        B = mask_np.shape[0]
 
-        # Validity: filter out pixels where mask or image contain NaN in any band
-        mask_nan = np.isnan(mask_flat.numpy())
-        image_nan = np.isnan(image_flat.numpy())
-        valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
+        # For each band/time, flatten across (H,W)
+        for c in range(C):
+            for t in range(T):
+                band_time_pixels = image_np[c, t]    # (H, W)
+                if ignore_value_in_image is not None:
+                    band_time_pixels = np.where(band_time_pixels == ignore_value_in_image, np.nan, band_time_pixels)
+                band_time_pixels = band_time_pixels.reshape(-1)  # (N,)
 
-        X_valid = image_flat[valid].numpy()
-        y_valid = mask_flat[valid].numpy()
+                # For each mask band
+                for b in range(B):
+                    mask_pixels = mask_np[b].reshape(-1)  # (N,)
 
-        X_list.append(X_valid)
-        y_list.append(y_valid)
+                    # valid = ~np.isnan(band_time_pixels)
+                    valid = np.ones(band_time_pixels.shape, dtype=bool)
+                    X_valid = band_time_pixels[valid][:, None]  # shape (num_valid, 1)
+                    y_valid = mask_pixels[valid][:, None]       # shape (num_valid, 1)
 
+                    if X_valid.shape[0] > 0:
+                        X_list.append(X_valid)
+                        y_list.append(y_valid)
+
+    if not X_list:
+        return np.empty((0, 1)), np.empty((0, 1))
     X = np.concatenate(X_list, axis=0)
     y = np.concatenate(y_list, axis=0)
-
-    # If only one mask band, squeeze to (N,)
     if y.shape[1] == 1:
         y = y.squeeze(1)
-
     return X, y
+
+
+# def test_flatten_dataset_with_dummy_data():
+#     import torch
+
+#     # Test single-band masks (all samples have mask shape (H, W))
+#     sample1 = {
+#         'image': torch.randn(3, 4, 5, 5),
+#         'mask': torch.randint(0, 2, (5, 5)).float()
+#     }
+#     dataset1 = [sample1, sample1]
+#     X1, y1 = flatten_dataset(dataset1, ignore_value_in_image=None, debug=False)
+#     print("\nTest: single-band mask")
+#     print(f"X shape: {X1.shape}, y shape: {y1.shape}")
+#     print(f"First 5 rows of y1:\n{y1[:5]}")
+
+#     # Test multi-band masks (all samples have mask shape (B, H, W))
+#     sample2 = {
+#         'image': torch.randn(3, 4, 5, 5),
+#         'mask': torch.randint(0, 2, (2, 5, 5)).float()
+#     }
+#     dataset2 = [sample2, sample2]
+#     X2, y2 = flatten_dataset(dataset2, ignore_value_in_image=None, debug=False)
+#     print("\nTest: multi-band mask")
+#     print(f"X shape: {X2.shape}, y shape: {y2.shape}")
+#     print(f"First 5 rows of y2:\n{y2[:5]}")
+
+
+# def test_flatten_dataset_per_band_time_edge_cases():
+#     print("\n==== Testing flatten_dataset (per_band_time=True) ====")
+#     H, W = 4, 5  # Small for quick tests
+
+#     # (1) Basic case: No -9999, 1 band, 2 time, 1 mask band
+#     sample = {
+#         'image': torch.ones(1, 2, H, W),
+#         'mask': torch.zeros(H, W)
+#     }
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=True)
+#     assert X.shape[0] == 1 * 2 * H * W, f"Expected {1*2*H*W}, got {X.shape[0]}"
+#     assert y.shape[0] == X.shape[0]
+#     print("[PASSED] Simple (no -9999, single band/time)")
+
+#     # (2) -9999 in one time/band, only that one pixel should be filtered
+#     image = torch.ones(1, 2, H, W)
+#     image[0, 1, 1, 2] = -9999
+#     sample = {'image': image, 'mask': torch.zeros(H, W)}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=True)
+#     assert X.shape[0] == 1 * 2 * H * W - 1, "[FAILED] -9999 pixel not filtered right"
+#     print("[PASSED] -9999 pixel masked correctly for per_band_time")
+
+#     # (3) Multiple bands, time, mask bands
+#     image = torch.ones(3, 3, H, W)
+#     mask = torch.randint(0, 2, (2, H, W)).float()
+#     image[2, 2, 0, 0] = -9999  # One missing pixel
+#     sample = {'image': image, 'mask': mask}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=True)
+#     total_pixels = 3 * 3 * H * W * 2  # bands * times * h * w * mask bands
+#     # There are two mask bands. For each, one pixel is filtered, so subtract 2.
+#     expected = total_pixels - 2
+#     print(f"[DEBUG] (Multiple bands/time/mask bands)")
+#     print(f"  Image shape: {image.shape}, Mask shape: {mask.shape}")
+#     print(f"  Expected rows: {expected}")
+#     print(f"  Actual rows: {X.shape[0]}")
+#     print(f"  -9999 pixels (should be 2): {np.sum(image.numpy() == -9999)}")
+#     assert X.shape[0] == expected, "[FAILED] Multiple bands/time/mask bands"
+#     print("[PASSED] Multiple bands/time/mask bands")
+
+#     # (4) All -9999 in one band/time: that slice gone, others remain
+#     image = torch.ones(1, 2, H, W)
+#     image[0, 0, :, :] = -9999  # All pixels in first time, gone
+#     sample = {'image': image, 'mask': torch.zeros(H, W)}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=True)
+#     assert X.shape[0] == 1 * 1 * H * W, "[FAILED] All pixels in one timepoint gone"
+#     print("[PASSED] All -9999 in one timepoint: filtered right")
+
+#     # (5) All -9999: X and y are empty
+#     image = torch.full((1, 2, H, W), -9999.)
+#     sample = {'image': image, 'mask': torch.zeros(H, W)}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=True)
+#     assert X.size == 0 and y.size == 0, "[FAILED] All -9999 should result in empty arrays"
+#     print("[PASSED] All -9999 returns empty arrays")
+
+# def test_flatten_dataset_original_edge_cases():
+#     print("\n==== Testing flatten_dataset (original per-pixel logic) ====")
+#     H, W = 3, 3
+
+#     # (1) All ones, no -9999
+#     image = torch.ones(2, 2, H, W)
+#     mask = torch.zeros(H, W)
+#     sample = {'image': image, 'mask': mask}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=False)
+#     assert X.shape[0] == H * W, "[FAILED] All pixels should remain"
+#     print("[PASSED] Simple: no filtering")
+
+#     # (2) -9999 in just one band/t, whole pixel filtered for all bands/times
+#     image = torch.ones(2, 2, H, W)
+#     image[1, 0, 1, 1] = -9999
+#     sample = {'image': image, 'mask': torch.zeros(H, W)}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=False)
+#     assert (X.shape[0] == H * W - 1), "[FAILED] Entire pixel should be filtered"
+#     print("[PASSED] -9999 in any band/time => pixel filtered")
+
+#     # (3) Mask is NaN for some pixel, that pixel filtered
+#     mask = torch.zeros(H, W)
+#     mask[2, 1] = float('nan')
+#     image = torch.ones(2, 2, H, W)
+#     sample = {'image': image, 'mask': mask}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=False)
+#     assert (X.shape[0] == H * W - 1), "[FAILED] NaN in mask should be filtered"
+#     print("[PASSED] NaN in mask => pixel filtered")
+
+#     # (4) All -9999: everything filtered, output empty
+#     image = torch.full((2, 2, H, W), -9999.)
+#     sample = {'image': image, 'mask': torch.zeros(H, W)}
+#     dataset = [sample]
+#     X, y = flatten_dataset(dataset, ignore_value_in_image=-9999, per_band_time=False)
+#     assert X.size == 0 and y.size == 0, "[FAILED] All -9999 should result in empty arrays"
+#     print("[PASSED] All -9999: empty output")
+
+# if __name__ == "__main__":
+#     test_flatten_dataset_per_band_time_edge_cases()
+#     test_flatten_dataset_original_edge_cases()

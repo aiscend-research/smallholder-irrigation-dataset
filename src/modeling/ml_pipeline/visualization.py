@@ -81,8 +81,10 @@ def plot_ml_predictions(dataset, clf, class_names=MASK_CLASS_NAMES, colors=MASK_
         y_pred = clf.predict(X)
         if num_bands == 1:
             y_pred = y_pred.reshape(-1, 1)
+        # Only plot as many bands as are predicted (e.g., if model only predicts 2 bands, plot 2)
+        n_pred_bands = y_pred.shape[1]
 
-        for b in range(num_bands):
+        for b in range(n_pred_bands):
             # Reconstruct masks
             gt_mask = reconstruct_mask(y_true[:, b], valid, H, W)
             pred_mask = reconstruct_mask(y_pred[:, b], valid, H, W)
