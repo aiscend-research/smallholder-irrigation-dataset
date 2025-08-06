@@ -332,7 +332,7 @@
         "day": 8,
         "year": 2023,
         "certainty": 4,
-        "uncertainty_explanation": "uneven;may naturally be green",
+        "uncertainty_explanation": "may naturally be green;uneven",
         "category": "small-scale"
       },
       "geometry": {
