@@ -262,6 +262,7 @@ def calculate_indices(img):
     """
     Calculate NDVI, EVI, NDWI from the first 10 Sentinel-2 bands.
     Returns int16 arrays scaled by 10000, with NO_DATA for missing values.
+    Ensures consistent scaling across all time steps.
 
     Args:
         img: numpy array, shape (>=10, H, W)
@@ -280,9 +281,21 @@ def calculate_indices(img):
     valid_evi = (B8 + 6*B4 - 7.5*B2 + 1) != 0
     valid_ndwi = (B8 + B11) != 0
 
-    ndvi[valid_ndvi] = ((B8 - B4)[valid_ndvi] / (B8 + B4)[valid_ndvi] * 10000).astype(np.int16)
-    evi[valid_evi] = (2.5 * (B8 - B4)[valid_evi] / (B8 + 6*B4 - 7.5*B2 + 1)[valid_evi] * 10000).astype(np.int16)
-    ndwi[valid_ndwi] = ((B8 - B11)[valid_ndwi] / (B8 + B11)[valid_ndwi] * 10000).astype(np.int16)
+    if np.any(valid_ndvi):
+        ndvi_calc = ((B8 - B4) / (B8 + B4))[valid_ndvi]
+        ndvi_calc = np.clip(ndvi_calc, -1.0, 1.0)
+        ndvi[valid_ndvi] = (ndvi_calc * 10000).astype(np.int16)
+    
+    if np.any(valid_evi):
+        evi_calc = (2.5 * (B8 - B4) / (B8 + 6*B4 - 7.5*B2 + 1))[valid_evi]
+        evi_calc = np.clip(evi_calc, -1.0, 1.0)
+        evi[valid_evi] = (evi_calc * 10000).astype(np.int16)
+    
+    if np.any(valid_ndwi):
+        ndwi_calc = ((B8 - B11) / (B8 + B11))[valid_ndwi]
+        ndwi_calc = np.clip(ndwi_calc, -1.0, 1.0)
+        ndwi[valid_ndwi] = (ndwi_calc * 10000).astype(np.int16)
+
     return ndvi, evi, ndwi
 
 def mask_scl_anomalies(scl_band, no_data=NO_DATA):
@@ -292,6 +305,7 @@ def mask_scl_anomalies(scl_band, no_data=NO_DATA):
     8 (Medium Probability Cloud), 9 (High Probability Cloud), 10 (Thin Cirrus)
     """
     mask_vals = [0, 1, 3, 8, 9, 10]
+    scl_band = scl_band.astype(np.int16)
     scl_band[np.isin(scl_band, mask_vals)] = no_data
     return scl_band
 

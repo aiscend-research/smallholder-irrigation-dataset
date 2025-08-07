@@ -160,6 +160,24 @@ For a particular window, data may be missing (if there is no satellite imagery w
 
 - **Missing Images** In rare cases, a time window may have no available satellite imagery. When this occurs, all pixels are assigned a value of -9999 to indicate missing data. Additionally, we set `cloud_fraction = 1.0` in the corresponding metadata file.
 
+### Data Quality Assessment and Visualization
+
+The downloaded time series data can be analyzed for quality and temporal patterns using the visualization tools. The following visualizations demonstrate the data quality and seasonal patterns for irrigation detection:
+
+#### NDVI Time Series Visualization
+
+The NDVI (Normalized Difference Vegetation Index) time series shows vegetation dynamics over the 37 time steps, with consistent color scaling and cloud masking applied:
+
+![NDVI Time Series](./readme_figures/ndvi_time_series_site_1.png)
+
+#### Seasonal Coverage Patterns
+
+Analysis of data coverage across different seasons reveals temporal patterns in data quality:
+
+![Seasonal Patterns](./readme_figures/seasonal_patterns_site_1.png)
+
+These visualizations help researchers understand the temporal coverage patterns and identify optimal time periods for irrigation detection analysis.
+
 ### Stacking and Output
 
 The 37 tif images are stored on the Google Cloud Bucket, and NOT locally. However, these 37 images are combined and a file with their combined data is stored locally, as described below.
@@ -172,6 +190,55 @@ The 37 tif images are stored on the Google Cloud Bucket, and NOT locally. Howeve
 - `data/features/site_{lat}_{lon}_{year}_{ID}.json` – Metadata for the .tif image, which includes cloud fraction, average NDVI/EVI/NDWI per frame
 
 Note that lat and lon are the latitude and longitude of center of the labeled image, year is the year the labeled image was taken, and ID is the unique ID of the labeled image.
+
+## Data Visualization and Quality Assessment
+
+The downloaded time series data can be visualized and analyzed for quality assessment using the provided visualization tools. These tools help researchers understand temporal patterns, data coverage, and seasonal variations in the satellite imagery.
+
+### Running Visualizations
+
+To visualize the downloaded data, use the `visualize_tif.py` script:
+
+```bash
+python src/features/visualize_tif.py
+```
+
+This script provides several visualization and analysis functions:
+
+#### Individual Site Analysis
+
+- **NDVI Time Series**: Visualizes NDVI values across all 37 time steps with consistent color scaling
+- **Temporal Pattern Analysis**: Analyzes coverage patterns and identifies good/poor time steps
+- **Seasonal Pattern Analysis**: Examines seasonal variations in data coverage and quality
+
+#### Key Features
+
+- **Automatic Image Saving**: Generated plots are automatically saved to `src/features/readme_figures/`
+- **Quality Assessment**: Provides standardized quality criteria (Excellent/Good/Moderate/Poor)
+- **Seasonal Classification**: Distinguishes between dry season (May-October) and wet season (November-April)
+- **Coverage Analysis**: Calculates percentage of valid pixels per time step
+
+#### Configuration
+
+The script can be configured by modifying the `unique_id` variable to analyze different sites:
+
+```python
+# Choose which site to visualize by unique ID
+unique_id = "26"  # Change this to analyze different sites
+```
+
+#### Output Files
+
+The visualization script generates the following output files in `src/features/readme_figures/`:
+
+- `ndvi_time_series_site_{unique_id}.png`: NDVI time series visualization
+- `seasonal_patterns_site_{unique_id}.png`: Seasonal coverage pattern analysis
+
+These visualizations help researchers:
+- Assess data quality for machine learning training
+- Identify optimal time periods for irrigation detection
+- Understand seasonal patterns in satellite data coverage
+- Validate the effectiveness of cloud masking algorithms
 
 ## Creating Pixel-Level Labels
 
