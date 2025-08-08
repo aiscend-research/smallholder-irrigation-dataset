@@ -2,7 +2,6 @@
 name: "rf_baseline"
 
 data:
-  data_dir: "../../data/modeling"
   train_dir: "../../data/modeling/train"
   val_dir: "../../data/modeling/val"
   image_bands: null   # e.g. ["B3"], use null for default

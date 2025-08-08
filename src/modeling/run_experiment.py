@@ -73,8 +73,8 @@ def run_experiment(exp_cfg, config_path):
             print(f"Saving outputs to: {experiment_dir}")
 
             data_cfg   = exp_cfg.get("data", {})
-            train_dir  = data_cfg.get("train_dir") or data_cfg.get("data_dir")
-            val_dir    = data_cfg.get("val_dir")   or data_cfg.get("data_dir")
+            train_dir  = data_cfg.get("train_dir") 
+            val_dir    = data_cfg.get("val_dir")   
             image_bands = data_cfg.get("image_bands")
 
             if not image_bands:
