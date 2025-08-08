@@ -32,6 +32,10 @@ S2_BAND_NAMES = [
     "SCL (Scene Classification Layer)"
 ]
 
+#Short bsnd names
+SHORT_BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
+
+
 # Band name to index mapping (both short code and full name)
 S2_BAND_NAME_TO_INDEX = {}
 for i, name in enumerate(S2_BAND_NAMES):
@@ -130,6 +134,7 @@ class MultiTemporalCropDataset(Dataset):
     def __getitem__(self, idx):
         image_path = self.paired_image_files[idx]
         mask_path = self.paired_mask_files[idx]
+        unique_id = self.paired_unique_ids[idx]
 
         # Load metadata (assume .json with same basename as image)
         sample_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -173,10 +178,12 @@ class MultiTemporalCropDataset(Dataset):
             if mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor[0]
 
+        # The "id" key is the unique prefix used to match image/label pairs.
         return {
             "image": image_tensor,
             "mask": mask_tensor,
-            "metadata": metadata
+            "metadata": metadata,
+            "id": unique_id
         }
 
     @staticmethod 

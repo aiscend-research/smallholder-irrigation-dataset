@@ -11,10 +11,25 @@ from tqdm import tqdm
 import pandas as pd
 from ml_pipeline.ml_model import train_model
 from ml_pipeline.evaluation import model_metrics
-from ml_pipeline.evaluation import export_feature_importances
+from ml_pipeline.evaluation import metrics_over_factors, plot_metrics_over_factors
+from ml_pipeline.evaluation import export_feature_importances, plot_band_time_importance
 import glob  # Place at the top of the file if not already present
 from ml_pipeline.visualization import plot_ml_predictions
-from custom_dataset import MultiTemporalCropDataset
+from custom_dataset import MultiTemporalCropDataset, SHORT_BAND_NAMES
+
+
+# --- Suppress Rasterio NotGeoreferencedWarning if present ---
+import warnings
+try:
+    from rasterio.errors import NotGeoreferencedWarning
+    warnings.filterwarnings(
+        "ignore",
+        category=NotGeoreferencedWarning,
+        module=r"rasterio"
+    )
+except Exception:
+    # rasterio might not be installed in some environments; ignore if import fails
+    pass
 
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
@@ -36,7 +51,7 @@ def run_experiment(exp_cfg, config_path):
 
     model_path = os.path.join(experiment_dir, "model.pkl")
     metrics_path = os.path.join(experiment_dir, "metrics.json")
-    visualization_path = os.path.join(experiment_dir, "visualization.png")
+    visualization_path = os.path.join(experiment_dir, "prediction_visualization.png")
     config_snapshot_path = os.path.join(experiment_dir, "experiment.yaml")
     log_path = os.path.join(experiment_dir, "run.log")
 
@@ -52,6 +67,11 @@ def run_experiment(exp_cfg, config_path):
 
             data_dir = exp_cfg["data"]["data_dir"]
             image_bands = exp_cfg["data"]["image_bands"]
+
+            if not image_bands:
+                BAND_NAMES = SHORT_BAND_NAMES
+            else:
+                BAND_NAMES = image_bands    
 
             print("Loading full dataset...")
             full_dataset = MultiTemporalCropDataset(data_dir=data_dir, image_band_names=image_bands)
@@ -72,6 +92,8 @@ def run_experiment(exp_cfg, config_path):
             if len(val_dataset) > 0:
                 sample_val = val_dataset[0]
                 print(f"First val sample image shape: {sample_val['image'].shape}, mask shape: {sample_val['mask'].shape}")
+
+            N_TIMESTEPS = sample_train["image"].shape[1]  
 
             from ml_pipeline.build_features import flatten_dataset
 
@@ -128,10 +150,14 @@ def run_experiment(exp_cfg, config_path):
             print(f"  y_val min: {np.nanmin(y_val) if y_val.size > 0 else 'EMPTY'}")
             print(f"  y_val max: {np.nanmax(y_val) if y_val.size > 0 else 'EMPTY'}")
 
-            y_train = y_train[:, :2]
-            y_val = y_val[:, :2]
+            # Preserve full label tensors for evaluation; use only first two bands for training/inference
+            y_train_full = y_train.copy()
+            y_val_full = y_val.copy()
+
+            y_train = y_train_full[:, :2]
+            y_val_train_only = y_val_full[:, :2]
             print(f"y_train (first two bands) shape: {y_train.shape}")
-            print(f"y_val (first two bands) shape: {y_val.shape}")
+            print(f"y_val   (first two bands) shape: {y_val_train_only.shape}")
 
             model_type = exp_cfg["model"]["type"].lower()
             hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
@@ -144,13 +170,63 @@ def run_experiment(exp_cfg, config_path):
             print(f"Model saved to {model_path}")
 
             print("Running predictions...")
-            y_pred = clf.predict(X_val)
+            # Predict in batches with a progress bar to avoid long pauses on large arrays
+            inference_cfg = exp_cfg.get("inference", {})
+            batch_size = int(inference_cfg.get("batch_size", 250000))  # default large to minimize overhead
+            n_rows = X_val.shape[0]
+            y_pred_chunks = []
+            for start in tqdm(range(0, n_rows, batch_size), desc="Predicting", unit="rows"):
+                end = min(start + batch_size, n_rows)
+                y_pred_chunks.append(clf.predict(X_val[start:end]))
+            y_pred = np.concatenate(y_pred_chunks, axis=0)
             print(f"y_pred shape: {y_pred.shape}")
 
-            metrics = model_metrics(y_pred, y_val)
+            metrics = model_metrics(y_pred, y_val_train_only)
             with open(metrics_path, "w") as f:
                 json.dump(metrics, f, indent=2)
             print("Metrics:", metrics)
+
+
+            # --- Save metrics over factors if configured ---
+            comp_deatailed_cfg = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics")
+            if comp_deatailed_cfg: 
+                try:
+                    # Dimensions and identifiers
+                    n_imgs = len(val_dataset)
+                    H = val_dataset[0]["image"].shape[2]  # Height
+                    W = val_dataset[0]["image"].shape[3]  # Width
+                    raw_ids = [full_dataset.paired_unique_ids[i] for i in val_dataset.indices]
+                    ids = np.array([int(str(s).split('_', 1)[0]) for s in raw_ids], dtype=int) 
+                    # --- Select Band 2 (index 1) for presence (binary) ---
+                    target_idx = 1
+
+                    # Ensure integer predictions and reshape to (n_imgs, H, W)
+                    y_pred_band2 = y_pred[:, target_idx].astype(int).reshape(n_imgs, H, W)
+                    y_test_band2 = y_val_full[:, target_idx].astype(int).reshape(n_imgs, H, W)
+
+                    # Label metadata from LAST 6 bands of y_val_full: shape (n_imgs, 6, H, W)
+                    label_metadata = (
+                        y_val_full[:, -6:]                      # (pixels, 6)
+                        .reshape(n_imgs, H, W, 6)               # (n_imgs, H, W, 6)
+                        .transpose(0, 3, 1, 2)                  # (n_imgs, 6, H, W)
+                        .astype(int)
+                    )
+
+                    # Call metrics function (binary)
+                    metrics = metrics_over_factors(
+                        y_pred=y_pred_band2,
+                        y_test=y_test_band2,
+                        multi_class=False,
+                        label_metadata=label_metadata,
+                        ids=ids,
+                        metrics_path=experiment_dir
+                    )
+
+                except Exception as e:
+                    import traceback
+                    print("Failed to compute metrics over factors:", e)
+                    traceback.print_exc()
+
 
             num_samples = exp_cfg["visualization"].get("num_samples", 2)
             print("Generating prediction visualizations...")
@@ -161,29 +237,74 @@ def run_experiment(exp_cfg, config_path):
 
             save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
             if save_feat_imp and hasattr(clf, "estimators_"):
-                BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
-                N_TIMESTEPS = 37
-                # --- Export and plot all feature importance CSVs in the experiment_dir ---
-                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, experiment_dir)
-                fi_csvs = glob.glob(os.path.join(experiment_dir, "feature_importance*.csv"))
+                from ml_pipeline.evaluation import plot_band_importance, plot_time_importance, plot_band_time_heatmap_from_csv
+                # --- Create subfolders for CSVs and PNGs ---
+                from pathlib import Path
+                fi_root_dir = os.path.join(experiment_dir, "feature_importance")
+                fi_csv_dir = os.path.join(fi_root_dir, "csv")
+                fi_plot_dir = os.path.join(fi_root_dir, "plots")
+                os.makedirs(fi_csv_dir, exist_ok=True)
+                os.makedirs(fi_plot_dir, exist_ok=True)
+                # --- Export feature importances to CSV subfolder ---
+                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv_dir)
+                # Back-compat: if exporter still wrote into experiment_dir, move them under csv/
+                legacy_csvs = glob.glob(os.path.join(experiment_dir, "feature_importance*.csv"))
+                for src in tqdm(legacy_csvs, desc="Reorganizing FI CSVs", unit="file"):
+                    dst = os.path.join(fi_csv_dir, os.path.basename(src))
+                    try:
+                        if os.path.abspath(src) != os.path.abspath(dst):
+                            shutil.move(src, dst)
+                            print(f"Moved legacy CSV {src} -> {dst}")
+                    except Exception as e:
+                        print(f"[WARN] Could not move CSV {src} -> {dst}: {e}")
+                # Discover CSVs from the csv/ folder
+                fi_csvs = glob.glob(os.path.join(fi_csv_dir, "feature_importance*.csv"))
                 print(f"Found feature importance CSV files: {fi_csvs}")
                 if not fi_csvs:
-                    print(f"Warning: No feature importance files found in {experiment_dir}.")
+                    print(f"Warning: No feature importance files found in {fi_csv_dir}.")
                 else:
-                    from ml_pipeline.evaluation import plot_feature_importance_from_df
-                    for fi_csv in fi_csvs:
+                    band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
+                    time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
+                    # Support either of these names for band-time details
+                    band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
+
+                    model_tag = model_type
+                    if os.path.exists(band_csv):
+                        png_path = os.path.join(fi_plot_dir, f"band_importance_{model_tag}.png")
                         try:
-                            base = os.path.splitext(os.path.basename(fi_csv))[0]
-                            png_path = os.path.join(experiment_dir, base + ".png")
-                            plot_feature_importance_from_df(
-                                fi_csv,
-                                band_names=BAND_NAMES,
+                            plot_band_importance(band_csv, band_names= BAND_NAMES, save_path=png_path)
+                            print(f"Plotted band importance to {png_path}")
+                        except Exception as e:
+                            print(f"Failed to plot band importance for {band_csv}: {e}")
+                    else:
+                        print(f"Band importance CSV not found: {band_csv}")
+
+                    if os.path.exists(time_csv):
+                        png_path = os.path.join(fi_plot_dir, f"time_importance_{model_tag}_T{N_TIMESTEPS}.png")
+                        try:
+                            plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS, save_path=png_path)
+                            print(f"Plotted time importance to {png_path}")
+                        except Exception as e:
+                            print(f"Failed to plot time importance for {time_csv}: {e}")
+                    else:
+                        print(f"Time importance CSV not found: {time_csv}")
+
+                    if band_time_csv and os.path.exists(band_time_csv):
+                        png_path = os.path.join(fi_plot_dir, f"band_time_importance_{model_tag}_T{N_TIMESTEPS}.png")
+                        try:
+                            plot_band_time_importance(
+                                importance_df = band_time_csv,
+                                band_names= BAND_NAMES,
                                 num_timesteps=N_TIMESTEPS,
                                 save_path=png_path
                             )
-                            print(f"Plotted feature importance for {fi_csv} to {png_path}")
+                            print(f"Plotted band-time heatmap to {png_path}")
                         except Exception as e:
-                            print(f"Failed to plot feature importance for {fi_csv}: {e}")
+                            print(f"Failed to plot band-time heatmap for {band_time_csv}: {e}")
+                    else:
+                        print(f"Band-time heatmap CSV not found: {band_time_csv}")
+                    print(f"Feature importance CSVs saved under: {fi_csv_dir}")
+                    print(f"Feature importance plots saved under: {fi_plot_dir}")
             elif save_feat_imp:
                 print("Warning: Requested to save feature importances, but model does not support 'estimators_'. Skipping feature importance export.")
             print(f"[{timestamp}] Experiment complete.")
