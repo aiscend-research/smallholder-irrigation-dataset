@@ -1,3 +1,6 @@
+import os
+# def test_flatten_dataset_with_dummy_data():
+#     import torch
 #
 # NOTE: Setting per_band_time=True in flatten_dataset will flatten as one row per (band, time, pixel),
 # filtering pixels only at that specific (band, time, pixel) location (not across all bands/times).
@@ -5,6 +8,42 @@
 import numpy as np
 from tqdm import tqdm
 import torch
+
+from sklearn.impute import SimpleImputer, KNNImputer
+from typing import Optional, Tuple
+
+# --- Time interpolation imputer (temporal) ---
+def _time_interp_row(row: np.ndarray, T: int, C: int, fill_constant: float = 0.0) -> np.ndarray:
+    """
+    Reshape a 1D feature vector (length = T*C) to (T, C), linearly interpolate along time
+    for each band independently, and reshape back. NaNs are filled by:
+      - all-NaN column -> fill_constant
+      - single observed value -> broadcast across time
+      - otherwise -> linear interpolation with end extrapolation
+    """
+    arr = row.reshape(T, C).astype(float)
+    idx = np.arange(T)
+    for c in range(C):
+        col = arr[:, c]
+        m = ~np.isnan(col)
+        if not m.any():
+            arr[:, c] = fill_constant
+        elif m.sum() == 1:
+            arr[:, c] = col[m][0]
+        else:
+            arr[:, c] = np.interp(idx, idx[m], col[m])  # fills gaps; extends ends
+    return arr.reshape(T * C)
+
+
+def time_interpolate_features(X: np.ndarray, T: int, C: int, fill_constant: float = 0.0) -> np.ndarray:
+    """
+    Apply temporal interpolation per row. X must have feature dimension T*C (bands stacked per timestep or vice versa,
+    but consistent with how flatten_dataset outputs: features = T * C).
+    """
+    out = np.empty_like(X, dtype=float)
+    for i in tqdm(range(X.shape[0]), desc="Imputing (time interp)", unit="row"):
+        out[i] = _time_interp_row(X[i], T, C, fill_constant=fill_constant)
+    return out
 
 def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_time=False):
     """
@@ -46,9 +85,12 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
             image = image.permute(2, 3, 1, 0)  # (H, W, T, C)
             image_flat = image.reshape(H * W, T * C)
 
+            # Replace -9999 with nan by default
+            image_flat = image_flat.clone()
+            image_flat[image_flat == -9999] = float('nan')
+
             # Optionally mask out ignore_value_in_image (e.g. -9999)
             if ignore_value_in_image is not None:
-                image_flat = image_flat.clone()
                 image_flat[image_flat == ignore_value_in_image] = float('nan')
 
             # Handle mask: always return all bands
@@ -108,6 +150,8 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
         for c in range(C):
             for t in range(T):
                 band_time_pixels = image_np[c, t]    # (H, W)
+                # Replace -9999 with nan by default
+                band_time_pixels = np.where(band_time_pixels == -9999, np.nan, band_time_pixels)
                 if ignore_value_in_image is not None:
                     band_time_pixels = np.where(band_time_pixels == ignore_value_in_image, np.nan, band_time_pixels)
                 band_time_pixels = band_time_pixels.reshape(-1)  # (N,)
@@ -262,3 +306,59 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
 # if __name__ == "__main__":
 #     test_flatten_dataset_per_band_time_edge_cases()
 #     test_flatten_dataset_original_edge_cases()
+
+# --- NaN stats helpers ---
+def _write_nan_table_txt(path_txt: str, counts_ct: np.ndarray):
+    """
+    Save a pretty text table: one row per band, 37 integers per row (t0..t36).
+    """
+    C, T = counts_ct.shape
+    with open(path_txt, "w") as f:
+        f.write("Number of NaN pixels per band/timepoint:\n")
+        for b in range(C):
+            row = "  ".join(f"{int(c):5d}" for c in counts_ct[b])
+            f.write(f"Band {b+1:2d}: {row}\n")
+
+def _save_nan_counts(out_dir: str, basename: str, counts_ct: np.ndarray):
+    """
+    Save counts_ct (C,T) to TXT and CSV with the same base name.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    # TXT
+    _write_nan_table_txt(os.path.join(out_dir, f"{basename}.txt"), counts_ct)
+    # CSV
+    np.savetxt(os.path.join(out_dir, f"{basename}.csv"), counts_ct, delimiter=",", fmt="%d")
+
+def compute_nan_stats_for_dataset(dataset, out_dir: str, split_name: str = "train", save_per_sample: bool = False):
+    """
+    Compute NaN counts per (band, time) for each sample in a dataset and an aggregate over the split.
+
+    Assumes each dataset item is a dict with 'image' tensor of shape (C, T, H, W),
+    where cloud/missing pixels have already been set to NaN (as in MultiTemporalCropDataset).
+    Saves an aggregate TXT/CSV into out_dir. If save_per_sample is True, per-sample TXT/CSV files are also saved.
+    The aggregate file is always saved.
+    """
+    if len(dataset) == 0:
+        os.makedirs(out_dir, exist_ok=True)
+        return
+
+    # Infer C,T from the first sample
+    first = dataset[0]
+    C, T = int(first["image"].shape[0]), int(first["image"].shape[1])
+
+    agg = np.zeros((C, T), dtype=np.int64)
+
+    for i in tqdm(range(len(dataset)), desc=f"NaN stats ({split_name})", unit="img"):
+        sample = dataset[i]
+        img = sample["image"].detach().cpu().numpy()  # (C,T,H,W)
+        counts = np.isnan(img).sum(axis=(2, 3)).astype(np.int64)  # (C,T)
+        agg += counts
+
+        # Per-sample outputs (optional)
+        if save_per_sample:
+            uid = sample.get("id", str(i))
+            uid_safe = str(uid).replace("/", "_")
+            _save_nan_counts(out_dir, f"{split_name}_{uid_safe}", counts)
+
+    # Aggregate over the split
+    _save_nan_counts(out_dir, f"{split_name}_AGGREGATE", agg)

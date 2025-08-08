@@ -415,129 +415,218 @@ def plot_feature_importance_from_df(df, band_names=None, num_timesteps=None,
 
 
 # --- Helper functions for evaluation and metrics ---
-def get_image_metadata(image_id, label_csv=LABEL_CSV):
-    """
-    Given an image_id, return its metadata as a dictionary from the label CSV.
-    """
-    df = pd.read_csv(label_csv)
-    row = df[df['image_id'] == image_id]
-    if row.empty:
-        return None
-    return row.iloc[0].to_dict()
 
+def get_image_metadata(ids):
+    '''
+    Retrieves information about presence of a water source, month, and year for each image with 
+    id in ids
 
-def get_metrics(y_true, y_pred, classes=None, average='weighted'):
+    Params
+        - ids (list): List of unique IDs for each pixel (n_samples, 1)
+    
+    Returns
+        - months (np.array): List of integers between 1 and 12, where integer at element i is 
+          the month of the image with unique id as ids[i]
+        - years (np.array): List of integers between 2016 and 2025, where integer at element i is
+          the year of the image with unique id as ids[i]
+        - water_sources (np.array): List of booleans, where boolean at element i represents the 
+          presence/absence of a water source in the image with unique id as ids[i]
+    '''
+    irrigation_table = pd.read_csv(LABEL_CSV)
+    months = [irrigation_table.loc[irrigation_table['unique_id'] == i, 'month'].values[0] for i in ids]
+    years = [irrigation_table.loc[irrigation_table['unique_id'] == i, 'year'].values[0] for i in ids]
+    water_sources = [irrigation_table.loc[irrigation_table['unique_id'] == i, 'water_source'].values[0] for i in ids]
+    months = np.array(months)
+    years = np.array(years)
+    water_sources = np.array(water_sources)
+    return months, years, water_sources
+
+def get_metrics(truth, pred, target_names):
+    '''
+    Computes the precision, recall, and F1-score for a given dimension and category.
+    Returns a dictionary containing the metrics for each irrigation type
+
+    Params
+        - truth (np.array) of shape (n_samples, H, W): Ground truth labels. 
+        - pred (np.array) of shape (n_samples, H, W): Predicted labels.
+        - target names (list of strings): The names of the irrigation classes (eg: "Small-scale"). Should match
+          with the value speciifed in label bands. (eg: Not irrigated is 0, small-scale is 1)
+    '''
+    # Flatten the arrays to 1D for sklearn
+    y_true = truth.flatten()
+    y_pred = pred.flatten()
+
+    labels = list(range(len(target_names)))
+    report = classification_report(y_true, y_pred, labels=labels, target_names=target_names, output_dict=True, zero_division=0)
+
+    results = {}
+    for class_name in target_names:
+        class_metrics = report[class_name]
+        results[class_name.lower().replace(" ", "_").replace("-", "_")] = {
+            'f1-score': class_metrics['f1-score'],
+            'precision': class_metrics['precision'],
+            'recall': class_metrics['recall'],
+            'support': class_metrics['support']
+        }
+    return results
+
+def get_uncertainty_explanation_metrics(label_metadata, y_pred, y_test, target_names):
     """
-    Compute classification metrics for predictions.
+    Computes metrics for each uncertainty explanation category.
+    
+    Args:
+        label_metadata (np.ndarray): Metadata array with shape (n_samples, 6, H, W).
+        y_pred (np.ndarray): Predicted labels with shape (n_samples, H, W).
+        y_test (np.ndarray): Ground truth labels with shape (n_samples, H, W).
+    
+    Returns:
+        dict: Metrics for each uncertainty explanation category.
     """
-    metrics = {
-        'accuracy': accuracy_score(y_true, y_pred),
-        'precision': precision_score(y_true, y_pred, average=average, zero_division=0),
-        'recall': recall_score(y_true, y_pred, average=average, zero_division=0),
-        'f1': f1_score(y_true, y_pred, average=average, zero_division=0),
-        'report': classification_report(y_true, y_pred, target_names=classes) if classes is not None else classification_report(y_true, y_pred)
-    }
+    metrics = {}
+    for i in range(5):
+        mask = np.where(label_metadata[:, i, :, :] == 1)
+        category_name = UNCERTAINTY_EXPLANATIONS[i].lower().replace(" ", "_").replace("-", "_")
+        metrics[category_name] = get_metrics(y_test[mask], y_pred[mask], target_names)
+    return metrics
+
+def get_certainty_score_metrics(label_metadata, y_pred, y_test, target_names):
+    """
+    Computes metrics for each certainty score category.
+    
+    Args:
+        label_metadata (np.ndarray): Metadata array with shape (n_samples, 6, H, W).
+        y_pred (np.ndarray): Predicted labels with shape (n_samples, H, W).
+        y_test (np.ndarray): Ground truth labels with shape (n_samples, H, W).
+    
+    Returns:
+        dict: Metrics for each certainty score category.
+    """
+    metrics = {}
+    certainty_scores = label_metadata[:, 5, :, :]
+    
+    low_mask = np.where(certainty_scores <= 3)
+    metrics['low_certainty'] = get_metrics(y_test[low_mask], y_pred[low_mask], target_names)
+    
+    high_mask = np.where(certainty_scores > 3)
+    metrics['high_certainty'] = get_metrics(y_test[high_mask], y_pred[high_mask], target_names)
+    
     return metrics
 
 
-def get_uncertainty_explanation_metrics(df, explanation_col='uncertainty_explanation', pred_col='prediction', true_col='label'):
+def get_month_metrics(months, y_pred, y_test, target_names):
     """
-    Compute metrics for each uncertainty explanation in the DataFrame.
+    Computes metrics for each month.
+    
+    Args:
+        months (np.ndarray): Array of months with shape (n_samples,).
+        y_pred (np.ndarray): Predicted labels with shape (n_samples, H, W).
+        y_test (np.ndarray): Ground truth labels with shape (n_samples, H, W).
+    
+    Returns:
+        dict: Metrics for each month.
     """
-    results = {}
-    for explanation in UNCERTAINTY_EXPLANATIONS:
-        subset = df[df[explanation_col] == explanation]
-        if not subset.empty:
-            metrics = get_metrics(subset[true_col], subset[pred_col], classes=MULTI_CLASSES)
-            results[explanation] = metrics
-    return results
+    metrics = {}
+
+    for i in range(6, 11):  # June to October
+        mask = np.where(months == i)
+        category_name = calendar.month_name[i].lower()
+        metrics[category_name] = get_metrics(y_test[mask], y_pred[mask], target_names)
+    return metrics
 
 
-def get_certainty_score_metrics(df, certainty_col='certainty_score', pred_col='prediction', true_col='label', bins=[0, 0.5, 0.8, 1.0]):
+def get_year_metrics(years, y_pred, y_test, target_names):
     """
-    Compute metrics for different certainty score bins.
+    Computes metrics for each year.
+    
+    Args:
+        years (np.ndarray): Array of years with shape (n_samples,).
+        y_pred (np.ndarray): Predicted labels with shape (n_samples, H, W).
+        y_test (np.ndarray): Ground truth labels with shape (n_samples, H, W).
+    
+    Returns:
+        dict: Metrics for each year.
     """
-    results = {}
-    labels = ['low', 'medium', 'high']
-    df = df.copy()
-    df['certainty_bin'] = pd.cut(df[certainty_col], bins=bins, labels=labels, include_lowest=True)
-    for label in labels:
-        subset = df[df['certainty_bin'] == label]
-        if not subset.empty:
-            metrics = get_metrics(subset[true_col], subset[pred_col], classes=MULTI_CLASSES)
-            results[label] = metrics
-    return results
+    metrics = {}
+    for year in range(2016, 2026):
+        mask = np.where(years == year)
+        metrics[str(year)] = get_metrics(y_test[mask], y_pred[mask], target_names)
+    return metrics
 
-
-def get_month_metrics(df, month_col='month', pred_col='prediction', true_col='label'):
+def get_water_source_metrics(water_sources, y_pred, y_test, target_names):
     """
-    Compute metrics for each month.
+    Computes metrics based on the presence of a water source.
+    
+    Args:
+        water_sources (np.ndarray): Array indicating presence of water source with shape (n_samples,).
+        y_pred (np.ndarray): Predicted labels with shape (n_samples, H, W).
+        y_test (np.ndarray): Ground truth labels with shape (n_samples, H, W).
+    
+    Returns:
+        dict: Metrics for presence and absence of water source.
     """
-    results = {}
-    months = sorted(df[month_col].dropna().unique())
-    for m in months:
-        subset = df[df[month_col] == m]
-        if not subset.empty:
-            metrics = get_metrics(subset[true_col], subset[pred_col], classes=MULTI_CLASSES)
-            month_name = calendar.month_abbr[int(m)]
-            results[month_name] = metrics
-    return results
+    metrics = {}
+    
+    # Presence of water source
+    presence_mask = np.where(water_sources == True)
+    metrics['water_source_present'] = get_metrics(y_test[presence_mask], y_pred[presence_mask], target_names)
+    
+    # Absence of water source
+    absence_mask = np.where(water_sources == False)
+    metrics['water_source_absent'] = get_metrics(y_test[absence_mask], y_pred[absence_mask], target_names)
+    
+    return metrics
 
-
-def get_year_metrics(df, year_col='year', pred_col='prediction', true_col='label'):
+def get_class_presence(mask, num_classes=2, presence_thresh=1):
     """
-    Compute metrics for each year.
-    """
-    results = {}
-    years = sorted(df[year_col].dropna().unique())
-    for y in years:
-        subset = df[df[year_col] == y]
-        if not subset.empty:
-            metrics = get_metrics(subset[true_col], subset[pred_col], classes=MULTI_CLASSES)
-            results[int(y)] = metrics
-    return results
+    Returns a binary array of class presence for a single image, where each element 
+    corresponds to a separate class.
 
+    Params:
+        - mask: The image over which we want to determine irrigation presence per-class
+        - num_classes (int): The number of irrigation classes (2 for binary, 6 for multi-class)
+        - presence_thresh (int): Threshold for how many pixels must be categorized with
+          a particular class, for the class to be considered present in the image.
 
-def get_water_source_metrics(df, source_col='water_source', pred_col='prediction', true_col='label'):
+    Returns:
+        - np.array of shape (num_classes,), where each element is 0 or 1, where 0 
+          represents the absence of class i in the image, and 1 represents the presence
+          of class i in the image.
     """
-    Compute metrics for each water source type.
+    return np.array([
+        int(np.sum(mask == c) >= presence_thresh)
+        for c in range(num_classes)
+    ])
+    
+def compute_presence_metrics(preds, gts, target_names, presence_thresh=1):
     """
-    results = {}
-    sources = df[source_col].dropna().unique()
-    for src in sources:
-        subset = df[df[source_col] == src]
-        if not subset.empty:
-            metrics = get_metrics(subset[true_col], subset[pred_col], classes=MULTI_CLASSES)
-            results[src] = metrics
-    return results
+    Uses sklearn to compute multi-label class presence metrics.
+    
+    Args:
+        preds (list): List of predicted label images. Shape (n_images, H, W)
+        gts (list): List of ground truth label images. Shape (n_images, H, W)
+        target_names (list of strings): List of irrigation category names
+        presence_thresh: Minimum pixel count to consider a class present.
+        average: 'macro', 'micro', 'samples', or 'weighted' — standard sklearn averaging.
+    
+    Returns:
+        Dictionary with sklearn-style precision, recall, F1.
+    """
+    # (n_samples, n_classes)
+    num_classes = len(target_names)
+    Y_pred = np.array([get_class_presence(p, num_classes, presence_thresh) for p in preds])
+    Y_true = np.array([get_class_presence(g, num_classes, presence_thresh) for g in gts])
+    per_class_metrics = {}
 
-
-def get_class_presence(df, class_col='label', classes=MULTI_CLASSES):
-    """
-    Return a dictionary of presence (count) for each class.
-    """
-    counts = {cls: 0 for cls in classes}
-    value_counts = df[class_col].value_counts()
-    for cls in classes:
-        counts[cls] = value_counts.get(cls, 0)
-    return counts
-
-
-def compute_presence_metrics(y_true, y_pred, classes=MULTI_CLASSES):
-    """
-    Compute precision, recall, and F1 for class presence (ignoring order).
-    """
-    # Convert to set for presence
-    true_set = set(y_true)
-    pred_set = set(y_pred)
-    tp = len(true_set & pred_set)
-    fp = len(pred_set - true_set)
-    fn = len(true_set - pred_set)
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    return {'precision': precision, 'recall': recall, 'f1': f1}
-
+    for idx in range(0, num_classes):
+        pred = Y_pred[:,idx]
+        true = Y_true[:,idx]
+        category = target_names[idx].lower().replace(" ", "_").replace("-", "_")
+        per_class_metrics[category] = {
+                    "precision": precision_score(true, pred, zero_division=0),
+                    "recall": recall_score(true, pred, zero_division=0),
+                    "f1-score": f1_score(true, pred, zero_division=0),
+                    }
+    return per_class_metrics
 
 def metrics_over_factors(y_pred, y_test, multi_class, label_metadata, ids, metrics_path):
     '''
@@ -628,6 +717,116 @@ def metrics_over_factors(y_pred, y_test, multi_class, label_metadata, ids, metri
     return metrics
 
 def plot_metrics_over_factors(metrics_json, save_dir="plots"):
+    '''
+    Plots the metrics over different factors and saves the figures to a folder.
+
+    Parameters:
+        - metrics_json (dict): Dictionary output from metrics_over_factors
+        - save_dir (str): Path to directory where plots should be saved
+    '''
+
+    # Create the directory if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
+
+    pixel_metrics = metrics_json["pixel_metrics"]
+    image_metrics = metrics_json["image_metrics"]
+    irrigation_classes = BINARY_CLASSES
+    if len(metrics_json['pixel_metrics']['overall'].keys()) == 6:
+        irrigation_classes = MULTI_CLASSES
+
+    def extract_data(section_key, image_level):
+        '''
+        For a specific factor, return a pd.DataFrame, where each entry corresponds
+        to a particular category. This is then used to plot the data.
+
+        Parameters
+            - section_key (string): A specific factor (eg: uncertainty explanation)
+            - image_level (bool): True we are performing image-level analysis, false if it is a pixel-level analysis
+        Returns
+            - pd.DataFrame, with each entry corresponding metrics for a particular category for each class
+                - Example of a row: {'category': 'Unclear signs of agriculture', 'class': 'small_scale', ...scores}
+        '''
+        section_data = image_metrics[section_key] if image_level else pixel_metrics[section_key]
+        data = []
+        if section_key == 'overall' or image_level:
+           for irrigation_class in irrigation_classes:
+                # Key to access irrigation class from dict
+                irrigation_class_key = irrigation_class.lower().replace(" ", "_").replace("-", "_")
+                metrics = section_data.get(irrigation_class_key, {})
+                data.append({
+                    "category": "",
+                    "class": irrigation_class, 
+                    "precision": metrics.get("precision", 0.0),
+                    "recall": metrics.get("recall", 0.0),
+                    "f1-score": metrics.get("f1-score", 0.0),
+                })
+        else:
+            for category, category_data in section_data.items():
+                for irrigation_class in irrigation_classes:
+                    # Key to access irrigation class from dict
+                    irrigation_class_key = irrigation_class.lower().replace(" ", "_").replace("-", "_")
+                    metrics = category_data.get(irrigation_class_key, {})
+                    data.append({
+                        "category": category.replace("_", " ").capitalize(),
+                        "class": irrigation_class, 
+                        "precision": metrics.get("precision", 0.0),
+                        "recall": metrics.get("recall", 0.0),
+                        "f1-score": metrics.get("f1-score", 0.0),
+                        "support": metrics.get("support", 0.0)
+                    })
+        return pd.DataFrame(data)
+
+    def make_plot(df, metric, title, filename):
+        # Do not plot categories with 0 cases
+        if "support" in df.columns.tolist():
+            df = df[df["support"] > 0]
+            if df.empty:
+                print(f"Skipping plot for {title} ({metric}) — all entries have zero support.")
+                return
+        plt.figure(figsize=(12, 5))
+        ax = plt.subplot()
+        pivot_df = df.pivot(index='category', columns='class', values=metric.lower())
+        pivot_df.plot(kind='bar', ax=ax, width=0.85)
+
+        # Different plot title for overall and image-level class presence graphs
+        plot_title = f"{metric} per {title}"
+        x_label = 'Category'
+        if title == 'Overall':
+            plot_title = f"Overall {metric}"
+            x_label = ""
+        elif title == 'Image-Level Class Presence':
+            plot_title = f"{metric} for Image-Level Class Presence Detection"
+            x_label = ""
+
+        plt.title(plot_title)
+        plt.ylabel(metric)
+        plt.xlabel(x_label)
+        plt.xticks(rotation=15)
+        plt.legend(title="Class", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plot_path = os.path.join(save_dir, f"{filename}_{metric.lower()}.png")
+        plt.savefig(plot_path)
+        plt.close()
+
+    # Handle one or more grouping sections
+    sections_to_plot = {
+        "overall": "Overall",
+        "per_uncertainty_explanation": "Uncertainty Explanation",
+        "per_uncertainty_score": "Uncertainty Score",
+        "per_month": "Month",
+        "per_year": "Year",
+        "water_source": "Water Source",
+        "image_level_class_presence": "Image-Level Class Presence"
+    }
+
+    # Plot precision, recall, f1-score (3 plots) 
+    for section_key, title in sections_to_plot.items():
+        image_level = False
+        if section_key == 'image_level_class_presence':
+            image_level = True
+        df = extract_data(section_key, image_level)
+        for metric in ['Precision', 'Recall', 'F1-Score']:
+            make_plot(df, metric, title, section_key)
     '''
     Plots the metrics over different factors and saves the figures to a folder.
 
