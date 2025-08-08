@@ -36,7 +36,7 @@ Before using any scripts, follow these steps:
 | ---- | ------------------------------ | --------------------------------------------------------------------------------- |
 | 1    | `survey_to_csv.py`             | Converts Earth Collect `.zip` survey files into usable `.csv` files               |
 | 2    | `polygons_to_geojson.py`       | Converts Google Earth Pro `.kml` files into `.geojson` format                     |
-| 3    | `merge_survey_and_polygons.py` | Merges processed survey data with labeled polygons and computes coverage stats    |
+| 3    | `merge_survey_and_polygons.py` | Merges processed survey data with labeled polygons, computes coverage stats, updates polygon categories based on area, and generates a validation report |
 | 4    | `batch_process.py`            | Batch processes a folder of `.zip` and `.kml` files, merges them, and pools the latest labeled irrigation data (outputs both a CSV and a GeoJSON file) |
 
 ---
@@ -47,7 +47,7 @@ Each script creates or saves new files as it runs:
 
 * `survey_to_csv.py` creates a `.csv` file in the `processed/` folder with survey results
 * `polygons_to_geojson.py` creates a `.geojson` file in the `processed/` folder with labeled polygons
-* `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder, **and also saves a log file** summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
+* `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder and saves a log file summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
 * `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`, and then pools the latest labeled irrigation data for the group:
 
 ```bash
