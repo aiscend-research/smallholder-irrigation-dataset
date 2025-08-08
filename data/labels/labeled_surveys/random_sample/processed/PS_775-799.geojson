@@ -427,8 +427,8 @@
         "month": 6,
         "day": 19,
         "year": 2019,
-        "certainty": 4,
-        "uncertainty_explanation": "only slightly green",
+        "certainty": 5,
+        "uncertainty_explanation": "",
         "category": "small-scale"
       },
       "geometry": {
@@ -540,59 +540,6 @@
             [
               26.38335406598855,
               -12.13734976961872
-            ]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "ps_20_10.3.2019",
-        "operator_initials": "PS",
-        "internal_id": 20,
-        "month": 10,
-        "day": 3,
-        "year": 2019,
-        "certainty": 5,
-        "uncertainty_explanation": "",
-        "category": "small-scale"
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [
-              26.38341113123607,
-              -12.13723280910379
-            ],
-            [
-              26.38359687101285,
-              -12.13710781245006
-            ],
-            [
-              26.38351942890593,
-              -12.13700704290562
-            ],
-            [
-              26.38346190556152,
-              -12.1370394765374
-            ],
-            [
-              26.38341799242369,
-              -12.13700974121837
-            ],
-            [
-              26.38333155644578,
-              -12.13703495578816
-            ],
-            [
-              26.3832709160359,
-              -12.13710135218947
-            ],
-            [
-              26.38341113123607,
-              -12.13723280910379
             ]
           ]
         ]
@@ -1277,47 +1224,6 @@
             [
               28.299075115797,
               -13.31613964679633
-            ]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "ps_15_8.24.2016",
-        "operator_initials": "PS",
-        "internal_id": 15,
-        "month": 8,
-        "day": 24,
-        "year": 2016,
-        "certainty": 4,
-        "uncertainty_explanation": "only slightly green",
-        "category": "small-scale"
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [
-              28.29908234035837,
-              -13.31615765610332
-            ],
-            [
-              28.29915750997794,
-              -13.31613238477053
-            ],
-            [
-              28.29910644370901,
-              -13.31602446840601
-            ],
-            [
-              28.29903632488038,
-              -13.31604818002869
-            ],
-            [
-              28.29908234035837,
-              -13.31615765610332
             ]
           ]
         ]

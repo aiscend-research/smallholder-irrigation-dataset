@@ -1,3 +1,1 @@
-Row 46 (internal_id 20, 19/6/2019): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.
-Polygon 12 (internal_id 20, 3/10/2019) has no matching survey row.
-Polygon 29 (internal_id 15, 24/8/2016) has no matching survey row.
+Row 47 (internal_id 20, 19/6/2019): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
