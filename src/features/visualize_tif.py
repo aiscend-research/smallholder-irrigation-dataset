@@ -4,338 +4,41 @@ import matplotlib.pyplot as plt
 import json
 import os
 import glob
-from datetime import datetime, timedelta
-
-# Quality Assessment Criteria (Consistent across all functions):
-# - EXCELLENT: ≥15 time steps with >50% coverage (≥15/37)
-# - GOOD: ≥10 time steps with >50% coverage (≥10/37) 
-# - MODERATE: ≥5 time steps with >50% coverage (≥5/37)
-# - POOR: <5 time steps with >50% coverage (<5/37)
-
-# Coverage threshold: >5000 valid pixels per time step (>50% of 100x100 pixels)
-
-features_dir = "data/features/"
-tif_files = glob.glob(os.path.join(features_dir, "site_*.tif"))
-print(f"Found {len(tif_files)} sites")
-
-# Choose which site to visualize by unique ID
-unique_id = "1" 
-TIF_PATH = None
-JSON_PATH = None
-
-for tif_path in tif_files:
-    filename = os.path.basename(tif_path)
-    file_unique_id = filename.split('_')[-1].replace('.tif', '')
-    if file_unique_id == unique_id:
-        TIF_PATH = tif_path
-        JSON_PATH = tif_path.replace('.tif', '.json')
-        break
-
-if TIF_PATH is None:
-    print(f"Site with unique ID {unique_id} not found!")
-    exit()
-
-print(f"Visualizing: {os.path.basename(TIF_PATH)} (Unique ID: {unique_id})")
-
-with open(JSON_PATH) as f:
-    meta = json.load(f)
-
-bands = meta['bands']
-T, B, H, W = meta['shape']
-print(f"Metadata: T={T}, B={B}, H={H}, W={W}")
-print(f"Bands ({len(bands)}): {bands}")
-
-# Load and reshape image
-with rasterio.open(TIF_PATH) as src:
-    raw = src.read()
-
-# Reshape to (T, B, H, W)
-stack = raw.reshape(T, B, H, W)
-
-# Get NDVI band
-ndvi_idx = bands.index('NDVI')
-ndvi_data = stack[:, ndvi_idx, :, :]  # Shape: (37, 100, 100)
-
-# Convert scaled values back to proper NDVI range
-ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
-
-# Calculate global min/max for consistent colorbar - optimize color range for better farmland visualization
-valid_data = ndvi_data[~np.isnan(ndvi_data)]
-if len(valid_data) > 0:
-    # Use more conservative percentiles to avoid extreme values affecting color range
-    global_min = np.percentile(valid_data, 2)  # Changed from 1% to 2%
-    global_max = np.percentile(valid_data, 98)  # Changed from 99% to 98%
-    
-    # Ensure color range is suitable for farmland visualization
-    if global_min < -0.1:
-        global_min = -0.1
-    if global_max > 0.8:
-        global_max = 0.8
-else:
-    global_min, global_max = -0.1, 0.8
-
-print(f"NDVI range: {global_min:.3f} to {global_max:.3f}")
-
-n_cols = 7
-n_rows = 6
-fig, axes = plt.subplots(n_rows, n_cols, figsize=(21, 18))
-axes = axes.flatten()
-
-# Use standard matplotlib colormap for NDVI visualization
-# 'RdYlGn' (Red-Yellow-Green) is commonly used for vegetation indices
-# Red = low NDVI (no vegetation), Green = high NDVI (dense vegetation)
-cmap = 'RdYlGn'
-
-for i in range(37):
-    img = ndvi_data[i]  # Shape: (100, 100)
-    
-    ax = axes[i]
-    im = ax.imshow(img, cmap=cmap, vmin=global_min, vmax=global_max)
-    ax.set_title(f"Time {i}", fontsize=10, fontweight='bold')
-    ax.axis('off')
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-for ax in axes[37:]:
-    ax.axis('off')
-
-plt.suptitle(f"NDVI (Normalized Difference Vegetation Index) Over Time - {os.path.basename(TIF_PATH)}", fontsize=16)
-plt.tight_layout()
-
-# Save the NDVI time series plot
-ndvi_plot_path = os.path.join("src/features/readme_figures", f"ndvi_time_series_site_{unique_id}.png")
-plt.savefig(ndvi_plot_path, dpi=300, bbox_inches='tight')
-print(f"Saved NDVI time series plot to: {ndvi_plot_path}")
-
-plt.show()
-
-print(f"\nNDVI Statistics:")
-print(f"Global min: {global_min:.3f}")
-print(f"Global max: {global_max:.3f}")
-print(f"Mean: {np.nanmean(ndvi_data):.3f}")
-print(f"Std: {np.nanstd(ndvi_data):.3f}")
-
-# Count masked pixels per time step
-print(f"\nMasked pixels per time step:")
-for i in range(37):
-    masked_count = np.sum(np.isnan(ndvi_data[i]))
-    total_pixels = ndvi_data[i].size
-    masked_percent = (masked_count / total_pixels) * 100
-    print(f"Time {i:2d}: {masked_count:4d} pixels masked ({masked_percent:5.1f}%)")
-
-# Data Quality Assessment
-print(f"\nData Quality Assessment:")
-print(f"Total valid pixels: {len(valid_data):,}")
-print(f"Percentage of valid data: {(len(valid_data)/(37*100*100)*100):.1f}%")
-
-# Count time steps with good coverage (>50% of pixels are valid)
-good_coverage_steps = sum(1 for i in range(37) 
-                         if np.sum(~np.isnan(ndvi_data[i])) > 5000)  # >50% coverage
-print(f"Time steps with >50% coverage: {good_coverage_steps}/37")
-
-# Quality assessment with consistent criteria
-if good_coverage_steps >= 15:
-    print("✅ Excellent temporal coverage for irrigation detection")
-elif good_coverage_steps >= 10:
-    print("✅ Good temporal coverage for irrigation detection")
-elif good_coverage_steps >= 5:
-    print("⚠️ Moderate temporal coverage - may need more sites")
-else:
-    print("❌ Poor temporal coverage - may need more sites or relaxed cloud filtering")
 
 """
-# Optional:Function to visualize different sites
-def visualize_ndvi_time_series(unique_id):
-    # Visualize NDVI time series for a specific site by unique ID
-    
-    # Find the file with this unique ID
-    tif_path = None
-    for path in tif_files:
-        filename = os.path.basename(path)
-        file_unique_id = filename.split('_')[-1].replace('.tif', '')
-        if file_unique_id == str(unique_id):
-            tif_path = path
-            break
-    
-    if tif_path is None:
-        print(f"Site with unique ID {unique_id} not found!")
-        return
-    
-    json_path = tif_path.replace('.tif', '.json')
-    
-    print(f"Visualizing site with unique ID {unique_id}: {os.path.basename(tif_path)}")
-    
-    # Load data
-    with open(json_path) as f:
-        meta = json.load(f)
-    
-    with rasterio.open(tif_path) as src:
-        raw = src.read()
-    
-    # Reshape
-    T, B, H, W = meta['shape']
-    stack = raw.reshape(T, B, H, W)
-    
-    # Get NDVI and convert scaling
-    ndvi_idx = meta['bands'].index('NDVI')
-    ndvi_data = stack[:, ndvi_idx, :, :]
-    ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
-    
-    # Calculate global range - optimize color range for better farmland visualization
-    valid_data = ndvi_data[~np.isnan(ndvi_data)]
-    if len(valid_data) > 0:
-        # Use more conservative percentiles to avoid extreme values affecting color range
-        global_min = np.percentile(valid_data, 2)  # Changed from 1% to 2%
-        global_max = np.percentile(valid_data, 98)  # Changed from 99% to 98%
-        
-        # Ensure color range is suitable for farmland visualization
-        if global_min < -0.1:
-            global_min = -0.1
-        if global_max > 0.8:
-            global_max = 0.8
-    else:
-        global_min, global_max = -0.1, 0.8
-    
-    # Create plot
-    n_cols = 7
-    n_rows = 6
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(21, 18))
-    axes = axes.flatten()
-    
-    # Use color scheme suitable for farmland visualization
-    cmap = 'RdYlGn'  # Red-Yellow-Green, Red=low NDVI, Green=high NDVI
-    
-    for i in range(37):
-        img = ndvi_data[i]
-        
-        ax = axes[i]
-        im = ax.imshow(img, cmap=cmap, vmin=global_min, vmax=global_max)
-        ax.set_title(f"Time {i}", fontsize=10, fontweight='bold')
-        ax.axis('off')
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    
-    # Hide unused axes
-    for ax in axes[37:]:
-        ax.axis('off')
-    
-    plt.suptitle(f"NDVI (Normalized Difference Vegetation Index) Over Time - {os.path.basename(tif_path)}", fontsize=16)
-    plt.tight_layout()
-    plt.show()
+ENHANCED VISUALIZATION SCRIPT FOR SENTINEL-2 DATA
 
-def compare_sites_quality():
-    # Compare data quality across multiple sites
-    results = []
-    
-    print("Analyzing data quality across sites...")
-    
-    # Analyze all sites, not just first 10
-    for i in range(len(tif_files)):
-        tif_path = tif_files[i]
-        json_path = tif_path.replace('.tif', '.json')
-        
-        try:
-            with open(json_path) as f:
-                meta = json.load(f)
-            
-            with rasterio.open(tif_path) as src:
-                raw = src.read()
-            
-            T, B, H, W = meta['shape']
-            stack = raw.reshape(T, B, H, W)
-            
-            ndvi_idx = meta['bands'].index('NDVI')
-            ndvi_data = stack[:, ndvi_idx, :, :]
-            ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
-            
-            valid_pixels = np.sum(~np.isnan(ndvi_data))
-            good_steps = np.sum([np.sum(~np.isnan(ndvi_data[i])) > 5000 for i in range(37)])
-            
-            results.append({
-                'site': os.path.basename(tif_path),
-                'valid_pixels': valid_pixels,
-                'good_steps': good_steps,
-                'coverage_percent': (valid_pixels/(37*100*100)*100)
-            })
-        except Exception as e:
-            print(f"Error processing {os.path.basename(tif_path)}: {e}")
-    
-    print(f"\nData Quality Comparison (All {len(results)} sites):")
-    print("Unique ID | Site Name                    | Good Steps | Coverage % | Status")
-    print("-" * 70)
-    
-    for r in results:
-        # Extract unique ID from filename
-        site_name = r['site']
-        unique_id = site_name.split('_')[-1].replace('.tif', '')  # Get the last part before .tif
-        
-        # Consistent quality assessment criteria
-        if r['good_steps'] >= 15:
-            status = "✅ Excellent"
-        elif r['good_steps'] >= 10:
-            status = "✅ Good"
-        elif r['good_steps'] >= 5:
-            status = "⚠️ Moderate"
-        else:
-            status = "❌ Poor"
-        print(f"{unique_id:>8} | {site_name:<30} | {r['good_steps']:>10} | {r['coverage_percent']:>9.1f}% | {status}")
-    
-    # Summary statistics
-    avg_good_steps = np.mean([r['good_steps'] for r in results])
-    avg_coverage = np.mean([r['coverage_percent'] for r in results])
-    
-    print(f"\nSummary:")
-    print(f"Average good time steps: {avg_good_steps:.1f}/37")
-    print(f"Average coverage: {avg_coverage:.1f}%")
-    
-    # Consistent overall assessment
-    if avg_good_steps >= 15:
-        print("🎉 Overall data quality is EXCELLENT for irrigation detection!")
-    elif avg_good_steps >= 10:
-        print("✅ Overall data quality is GOOD for irrigation detection!")
-    elif avg_good_steps >= 5:
-        print("⚠️ Overall data quality is MODERATE - consider processing more sites")
-    else:
-        print("❌ Overall data quality is POOR - consider adjusting cloud filtering parameters")
+This script provides visualization functions for Sentinel-2 data with enhanced scaling
+and color enhancement for better representation of vegetation, water, and land features.
 """
 
-def find_site_by_name(site_name):
-    """Find a specific site by name and return its unique ID"""
-    for tif_path in tif_files:
-        if site_name in os.path.basename(tif_path):
-            filename = os.path.basename(tif_path)
-            return filename.split('_')[-1].replace('.tif', '')
-    return None
+# Configuration
+FEATURES_DIR = "data/features"
+OUTPUT_DIR = "src/features/readme_figures"
+TIF_FILES = glob.glob(os.path.join(FEATURES_DIR, "site_*.tif"))
 
-def find_site_by_unique_id(unique_id):
-    """Check if a site with this unique ID exists"""
-    for tif_path in tif_files:
+# Quality Assessment Criteria
+# - EXCELLENT: ≥15 time steps with >50% coverage
+# - GOOD: ≥10 time steps with >50% coverage 
+# - MODERATE: ≥5 time steps with >50% coverage
+# - POOR: <5 time steps with >50% coverage
+
+def find_site_file(unique_id):
+    """Find TIF and JSON files for a given site ID"""
+    for tif_path in TIF_FILES:
         filename = os.path.basename(tif_path)
         file_unique_id = filename.split('_')[-1].replace('.tif', '')
         if file_unique_id == str(unique_id):
-            return True
-    return False
+            return tif_path, tif_path.replace('.tif', '.json')
+    return None, None
 
-# Uncomment to run quality comparison
-# compare_sites_quality()
-
-def analyze_temporal_patterns(unique_id):
-    """Analyze temporal patterns for a specific site"""
-    
-    # Find the file with this unique ID
-    tif_path = None
-    for path in tif_files:
-        filename = os.path.basename(path)
-        file_unique_id = filename.split('_')[-1].replace('.tif', '')
-        if file_unique_id == str(unique_id):
-            tif_path = path
-            break
-    
+def load_site_data(unique_id):
+    """Load and reshape data for a given site"""
+    tif_path, json_path = find_site_file(unique_id)
     if tif_path is None:
-        print(f"Site with unique ID {unique_id} not found!")
+        print(f"Site {unique_id} not found")
         return None, None, None
     
-    json_path = tif_path.replace('.tif', '.json')
-    
-    # Load data
     with open(json_path) as f:
         meta = json.load(f)
     
@@ -345,338 +48,333 @@ def analyze_temporal_patterns(unique_id):
     T, B, H, W = meta['shape']
     stack = raw.reshape(T, B, H, W)
     
-    # Get NDVI and convert scaling
-    ndvi_idx = meta['bands'].index('NDVI')
+    return stack, meta, tif_path
+
+
+
+def stretch_band_enhanced(band_data, lower_percentile=2, upper_percentile=98):
+    """Enhanced histogram stretching with adaptive scaling for Sentinel-2 data"""
+    valid_data = band_data[~np.isnan(band_data)]
+    if len(valid_data) == 0:
+        return np.zeros_like(band_data)
+    
+    min_val = np.percentile(valid_data, lower_percentile)
+    max_val = np.percentile(valid_data, upper_percentile)
+    
+    if max_val > min_val and (max_val - min_val) > 100:
+        gamma = 0.7
+        stretched = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
+        return np.power(stretched, gamma)
+    else:
+        global_min = np.percentile(valid_data, 1)
+        global_max = np.percentile(valid_data, 99)
+        if global_max > global_min:
+            gamma = 0.7
+            stretched = np.clip((band_data - global_min) / (global_max - global_min), 0, 1)
+            return np.power(stretched, gamma)
+        return np.zeros_like(band_data)
+
+def create_time_series_plot(data, title, output_filename, cmap=None, vmin=None, vmax=None):
+    """Create a time series plot with consistent layout"""
+    n_cols, n_rows = 7, 6
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(21, 18))
+    axes = axes.flatten()
+    
+    for i in range(37):
+        img = data[i]
+        ax = axes[i]
+        
+        if cmap:
+            # NDVI data (single channel)
+            im = ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='bilinear')
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label('NDVI', fontsize=8, fontweight='bold')
+            cbar.ax.tick_params(labelsize=7)
+        else:
+            # RGB data (3 channels) - need to transpose from (3, H, W) to (H, W, 3)
+            if img.shape[0] == 3:  # RGB data
+                img = img.transpose(1, 2, 0)
+            ax.imshow(img, interpolation='bilinear')
+        
+        ax.set_title(f"Time {i}", fontsize=10, fontweight='bold')
+        ax.axis('off')
+    
+    for ax in axes[37:]:
+        ax.axis('off')
+    
+    plt.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
+
+def create_natural_rgb(red_data, green_data, blue_data, apply_cloud_mask=True):
+    """Create more natural-looking RGB by using different scaling approach"""
+    if apply_cloud_mask:
+        # For cloud-masked data, use nan values
+        red_clean = np.where(red_data == -9999, np.nan, red_data)
+        green_clean = np.where(green_data == -9999, np.nan, green_data)
+        blue_clean = np.where(blue_data == -9999, np.nan, blue_data)
+    else:
+        # For raw data, set -9999 to 0 for visualization
+        red_clean = np.where(red_data == -9999, 0, red_data)
+        green_clean = np.where(green_data == -9999, 0, green_data)
+        blue_clean = np.where(blue_data == -9999, 0, blue_data)
+    
+    # CRITICAL: Divide by 10,000 to normalize Sentinel-2 TOA values (0-1 range)
+    # The data stored in .tif files are the original 0-10000 range values
+    red_clean = red_clean / 10000.0
+    green_clean = green_clean / 10000.0
+    blue_clean = blue_clean / 10000.0
+    
+    # Get valid data for scaling (now in 0-1 range)
+    red_valid = red_clean[red_clean != 0] if not apply_cloud_mask else red_clean[~np.isnan(red_clean)]
+    green_valid = green_clean[green_clean != 0] if not apply_cloud_mask else green_clean[~np.isnan(green_clean)]
+    blue_valid = blue_clean[blue_clean != 0] if not apply_cloud_mask else blue_clean[~np.isnan(blue_clean)]
+    
+    if len(red_valid) > 0 and len(green_valid) > 0 and len(blue_valid) > 0:
+        # Use 2nd and 98th percentiles for robust scaling (avoid outliers)
+        red_min, red_max = np.percentile(red_valid, [2, 98])
+        green_min, green_max = np.percentile(green_valid, [2, 98])
+        blue_min, blue_max = np.percentile(blue_valid, [2, 98])
+        
+        # Ensure minimum range for visualization
+        min_range = 0.05  # Minimum 5% range to avoid flat images
+        if red_max - red_min < min_range:
+            mid = (red_max + red_min) / 2
+            red_min = max(0, mid - min_range/2)
+            red_max = min(1, mid + min_range/2)
+        if green_max - green_min < min_range:
+            mid = (green_max + green_min) / 2
+            green_min = max(0, mid - min_range/2)
+            green_max = min(1, mid + min_range/2)
+        if blue_max - blue_min < min_range:
+            mid = (blue_max + blue_min) / 2
+            blue_min = max(0, mid - min_range/2)
+            blue_max = min(1, mid + min_range/2)
+        
+        # Scale each band independently to 0-1 range
+        red_scaled = np.clip((red_clean - red_min) / (red_max - red_min), 0, 1)
+        green_scaled = np.clip((green_clean - green_min) / (green_max - green_min), 0, 1)
+        blue_scaled = np.clip((blue_clean - blue_min) / (blue_max - blue_min), 0, 1)
+        
+        return red_scaled, green_scaled, blue_scaled
+    else:
+        return red_clean, green_clean, blue_clean
+
+def visualize_rgb(unique_id, apply_cloud_mask=True):
+    """Visualize RGB images with or without cloud masking"""
+    stack, meta, _ = load_site_data(unique_id)
+    if stack is None:
+        return
+    
+    bands = meta['bands']
+    try:
+        red_idx = bands.index('B4')    # Red band (B4)
+        green_idx = bands.index('B3')  # Green band (B3) 
+        blue_idx = bands.index('B2')   # Blue band (B2)
+    except ValueError:
+        print("RGB bands not found")
+        return
+    
+    red_data = stack[:, red_idx, :, :]
+    green_data = stack[:, green_idx, :, :]
+    blue_data = stack[:, blue_idx, :, :]
+    
+    # Use the natural RGB approach
+    red_scaled, green_scaled, blue_scaled = create_natural_rgb(red_data, green_data, blue_data, apply_cloud_mask)
+    
+    # Stack RGB bands and transpose for proper plotting
+    rgb_data = np.stack([red_scaled, green_scaled, blue_scaled], axis=1)
+    
+    mask_status = "after" if apply_cloud_mask else "before"
+    title = f"RGB Images {mask_status.title()} Cloud Masking - Site {unique_id}"
+    filename = f"rgb_{mask_status}_cloud_mask_site_{unique_id}.png"
+    
+    create_time_series_plot(rgb_data, title, filename)
+
+def visualize_ndvi(unique_id, apply_cloud_mask=True):
+    """Visualize NDVI with or without cloud masking"""
+    stack, meta, _ = load_site_data(unique_id)
+    if stack is None:
+        return
+    
+    bands = meta['bands']
+    try:
+        ndvi_idx = bands.index('NDVI')
+    except ValueError:
+        print("NDVI band not found")
+        return
+    
+    ndvi_data = stack[:, ndvi_idx, :, :]
+    
+    if apply_cloud_mask:
+        ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
+        mask_status = "after"
+    else:
+        ndvi_data = ndvi_data / 10000.0
+        mask_status = "before"
+    
+    valid_data = ndvi_data[~np.isnan(ndvi_data)] if apply_cloud_mask else ndvi_data[ndvi_data != -0.9999]
+    
+    if len(valid_data) > 0:
+        global_min = max(np.percentile(valid_data, 2), -0.15)
+        global_max = min(np.percentile(valid_data, 98), 0.85)
+        
+        if global_max - global_min < 0.15:
+            mid_point = (global_max + global_min) / 2
+            global_min = max(mid_point - 0.15, -0.15)
+            global_max = min(mid_point + 0.15, 0.85)
+    else:
+        global_min, global_max = -0.15, 0.85
+    
+    title = f"NDVI {mask_status.title()} Cloud Masking - Site {unique_id}"
+    filename = f"ndvi_{mask_status}_cloud_mask_site_{unique_id}.png"
+    
+    create_time_series_plot(ndvi_data, title, filename, cmap='RdYlGn_r', vmin=global_min, vmax=global_max)
+
+def analyze_data_scaling(unique_id):
+    """Analyze data scaling characteristics"""
+    stack, meta, _ = load_site_data(unique_id)
+    if stack is None:
+        return
+    
+    bands = meta['bands']
+    T, B, H, W = meta['shape']
+    
+    print(f"=== Data Scaling Analysis for Site {unique_id} ===")
+    print(f"Data: {stack.shape}, {stack.dtype}")
+    
+    # Analyze RGB bands
+    try:
+        red_idx = bands.index('B4')
+        green_idx = bands.index('B3')
+        blue_idx = bands.index('B2')
+        
+        print(f"\n--- RGB Band Analysis ---")
+        for t in range(min(3, T)):
+            red_data = stack[t, red_idx, :, :]
+            green_data = stack[t, green_idx, :, :]
+            blue_data = stack[t, blue_idx, :, :]
+            
+            red_valid = red_data[red_data != -9999]
+            green_valid = green_data[green_data != -9999]
+            blue_valid = blue_data[blue_data != -9999]
+            
+            if len(red_valid) > 0:
+                print(f"Time Step {t}: R({np.min(red_valid):.0f}-{np.max(red_valid):.0f}), "
+                      f"G({np.min(green_valid):.0f}-{np.max(green_valid):.0f}), "
+                      f"B({np.min(blue_valid):.0f}-{np.max(blue_valid):.0f})")
+            else:
+                print(f"Time Step {t}: All pixels cloudy")
+        
+        # Overall statistics
+        all_red = stack[:, red_idx, :, :].flatten()
+        all_red_valid = all_red[all_red != -9999]
+        if len(all_red_valid) > 0:
+            print(f"Overall RGB ranges: R({np.min(all_red_valid):.0f}-{np.max(all_red_valid):.0f})")
+    
+    except ValueError:
+        print("RGB bands not found")
+    
+    # Analyze NDVI band
+    try:
+        ndvi_idx = bands.index('NDVI')
+        print(f"\n--- NDVI Band Analysis ---")
+        
+        ndvi_data = stack[:, ndvi_idx, :, :]
+        all_ndvi = ndvi_data.flatten()
+        all_ndvi_valid = all_ndvi[all_ndvi != -9999]
+        
+        if len(all_ndvi_valid) > 0:
+            all_ndvi_scaled = all_ndvi_valid / 10000.0
+            print(f"Global NDVI range: {np.min(all_ndvi_scaled):.3f} to {np.max(all_ndvi_scaled):.3f}")
+            print(f"Global percentiles: 1%={np.percentile(all_ndvi_scaled, 1):.3f}, "
+                  f"50%={np.percentile(all_ndvi_scaled, 50):.3f}, "
+                  f"99%={np.percentile(all_ndvi_scaled, 99):.3f}")
+    
+    except ValueError:
+        print("NDVI band not found")
+    
+def assess_data_quality(unique_id):
+    """Assess data quality based on coverage"""
+    stack, meta, _ = load_site_data(unique_id)
+    if stack is None:
+        return
+    
+    bands = meta['bands']
+    try:
+        ndvi_idx = bands.index('NDVI')
+        ndvi_data = stack[:, ndvi_idx, :, :]
+        ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
+        
+        good_coverage_steps = sum(1 for i in range(37) 
+                                 if np.sum(~np.isnan(ndvi_data[i])) > 5000)
+        
+        valid_data = ndvi_data[~np.isnan(ndvi_data)]
+        coverage_percent = (len(valid_data)/(37*100*100)*100)
+        
+        quality = ('✅ Excellent' if good_coverage_steps >= 15 else 
+                  '✅ Good' if good_coverage_steps >= 10 else 
+                  '⚠️ Moderate' if good_coverage_steps >= 5 else '❌ Poor')
+        
+        print(f"\n=== Data Quality Assessment ===")
+        print(f"Valid data: {len(valid_data):,} pixels ({coverage_percent:.1f}%)")
+        print(f"Good coverage: {good_coverage_steps}/37 time steps")
+        print(f"Quality: {quality}")
+        
+    except ValueError:
+        print("NDVI band not found for quality assessment")
+
+def create_ndvi_time_series(unique_id):
+    """Create enhanced NDVI time series visualization"""
+    stack, meta, _ = load_site_data(unique_id)
+    if stack is None:
+        return
+    
+    bands = meta['bands']
+    try:
+        ndvi_idx = bands.index('NDVI')
+    except ValueError:
+        print("NDVI band not found")
+        return
+    
     ndvi_data = stack[:, ndvi_idx, :, :]
     ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
     
-    # Calculate coverage per time step
-    coverage_per_step = []
-    for i in range(37):
-        valid_pixels = np.sum(~np.isnan(ndvi_data[i]))
-        coverage_percent = (valid_pixels / (100*100)) * 100
-        coverage_per_step.append(coverage_percent)
-    
-    # Find good time steps (>50% coverage)
-    good_steps = [i for i, coverage in enumerate(coverage_per_step) if coverage > 50]
-    poor_steps = [i for i, coverage in enumerate(coverage_per_step) if coverage <= 50]
-    
-    print(f"\n=== Temporal Pattern Analysis for Site {unique_id} ===")
-    print(f"Site: {os.path.basename(tif_path)}")
-    print(f"Year: {meta.get('year', 'Unknown')}")
-    print(f"Location: {meta.get('lat', 'Unknown')}, {meta.get('lon', 'Unknown')}")
-    
-    print(f"\n Coverage Summary:")
-    print(f"Good time steps (>50% coverage): {len(good_steps)}/37")
-    print(f"Poor time steps (≤50% coverage): {len(poor_steps)}/37")
-    print(f"Average coverage: {np.mean(coverage_per_step):.1f}%")
-    
-    print(f"\n✅ Good Time Steps: {good_steps}")
-    print(f"❌ Poor Time Steps: {poor_steps}")
-    
-    return coverage_per_step, good_steps, poor_steps
-
-def analyze_seasonal_patterns(unique_id):
-    """Analyze seasonal patterns for a specific site"""
-    
-    # Get temporal patterns first
-    coverage_per_step, good_steps, poor_steps = analyze_temporal_patterns(unique_id)
-    if coverage_per_step is None:
-        return
-    
-    # Find the file to get metadata
-    tif_path = None
-    for path in tif_files:
-        filename = os.path.basename(path)
-        file_unique_id = filename.split('_')[-1].replace('.tif', '')
-        if file_unique_id == str(unique_id):
-            tif_path = path
-            break
-    
-    json_path = tif_path.replace('.tif', '.json')
-    
-    # Load metadata to get the survey date
-    with open(json_path) as f:
-        meta = json.load(f)
-    
-    # Get the survey date (approximate)
-    survey_year = meta.get('year', 2020)
-    survey_month = meta.get('month', 6)  # Default to June if not available
-    survey_day = meta.get('day', 15)     # Default to middle of month
-    
-    survey_date = datetime(survey_year, survey_month, survey_day)
-    
-    # Calculate time step dates
-    time_step_dates = []
-    for i in range(37):
-        # Each time step is 10 days apart
-        # Time step 18 is the center (survey date)
-        days_offset = (i - 18) * 10
-        step_date = survey_date + timedelta(days=days_offset)
-        time_step_dates.append(step_date)
-    
-    print(f"\n Seasonal Analysis:")
-    print(f"Survey date: {survey_date.strftime('%Y-%m-%d')}")
-    
-    # Group by month
-    monthly_coverage = {}
-    for i, (date, coverage) in enumerate(zip(time_step_dates, coverage_per_step)):
-        month = date.month
-        if month not in monthly_coverage:
-            monthly_coverage[month] = []
-        monthly_coverage[month].append((i, coverage, date))
-    
-    print(f"\n Monthly Coverage Patterns:")
-    for month in sorted(monthly_coverage.keys()):
-        avg_coverage = np.mean([data[1] for data in monthly_coverage[month]])
-        month_name = datetime(2020, month, 1).strftime('%B')
-        time_steps = [data[0] for data in monthly_coverage[month]]
-        print(f"{month_name:>9}: {avg_coverage:5.1f}% coverage (time steps: {time_steps})")
-    
-    # Determine dry vs wet season
-    print(f"\n Seasonal Classification:")
-    dry_months = [5, 6, 7, 8, 9, 10]  # May-October
-    wet_months = [11, 12, 1, 2, 3, 4]  # November-April
-    
-    dry_coverage = []
-    wet_coverage = []
-    dry_steps = []
-    wet_steps = []
-    
-    for month in dry_months:
-        if month in monthly_coverage:
-            for data in monthly_coverage[month]:
-                dry_coverage.append(data[1])
-                dry_steps.append(data[0])
-    
-    for month in wet_months:
-        if month in monthly_coverage:
-            for data in monthly_coverage[month]:
-                wet_coverage.append(data[1])
-                wet_steps.append(data[0])
-    
-    if dry_coverage:
-        print(f"Dry season (May-Oct): {np.mean(dry_coverage):.1f}% average coverage (time steps: {dry_steps})")
-    if wet_coverage:
-        print(f"Wet season (Nov-Apr): {np.mean(wet_coverage):.1f}% average coverage (time steps: {wet_steps})")
-    
-    # Create seasonal pattern plot with improved colors
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10))
-    
-    # Define soft, high-contrast colors
-    dry_color = '#FF8C42'  # Soft orange
-    wet_color = '#4A90E2'  # Soft blue
-    line_color = '#2C3E50'  # Dark blue-gray
-    threshold_color = '#E74C3C'  # Soft red
-    
-    # Plot 1: Coverage over time with seasonal coloring
-    ax1.plot(range(37), coverage_per_step, color=line_color, linewidth=2.5, label='Coverage %', alpha=0.8)
-    ax1.axhline(y=50, color=threshold_color, linestyle='--', alpha=0.8, linewidth=2, label='50% threshold')
-    
-    # Color by season with improved styling
-    for i, (date, coverage) in enumerate(zip(time_step_dates, coverage_per_step)):
-        if date.month in dry_months:
-            color = dry_color  # Soft orange for dry season
-        else:
-            color = wet_color  # Soft blue for wet season
+    valid_data = ndvi_data[~np.isnan(ndvi_data)]
+    if len(valid_data) > 0:
+        global_min = max(np.percentile(valid_data, 2), -0.15)
+        global_max = min(np.percentile(valid_data, 98), 0.85)
         
-        ax1.scatter(i, coverage, color=color, s=40, alpha=0.8, edgecolors='white', linewidth=1)
+        if global_max - global_min < 0.15:
+            mid_point = (global_max + global_min) / 2
+            global_min = max(mid_point - 0.15, -0.15)
+            global_max = min(mid_point + 0.15, 0.85)
+    else:
+        global_min, global_max = -0.15, 0.85
     
-    ax1.set_xlabel('Time Step', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Coverage (%)', fontsize=12, fontweight='bold')
-    ax1.set_title(f'Seasonal Coverage Pattern - Site {unique_id}', fontsize=14, fontweight='bold', pad=20)
-    ax1.legend(fontsize=11, framealpha=0.9)
-    ax1.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-    ax1.set_facecolor('#F8F9FA')  # Light gray background
+    title = f"Enhanced NDVI Time Series - Site {unique_id}"
+    filename = f"ndvi_time_series_site_{unique_id}.png"
     
-    # Plot 2: Monthly average coverage with improved styling
-    months = sorted(monthly_coverage.keys())
-    monthly_avg = [np.mean([data[1] for data in monthly_coverage[month]]) for month in months]
-    month_names = [datetime(2020, month, 1).strftime('%b') for month in months]
-    
-    # Use improved colors for bars
-    bar_colors = [dry_color if month in dry_months else wet_color for month in months]
-    bars = ax2.bar(range(len(months)), monthly_avg, color=bar_colors, alpha=0.8, 
-                   edgecolor='white', linewidth=1.5)
-    
-    # Add value labels on bars
-    for i, (bar, value) in enumerate(zip(bars, monthly_avg)):
-        height = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2., height + 1,
-                f'{value:.1f}%', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    ax2.set_xlabel('Month', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Average Coverage (%)', fontsize=12, fontweight='bold')
-    ax2.set_title(f'Monthly Coverage Pattern - Site {unique_id}', fontsize=14, fontweight='bold', pad=20)
-    ax2.set_xticks(range(len(months)))
-    ax2.set_xticklabels(month_names, fontsize=11)
-    ax2.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-    ax2.set_facecolor('#F8F9FA')  # Light gray background
-    
-    # Add improved legend
-    from matplotlib.patches import Patch
-    legend_elements = [Patch(facecolor=dry_color, alpha=0.8, label='Dry Season (May-Oct)'),
-                      Patch(facecolor=wet_color, alpha=0.8, label='Wet Season (Nov-Apr)')]
-    ax2.legend(handles=legend_elements, fontsize=11, framealpha=0.9)
-    
-    plt.tight_layout()
-    
-    # Save the seasonal patterns plot
-    seasonal_plot_path = os.path.join("src/features/readme_figures", f"seasonal_patterns_site_{unique_id}.png")
-    plt.savefig(seasonal_plot_path, dpi=300, bbox_inches='tight')
-    print(f"Saved seasonal patterns plot to: {seasonal_plot_path}")
-    
-    plt.show()
-    
-    return time_step_dates, coverage_per_step
+    create_time_series_plot(ndvi_data, title, filename, cmap='RdYlGn_r', vmin=global_min, vmax=global_max)
 
-def analyze_multi_site_seasonal_patterns():
-    """Analyze seasonal patterns across all sites"""
+def main():
+    """Main function to run all visualizations"""
+    unique_id = "1"  # Default site ID
     
-    print("=== Multi-Site Seasonal Pattern Analysis ===")
+    # Create output directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Collect data from all sites
-    all_coverage_data = []
-    site_info = []
-    
-    for tif_path in tif_files:
-        try:
-            json_path = tif_path.replace('.tif', '.json')
-            with open(json_path) as f:
-                meta = json.load(f)
-            
-            with rasterio.open(tif_path) as src:
-                raw = src.read()
-            
-            T, B, H, W = meta['shape']
-            stack = raw.reshape(T, B, H, W)
-            
-            ndvi_idx = meta['bands'].index('NDVI')
-            ndvi_data = stack[:, ndvi_idx, :, :]
-            ndvi_data = np.where(ndvi_data == -9999, np.nan, ndvi_data / 10000.0)
-            
-            # Calculate coverage per time step
-            coverage_per_step = []
-            for i in range(37):
-                valid_pixels = np.sum(~np.isnan(ndvi_data[i]))
-                coverage_percent = (valid_pixels / (100*100)) * 100
-                coverage_per_step.append(coverage_percent)
-            
-            # Extract site info
-            filename = os.path.basename(tif_path)
-            unique_id = filename.split('_')[-1].replace('.tif', '')
-            lat = meta.get('lat', 0)
-            lon = meta.get('lon', 0)
-            year = meta.get('year', 0)
-            
-            all_coverage_data.append(coverage_per_step)
-            site_info.append({
-                'unique_id': unique_id,
-                'lat': lat,
-                'lon': lon,
-                'year': year,
-                'filename': filename
-            })
-            
-        except Exception as e:
-            print(f"Error processing {os.path.basename(tif_path)}: {e}")
-    
-    # Convert to numpy array
-    coverage_array = np.array(all_coverage_data)
-    
-    # Calculate average coverage per time step across all sites
-    avg_coverage_per_step = np.mean(coverage_array, axis=0)
-    std_coverage_per_step = np.std(coverage_array, axis=0)
-    
-    print(f"\n Overall Seasonal Patterns:")
-    print(f"Analyzed {len(all_coverage_data)} sites")
-    
-    # Find best and worst time steps
-    best_steps = np.argsort(avg_coverage_per_step)[-5:]  # Top 5
-    worst_steps = np.argsort(avg_coverage_per_step)[:5]  # Bottom 5
-    
-    print(f"Best time steps: {best_steps} (coverage: {avg_coverage_per_step[best_steps]:.1f}%)")
-    print(f"Worst time steps: {worst_steps} (coverage: {avg_coverage_per_step[worst_steps]:.1f}%)")
-    
-    # Create comprehensive plot with improved styling
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 12))
-    
-    # Define improved colors
-    main_color = '#2C3E50'  # Dark blue-gray
-    fill_color = '#3498DB'  # Soft blue
-    threshold_color = '#E74C3C'  # Soft red
-    heatmap_cmap = 'RdYlBu_r'  # Red-Yellow-Blue reversed for better contrast
-    
-    # Plot 1: Average coverage over time
-    ax1.plot(range(37), avg_coverage_per_step, color=main_color, linewidth=2.5, label='Average Coverage', alpha=0.9)
-    ax1.fill_between(range(37), avg_coverage_per_step - std_coverage_per_step, 
-                     avg_coverage_per_step + std_coverage_per_step, alpha=0.3, color=fill_color, label='±1 Std Dev')
-    ax1.axhline(y=50, color=threshold_color, linestyle='--', alpha=0.8, linewidth=2, label='50% threshold')
-    ax1.set_xlabel('Time Step', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Average Coverage (%)', fontsize=12, fontweight='bold')
-    ax1.set_title('Overall Temporal Coverage Pattern', fontsize=14, fontweight='bold', pad=20)
-    ax1.legend(fontsize=11, framealpha=0.9)
-    ax1.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-    ax1.set_facecolor('#F8F9FA')
-    
-    # Plot 2: Coverage heatmap with improved colormap
-    im = ax2.imshow(coverage_array, cmap=heatmap_cmap, aspect='auto', 
-                    extent=[0, 36, 0, len(all_coverage_data)])
-    ax2.set_xlabel('Time Step', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Site Index', fontsize=12, fontweight='bold')
-    ax2.set_title('Coverage Heatmap (All Sites)', fontsize=14, fontweight='bold', pad=20)
-    cbar = plt.colorbar(im, ax=ax2, label='Coverage (%)')
-    cbar.ax.tick_params(labelsize=10)
-    cbar.ax.set_ylabel('Coverage (%)', fontsize=11, fontweight='bold')
-    
-    # Plot 3: Geographic pattern with improved styling
-    lats = [info['lat'] for info in site_info]
-    lons = [info['lon'] for info in site_info]
-    avg_coverage = [np.mean(coverage_array[i]) for i in range(len(all_coverage_data))]
-    
-    scatter = ax3.scatter(lons, lats, c=avg_coverage, cmap='RdYlBu_r', s=60, alpha=0.8, edgecolors='white', linewidth=0.5)
-    ax3.set_xlabel('Longitude', fontsize=12, fontweight='bold')
-    ax3.set_ylabel('Latitude', fontsize=12, fontweight='bold')
-    ax3.set_title('Geographic Coverage Pattern', fontsize=14, fontweight='bold', pad=20)
-    cbar2 = plt.colorbar(scatter, ax=ax3, label='Average Coverage (%)')
-    cbar2.ax.tick_params(labelsize=10)
-    cbar2.ax.set_ylabel('Average Coverage (%)', fontsize=11, fontweight='bold')
-    ax3.set_facecolor('#F8F9FA')
-    
-    # Plot 4: Year-based pattern with improved styling
-    years = [info['year'] for info in site_info]
-    year_coverage = {}
-    for i, year in enumerate(years):
-        if year not in year_coverage:
-            year_coverage[year] = []
-        year_coverage[year].append(avg_coverage[i])
-    
-    year_avg = {year: np.mean(coverage) for year, coverage in year_coverage.items()}
-    year_std = {year: np.std(coverage) for year, coverage in year_coverage.items()}
-    
-    years_sorted = sorted(year_avg.keys())
-    coverage_values = [year_avg[year] for year in years_sorted]
-    coverage_stds = [year_std[year] for year in years_sorted]
-    
-    bars = ax4.bar(years_sorted, coverage_values, yerr=coverage_stds, alpha=0.8, 
-                   color=fill_color, edgecolor='white', linewidth=1.5, capsize=5)
-    
-    # Add value labels on bars
-    for i, (bar, value) in enumerate(zip(bars, coverage_values)):
-        height = bar.get_height()
-        ax4.text(bar.get_x() + bar.get_width()/2., height + 1,
-                f'{value:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
-    
-    ax4.set_xlabel('Year', fontsize=12, fontweight='bold')
-    ax4.set_ylabel('Average Coverage (%)', fontsize=12, fontweight='bold')
-    ax4.set_title('Coverage by Year', fontsize=14, fontweight='bold', pad=20)
-    ax4.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-    ax4.set_facecolor('#F8F9FA')
-    
-    plt.tight_layout()
-    plt.show()
-    
-    return coverage_array, site_info
+    # Run analysis and visualizations
+    analyze_data_scaling(unique_id)
+    visualize_rgb(unique_id, apply_cloud_mask=False)
+    visualize_rgb(unique_id, apply_cloud_mask=True)
+    visualize_ndvi(unique_id, apply_cloud_mask=False)
+    visualize_ndvi(unique_id, apply_cloud_mask=True)
+    create_ndvi_time_series(unique_id)
+    assess_data_quality(unique_id)
 
-# Uncomment to run seasonal analysis
-analyze_seasonal_patterns(unique_id)
+if __name__ == "__main__":
+    main()
