@@ -122,23 +122,23 @@ if __name__ == '__main__':
     # test code
     # folder_path = "data/labels/labeled_surveys/random_sample/raw/"
     # process_and_merge_folder(folder_path)
-    group_name = "random_sample"
-    # pool_latest_labels_and_save(group_name)
-    pool_latest_polygons_and_save(group_name)
-
-    # import argparse
-    # parser = argparse.ArgumentParser(description="Process and merge all survey files in a folder, then pool the latest labeled irrigation data and output both a CSV and a GeoJSON file with bounding boxes.")
-    # parser.add_argument("folder_path", type=str, help="Path to the folder containing survey files.")
-    # parser.add_argument("--group_name", type=str, default="random_sample", help="Name of the group/sample set (default: random_sample)")
-    # args = parser.parse_args()
-    # folder_path = args.folder_path
-    # group_name = args.group_name
-
-    # merged_result = process_and_merge_folder(folder_path)
-    # print(f"Merged result has {len(merged_result)} rows")
-
-    # pool_latest_labels_and_save(group_name)
-    # print(f"Pooled latest labeled irrigation data for group '{group_name}' and saved CSV and GeoJSON.")
-
+    # group_name = "random_sample"
     # pool_latest_polygons_and_save(group_name)
-    # print(f"Merged latest polygons for group '{group_name}' and saved CSV and GeoJSON.")
+
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Process and merge all survey files in a folder, then pool the latest labeled irrigation data and output both a CSV and a GeoJSON file with bounding boxes.")
+    parser.add_argument("folder_path", type=str, help="Path to the folder containing survey files.")
+    parser.add_argument("--group_name", type=str, default="random_sample", help="Name of the group/sample set (default: random_sample)")
+    args = parser.parse_args()
+    folder_path = args.folder_path
+    group_name = args.group_name
+
+    merged_result = process_and_merge_folder(folder_path)
+    print(f"Merged result has {len(merged_result)} rows")
+
+    pool_latest_labels_and_save(group_name)
+    print(f"Pooled latest labeled irrigation data for group '{group_name}' and saved CSV and GeoJSON.")
+
+    pool_latest_polygons_and_save(group_name)
+    print(f"Merged latest polygons for group '{group_name}' and saved CSV and GeoJSON.")

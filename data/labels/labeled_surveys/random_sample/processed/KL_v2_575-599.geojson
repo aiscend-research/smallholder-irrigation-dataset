@@ -1789,7 +1789,7 @@
         "day": 1,
         "year": 2020,
         "certainty": 3,
-        "uncertainty_explanation": "only slightly green;unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;only slightly green",
         "category": "small-scale"
       },
       "geometry": {
