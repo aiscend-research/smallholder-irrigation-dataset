@@ -1,6 +1,10 @@
 # NOTE: Data splitting logic is disabled for this test config. Manual split in use.
 name: "rf_baseline"
 
+imputation:
+  mode: temporal   # options: none, drop, temporal
+  fill_constant: 0.0   # used only for temporal
+
 data:
   train_dir: "../../data/modeling/train"
   val_dir: "../../data/modeling/val"

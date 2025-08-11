@@ -170,15 +170,41 @@ def run_experiment(exp_cfg, config_path):
             y_train_full = y_train.copy()
             y_val_full = y_val.copy()
 
-            # --- Temporal imputation over time for missing values ---
+            # --- NaN handling options: none | drop | temporal ---
             impute_cfg = exp_cfg.get("imputation", {})
-            if impute_cfg.get("enabled", True):
-                fill_const = float(impute_cfg.get("fill_constant", 0.0))
+            mode = str(impute_cfg.get("mode", "temporal")).lower()
+            fill_const = float(impute_cfg.get("fill_constant", 0.0))
+
+            if mode == "temporal":
                 print(f"Imputing features with temporal interpolation (fill_constant={fill_const})...")
                 X_train = time_interpolate_features(X_train, T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
                 X_val   = time_interpolate_features(X_val,   T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
-                print("[DEBUG] After imputation ->",
+                print("[DEBUG] After temporal imputation ->",
                       f"X_train NaNs: {np.isnan(X_train).sum()} | X_val NaNs: {np.isnan(X_val).sum()}")
+
+            elif mode == "drop":
+                print("Dropping rows with any NaN in features (train & val)...")
+                # Train
+                mask_tr = ~np.any(np.isnan(X_train), axis=1)
+                dropped_tr = int((~mask_tr).sum())
+                if dropped_tr > 0:
+                    print(f"[INFO] Dropping {dropped_tr} / {X_train.shape[0]} train rows due to NaNs")
+                X_train = X_train[mask_tr]
+                y_train_full = y_train_full[mask_tr]
+                # Val
+                mask_va = ~np.any(np.isnan(X_val), axis=1)
+                dropped_va = int((~mask_va).sum())
+                if dropped_va > 0:
+                    print(f"[INFO] Dropping {dropped_va} / {X_val.shape[0]} val rows due to NaNs")
+                X_val = X_val[mask_va]
+                y_val_full = y_val_full[mask_va]
+
+            elif mode == "none":
+                print("NaN handling: none (leaving NaNs as-is). WARNING: most sklearn models cannot handle NaNs.")
+            else:
+                print(f"[WARN] Unknown imputation mode '{mode}'. Using 'temporal' by default.")
+                X_train = time_interpolate_features(X_train, T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
+                X_val   = time_interpolate_features(X_val,   T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
 
             y_train = y_train_full[:, :2]
             y_val_train_only = y_val_full[:, :2]
