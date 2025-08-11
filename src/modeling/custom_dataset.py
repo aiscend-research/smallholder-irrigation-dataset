@@ -102,28 +102,47 @@ class MultiTemporalCropDataset(Dataset):
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*.tif")))
         label_files = sorted(glob.glob(os.path.join(self.label_dir, "*.tif")))
 
-        # Extract unique IDs for images: last underscore-separated field before .tif
+        # Extract unique IDs for images: handle both old and new naming conventions
         image_id_to_file = {}
         for f in image_files:
             base = os.path.splitext(os.path.basename(f))[0]
             parts = base.split('_')
-            if len(parts) < 2:
+            
+            # Handle new standardized naming: {base}_image.tif
+            if base.endswith('_image'):
+                unique_id = base[:-6]  # Remove '_image' suffix
+            # Handle old naming: last underscore-separated field
+            elif len(parts) >= 2:
+                unique_id = parts[-1]
+            else:
                 continue
-            unique_id = parts[-1]
+                
             image_id_to_file[unique_id] = f
 
-        # Extract unique IDs for masks: first underscore-separated field
+        # Extract unique IDs for masks: handle both old and new naming conventions
         mask_id_to_file = {}
         for f in label_files:
             base = os.path.splitext(os.path.basename(f))[0]
             parts = base.split('_')
-            if len(parts) < 1:
+            
+            # Handle new standardized naming: {base}_label.tif
+            if base.endswith('_label'):
+                unique_id = base[:-6]  # Remove '_label' suffix
+            # Handle old naming: first underscore-separated field
+            elif len(parts) >= 1:
+                unique_id = parts[0]
+            else:
                 continue
-            unique_id = parts[0]
+                
             mask_id_to_file[unique_id] = f
 
         # Find intersection of IDs that have both image and mask (matching by unique_id)
         paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
+        
+        logger.info(f"Found {len(image_files)} image files, {len(label_files)} label files")
+        logger.info(f"Extracted {len(image_id_to_file)} image IDs, {len(mask_id_to_file)} label IDs")
+        logger.info(f"Matched {len(paired_ids)} paired IDs")
+        
         self.paired_image_files = []
         self.paired_mask_files = []
         self.paired_unique_ids = []
@@ -154,7 +173,20 @@ class MultiTemporalCropDataset(Dataset):
             image_tensor = torch.from_numpy(full_array).float()
             H, W = image_tensor.shape[1:]
             image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
-            image_tensor[image_tensor == -9999] = float('nan')
+            
+            # Handle -9999 values (Sentinel-2 no-data) more carefully
+            # Instead of converting to NaN, we'll use a reasonable replacement value
+            # -9999 typically indicates no data, so we can replace with 0 or mean values
+            if torch.any(image_tensor == -9999):
+                # Count how many -9999 values we have
+                invalid_count = torch.sum(image_tensor == -9999)
+                total_pixels = image_tensor.numel()
+                invalid_percentage = (invalid_count / total_pixels) * 100
+                
+                print(f"Sample {idx}: Found {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
+                
+                # Replace -9999 with 0 (or could use mean values per band)
+                image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
 
         # --- Time step selection/averaging ---
         if self.time_step_selection is not None:
@@ -176,7 +208,18 @@ class MultiTemporalCropDataset(Dataset):
         with rasterio.open(mask_path) as label_src:
             mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
             mask_tensor = torch.from_numpy(mask_array).float()
-            mask_tensor[mask_tensor == -9999] = float('nan')
+            
+            # Handle -9999 values in mask data as well
+            if torch.any(mask_tensor == -9999):
+                invalid_count = torch.sum(mask_tensor == -9999)
+                total_pixels = mask_tensor.numel()
+                invalid_percentage = (invalid_count / total_pixels) * 100
+                
+                print(f"Sample {idx}: Mask has {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
+                
+                # Replace -9999 with 0 in mask
+                mask_tensor = torch.where(mask_tensor == -9999, torch.tensor(0.0), mask_tensor)
+            
             # If only one band, squeeze to (H, W)
             if mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor[0]

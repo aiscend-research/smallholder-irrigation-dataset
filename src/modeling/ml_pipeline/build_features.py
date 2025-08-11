@@ -22,8 +22,11 @@ def flatten_dataset(dataset, ignore_value_in_image=None):
     """
     X_list = []
     y_list = []
+    
+    total_pixels = 0
+    valid_pixels = 0
 
-    for sample in tqdm(dataset, desc="Flattening dataset"):
+    for i, sample in enumerate(tqdm(dataset, desc="Flattening dataset")):
         image = sample['image']  # (C, T, H, W)
         mask = sample['mask']    # (H, W) or (B, H, W)
 
@@ -40,19 +43,52 @@ def flatten_dataset(dataset, ignore_value_in_image=None):
         else:
             raise ValueError(f"Unexpected mask shape: {mask.shape}")
 
-        # Validity: filter out pixels where mask or image contain NaN in any band
-        mask_nan = np.isnan(mask_flat.numpy())
-        image_nan = np.isnan(image_flat.numpy())
-        valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
+        # Convert to numpy for easier handling
+        image_np = image_flat.numpy()
+        mask_np = mask_flat.numpy()
+        
+        # Check for extreme values that might indicate invalid data
+        if ignore_value_in_image is not None:
+            image_invalid = (image_np == ignore_value_in_image)
+            if np.any(image_invalid):
+                print(f"Sample {i}: Found {np.sum(image_invalid)} pixels with ignore value {ignore_value_in_image}")
+        
+        # Check for NaN values
+        mask_nan = np.isnan(mask_np)
+        image_nan = np.isnan(image_np)
+        
+        # Count total and invalid pixels
+        sample_total = H * W
+        sample_invalid = np.sum(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
+        sample_valid = sample_total - sample_invalid
+        
+        total_pixels += sample_total
+        valid_pixels += sample_valid
+        
+        print(f"Sample {i}: {sample_valid}/{sample_total} valid pixels ({sample_valid/sample_total*100:.1f}%)")
+        
+        # If all pixels are invalid, skip this sample
+        if sample_valid == 0:
+            print(f"Warning: Sample {i} has no valid pixels, skipping")
+            continue
 
-        X_valid = image_flat[valid].numpy()
-        y_valid = mask_flat[valid].numpy()
+        # Filter out invalid pixels
+        valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
+        
+        X_valid = image_np[valid]
+        y_valid = mask_np[valid]
 
         X_list.append(X_valid)
         y_list.append(y_valid)
 
+    if not X_list:
+        raise ValueError("No valid pixels found in any sample! Check your data for NaN or invalid values.")
+    
     X = np.concatenate(X_list, axis=0)
     y = np.concatenate(y_list, axis=0)
+    
+    print(f"Total: {valid_pixels}/{total_pixels} valid pixels ({valid_pixels/total_pixels*100:.1f}%)")
+    print(f"Final shapes: X={X.shape}, y={y.shape}")
 
     # If only one mask band, squeeze to (N,)
     if y.shape[1] == 1:

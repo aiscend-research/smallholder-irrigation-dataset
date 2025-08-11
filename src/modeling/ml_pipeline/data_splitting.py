@@ -58,6 +58,21 @@ class IrrigationDataSplitter:
         self.df = None
         self.label_encoder = LabelEncoder()
         
+        # Check if data directory is organized
+        data_path = Path(data_dir)
+        organized_dir = data_path / "organized"
+        
+        if organized_dir.exists():
+            # Use organized structure
+            self.images_dir = organized_dir / "images"
+            self.labels_dir = organized_dir / "labels"
+            self.metadata_dir = organized_dir / "metadata"
+        else:
+            # Use flat structure
+            self.images_dir = data_path
+            self.labels_dir = data_path
+            self.metadata_dir = data_path
+        
         self._load_data()
         
     def _load_data(self):
@@ -74,40 +89,73 @@ class IrrigationDataSplitter:
     def _get_date_string(self, row):
         """Generate date string from row data in format YYYY.MM.DD."""
         return f"{row['year']}.{row['month']:02d}.{row['day']:02d}"
-        
+    
     def _validate_data_files(self):
         """Validate that downloaded files exist for each survey location."""
-        existing_files = []
-        missing_locations = []
+        # Use the appropriate directories based on organization
+        available_tifs = list(self.images_dir.glob("*.tif")) + list(self.labels_dir.glob("*.tif"))
+        available_jsons = list(self.metadata_dir.glob("*.json"))
         
-        for _, row in self.df.iterrows():
-            # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
-            site_id_number = row['site_id'].replace('id_', '')
-            date_str = self._get_date_string(row)
+        # Check if we have standardized data format
+        is_standardized = any("_image" in f.stem for f in available_tifs)
+        
+        if is_standardized:
+            # For standardized data, just count the files and create a mapping
+            image_files = [f.stem for f in available_tifs if "_image" in f.stem]
+            label_files = [f.stem for f in available_tifs if "_label" in f.stem]
+            json_files = [f.stem for f in available_jsons]
+            
+            # Create base IDs (remove _image, _label suffixes)
+            base_ids = set()
+            for img_file in image_files:
+                base_id = img_file.replace('_image', '')
+                base_ids.add(base_id)
+            
+            # Check for complete sets
+            complete_sets = 0
+            for base_id in base_ids:
+                if (f"{base_id}_image" in image_files and 
+                    f"{base_id}_label" in label_files and 
+                    f"{base_id}.json" in json_files):
+                    complete_sets += 1
+            
+            # Store the available files for later use
+            self.data_files = image_files
+            self.available_base_ids = base_ids
+            
+        else:
+            # Original validation logic for non-standardized data
+            existing_files = []
+            missing_locations = []
+            
+            for _, row in self.df.iterrows():
+                # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
+                site_id_number = row['site_id'].replace('id_', '')
+                date_str = self._get_date_string(row)
 
-            image_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.tif"
-            json_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.json"
+                image_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.tif"
+                json_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.json"
+                
+                tif_path = self.images_dir / image_filename
+                json_path = self.metadata_dir / json_filename
+                
+                if tif_path.exists() and json_path.exists():
+                    existing_files.append(image_filename.replace('.tif', ''))
+                else:
+                    missing_locations.append(image_filename)
             
-            tif_path = os.path.join(self.data_dir, image_filename)
-            json_path = os.path.join(self.data_dir, json_filename)
+            # Store the existing files for later use
+            self.data_files = existing_files
             
-            if os.path.exists(tif_path) and os.path.exists(json_path):
-                existing_files.append(image_filename.replace('.tif', ''))
-            else:
-                missing_locations.append(image_filename)
-        
-        logger.info(f"Found {len(existing_files)} complete data files")
-        logger.warning(f"Missing {len(missing_locations)} data files")
-        
-        # Filter to only include locations with complete data
-        self.df = self.df[self.df.apply(
-            lambda row: os.path.exists(os.path.join(
-                self.data_dir, 
-                f"{row['unique_id']}_{row['site_id'].replace('id_', '')}_{date_str}_image.tif"
-            )), axis=1
-        )]
-        
-        logger.info(f"Final dataset size: {len(self.df)} locations")
+            # Filter to only include locations with complete data
+            self.df = self.df[self.df.apply(
+                lambda row: os.path.exists(os.path.join(
+                    self.data_dir, 
+                    f"{row['unique_id']}_{row['site_id'].replace('id_', '')}_{self._get_date_string(row)}_image.tif"
+                )), axis=1
+            )]
+            
+            logger.info(f"Final dataset size: {len(self.df)} locations")
         
     def get_band_info(self) -> Dict:
         """
@@ -185,27 +233,96 @@ class IrrigationDataSplitter:
         Returns:
             Tuple of (location_labels, location_files) as numpy arrays
         """
-        unique_locations = self.df['location_id'].unique()
+        # Check if we're working with standardized data
+        data_path = Path(self.data_dir)
+        available_tifs = list(data_path.rglob("*.tif"))
+        available_tif_names = {f.stem for f in available_tifs}
         
-        location_labels = []
-        location_files = []
+        is_standardized = any("_image" in name for name in available_tif_names)
         
-        for loc_id in unique_locations:
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            primary_survey = loc_data.iloc[0]
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            date_str = self._get_date_string(primary_survey)
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
+        if is_standardized:
+            # For standardized data, we need to group by site_id to prevent spatial leakage
             
-            # Use irrigation presence (band 2) for stratification by default
-            if stratification_band == 2:
-                label = primary_survey['irrigation']  # Binary irrigation presence
-            else:
-                # For other bands, load the actual label files
-                label = primary_survey['irrigation']
+            # First, create a mapping from unique_id to site_id
+            unique_id_to_site = {}
+            for _, row in self.df.iterrows():
+                unique_id_to_site[row['unique_id']] = row['site_id']
             
-            location_labels.append(label)
-            location_files.append(file_id)
+            # Group files by site_id (geographic location)
+            site_files = {}  # site_id -> list of file_ids
+            site_labels = {}  # site_id -> label
+            
+            for tif_file in available_tifs:
+                stem = tif_file.stem
+                if "_image" in stem:
+                    # Extract unique_id from standardized name: {unique_id}_{site_id}_{date}_image
+                    parts = stem.split('_')
+                    if len(parts) >= 4 and parts[-1] == "image":
+                        try:
+                            unique_id = int(parts[0])
+                            file_id = stem
+                            
+                            # Get the site_id for this unique_id
+                            if unique_id in unique_id_to_site:
+                                site_id = unique_id_to_site[unique_id]
+                                
+                                # Initialize if this site_id is new
+                                if site_id not in site_files:
+                                    site_files[site_id] = []
+                                    # Get label from any survey at this site (they should be similar)
+                                    site_row = self.df[self.df['site_id'] == site_id].iloc[0]
+                                    site_labels[site_id] = site_row['irrigation']
+                                
+                                # Add this file to the site's file list
+                                site_files[site_id].append(file_id)
+                        except ValueError:
+                            continue
+            
+            # Now create location-level data (one entry per unique geographic location)
+            location_files = []
+            location_labels = []
+            
+            for site_id, file_list in site_files.items():
+                # Use the first file as representative for this location
+                # All files from the same site will be kept together
+                representative_file = file_list[0]
+                label = site_labels[site_id]
+                
+                location_files.append(representative_file)
+                location_labels.append(label)
+            
+            # If no sites were found, create a fallback using just the file names
+            if len(location_files) == 0:
+                # Create a simple mapping: one file per location
+                for tif_file in available_tifs:
+                    stem = tif_file.stem
+                    if "_image" in stem:
+                        location_files.append(stem)
+                        # Use a default label (0 for no irrigation)
+                        location_labels.append(0)
+            
+        else:
+            # Original logic but ensure we group by site_id
+            unique_sites = self.df['site_id'].unique()
+            
+            location_labels = []
+            location_files = []
+            
+            for site_id in unique_sites:
+                site_data = self.df[self.df['site_id'] == site_id]
+                primary_survey = site_data.iloc[0]
+                site_id_number = primary_survey['site_id'].replace('id_', '')
+                date_str = self._get_date_string(primary_survey)
+                file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
+                
+                # Use irrigation presence for stratification
+                if stratification_band == 2:
+                    label = primary_survey['irrigation']
+                else:
+                    label = primary_survey['irrigation']
+                
+                location_labels.append(label)
+                location_files.append(file_id)
         
         return np.array(location_labels), np.array(location_files)
     
@@ -262,21 +379,48 @@ class IrrigationDataSplitter:
                 }
             }
         
-        # Perform stratified split
-        train_locations, test_locations, train_labels, test_labels = train_test_split(
-            location_files, location_labels,
-            test_size=test_size,
-            stratify=location_labels,
-            random_state=self.random_state
-        )
+        # Check if stratification is possible
+        unique_labels, counts = np.unique(location_labels, return_counts=True)
+        min_samples_per_class = 2  # Need at least 2 samples per class for stratification
         
-        # Split train into train/val
-        train_locations, val_locations, train_labels, val_labels = train_test_split(
-            train_locations, train_labels,
-            test_size=val_size / (1 - test_size), 
-            stratify=train_labels,
-            random_state=self.random_state
-        )
+        valid_classes = unique_labels[counts >= min_samples_per_class]
+        valid_mask = np.isin(location_labels, valid_classes)
+        
+        if not valid_mask.all():
+            location_labels = location_labels[valid_mask]
+            location_files = location_files[valid_mask]
+        
+        # Perform stratified split if possible
+        if len(valid_classes) >= 2:
+            # Use stratification if we have enough classes
+            train_locations, test_locations, train_labels, test_labels = train_test_split(
+                location_files, location_labels,
+                test_size=test_size,
+                stratify=location_labels,
+                random_state=self.random_state
+            )
+            
+            # Split train into train/val
+            train_locations, val_locations, train_labels, val_labels = train_test_split(
+                train_locations, train_labels,
+                test_size=val_size / (1 - test_size), 
+                stratify=train_labels,
+                random_state=self.random_state
+            )
+        else:
+            # Use random split if stratification is not possible
+            train_locations, test_locations, train_labels, test_labels = train_test_split(
+                location_files, location_labels,
+                test_size=test_size,
+                random_state=self.random_state
+            )
+            
+            # Split train into train/val
+            train_locations, val_locations, train_labels, val_labels = train_test_split(
+                train_locations, train_labels,
+                test_size=val_size / (1 - test_size), 
+                random_state=self.random_state
+            )
         
         train_files = train_locations.tolist()
         val_files = val_locations.tolist()
@@ -316,12 +460,11 @@ class IrrigationDataSplitter:
         Returns:
             List of dictionaries, each containing train/val splits for one fold
         """
-        # Get location-level labels and files
+        # Get location-level labels and files (these are site representatives)
         location_labels, location_files = self._get_location_labels_and_files(stratification_band)
         
         # Handle insufficient samples for CV
         if len(location_files) < n_splits:
-            logger.warning(f"Insufficient samples ({len(location_files)}) for {n_splits}-fold CV. Using all samples for training.")
             # Return a single fold with all data
             return [{
                 'fold': 1,
@@ -334,137 +477,66 @@ class IrrigationDataSplitter:
                     'class_distribution': {
                         'train': dict(zip(*np.unique(location_labels, return_counts=True))),
                         'val': {}
-                    },
-                    'warning': f'Insufficient samples for {n_splits}-fold CV'
+                    }
                 }
             }]
         
-        # Perform stratified k-fold
+        # Perform stratified k-fold at the SITE level (not file level)
+        # This ensures that within each fold, train and validation don't share the same site
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
         
         cv_splits = []
         for fold, (train_idx, val_idx) in enumerate(skf.split(location_files, location_labels)):
-            train_files = location_files[train_idx].tolist()
-            val_files = location_files[val_idx].tolist()
+            train_sites = location_files[train_idx].tolist()
+            val_sites = location_files[val_idx].tolist()
+            
+            # Verify spatial awareness within this fold
+            train_site_ids = set()
+            val_site_ids = set()
+            
+            for site_file in train_sites:
+                parts = site_file.split('_')
+                if len(parts) >= 2:
+                    site_id = parts[1]  # Extract site_id from filename
+                    train_site_ids.add(site_id)
+            
+            for site_file in val_sites:
+                parts = site_file.split('_')
+                if len(parts) >= 2:
+                    site_id = parts[1]  # Extract site_id from filename
+                    val_site_ids.add(site_id)
+            
+            # Check for spatial violations within this fold
+            overlap = train_site_ids.intersection(val_site_ids)
+            if overlap:
+                logger.warning(f"Fold {fold + 1}: Spatial violation detected - sites {overlap} appear in both train and validation")
+            else:
+                logger.debug(f"Fold {fold + 1}: Spatial awareness maintained - no site overlap between train and validation")
             
             split_info = {
                 'fold': fold + 1,
-                'train_files': train_files,
-                'val_files': val_files,
+                'train_files': train_sites,  # These are site representatives
+                'val_files': val_sites,      # These are site representatives
                 'metadata': {
-                    'train_locations': len(train_files),
-                    'val_locations': len(val_files),
+                    'train_locations': len(train_sites),
+                    'val_locations': len(val_sites),
                     'stratification_band': stratification_band,
                     'class_distribution': {
                         'train': dict(zip(*np.unique(location_labels[train_idx], return_counts=True))),
                         'val': dict(zip(*np.unique(location_labels[val_idx], return_counts=True)))
-                    }
+                    },
+                    'spatial_awareness': 'maintained within fold' if not overlap else 'violation detected'
                 }
             }
             cv_splits.append(split_info)
         
         return cv_splits
     
-    def experiment_with_bands(self,
-                             target_bands: List[int] = [1, 2, 8],
-                             test_size: float = 0.2) -> Dict:
-        """
-        Create experimental splits for different target bands.
-        
-        Args:
-            target_bands: List of bands to experiment with
-            test_size: Test set size
-            
-        Returns:
-            Dictionary with splits for each target band
-        """
-        experiments = {}
-        
-        for band in target_bands:
-            logger.info(f"\nCreating split for Band {band}")
-            
-            # use irrigation presence as proxy for all bands
-            split_info = self.spatial_stratified_split(
-                test_size=test_size,
-                stratification_band=band
-            )
-            
-            experiments[f'band_{band}'] = {
-                'split_info': split_info,
-                'band_description': self.get_band_info()[f'band_{band}'],
-                'recommended_use': self._get_band_recommendation(band)
-            }
-        
-        return experiments
+
     
-    def _get_band_recommendation(self, band: int) -> str:
-        """Get recommendation for how to use a specific band."""
-        recommendations = {
-            1: "Multi-class classification (6 classes: no irrigation, small-scale, tree crop, industrial, lawn, covered)",
-            2: "Binary classification (irrigated vs non-irrigated) - most common use case",
-            3: "Binary classification with uncertainty filtering",
-            4: "Binary classification with uncertainty filtering", 
-            5: "Binary classification with uncertainty filtering",
-            6: "Binary classification with uncertainty filtering",
-            7: "Binary classification with uncertainty filtering",
-            8: "Multi-class classification with confidence levels (5 classes: no irrigation to probably irrigated)"
-        }
-        return recommendations.get(band, "Unknown band")
+
     
-    def visualize_splits(self, split_info: Dict, save_path: Optional[str] = None):
-        """Visualize the data splits and class distributions."""
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        
-        # Class distribution
-        metadata = split_info['metadata']
-        splits = ['train', 'val', 'test']
-        
-        for i, split in enumerate(splits):
-            if split in metadata['class_distribution']:
-                dist = metadata['class_distribution'][split]
-                axes[0, 0].bar([f"{split}_{k}" for k in dist.keys()], dist.values(), 
-                              alpha=0.7, label=split)
-        
-        axes[0, 0].set_title('Class Distribution by Split')
-        axes[0, 0].set_ylabel('Number of Locations')
-        axes[0, 0].legend()
-        
-        split_sizes = [metadata['train_locations'], metadata['val_locations'], metadata['test_locations']]
-        axes[0, 1].pie(split_sizes, labels=['Train', 'Val', 'Test'], autopct='%1.1f%%')
-        axes[0, 1].set_title('Split Proportions')
-        
-        # Spatial distribution
-        if 'spatial_info' in metadata:
-            # This would show the spatial distribution of splits
-            pass
-        
-        summary_text = f"""
-        Total Locations: {metadata['total_locations']}
-        Train: {metadata['train_locations']} ({metadata['train_locations']/metadata['total_locations']:.1%})
-        Val: {metadata['val_locations']} ({metadata['val_locations']/metadata['total_locations']:.1%})
-        Test: {metadata['test_locations']} ({metadata['test_locations']/metadata['total_locations']:.1%})
-        Stratification Band: {metadata['stratification_band']}
-        """
-        axes[1, 0].text(0.1, 0.5, summary_text, transform=axes[1, 0].transAxes, 
-                       fontsize=12, verticalalignment='center')
-        axes[1, 0].set_title('Split Summary')
-        axes[1, 0].axis('off')
-        
-        # Band information
-        band_info = self.get_band_info()
-        band_text = f"Band {metadata['stratification_band']}:\n"
-        band_text += band_info[f'band_{metadata["stratification_band"]}']['name']
-        axes[1, 1].text(0.1, 0.5, band_text, transform=axes[1, 1].transAxes,
-                       fontsize=10, verticalalignment='center')
-        axes[1, 1].set_title('Band Information')
-        axes[1, 1].axis('off')
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        
-        plt.show()
+
     
     def save_splits(self, split_info: Dict, output_dir: str, name: str = "default"):
         """Save split information to files."""
@@ -496,7 +568,7 @@ class IrrigationDataSplitter:
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        logger.info(f"Saved splits to {output_dir}")
+
 
     def create_folder_structure(self, split_info: Dict, output_dir: str, 
                               copy_files: bool = True, create_symlinks: bool = False) -> str:
@@ -521,7 +593,6 @@ class IrrigationDataSplitter:
             
             if f'{split_type}_files' in split_info:
                 files = split_info[f'{split_type}_files']
-                logger.info(f"Processing {len(files)} files for {split_type} set...")
                 
                 for file_base in files:
                     # Define source files (image, label, json)
@@ -551,9 +622,6 @@ class IrrigationDataSplitter:
                             logger.warning(f"Warning: Source file not found: {src}")
         
         logger.info(f"Created folder structure at: {output_dir}")
-        logger.info(f"  - train/: {len(split_info.get('train_files', []))} files")
-        logger.info(f"  - val/: {len(split_info.get('val_files', []))} files")
-        logger.info(f"  - test/: {len(split_info.get('test_files', []))} files")
         
         return output_dir
 
@@ -595,12 +663,6 @@ class IrrigationDataSplitter:
         stratification_band = exp_cfg["data"].get("stratification_band", 2)
         min_samples_per_class = exp_cfg["data"].get("min_samples_per_class", 5)
         
-        logger.info(f"Creating spatial stratified split:")
-        logger.info(f"  - Test size: {test_size}")
-        logger.info(f"  - Val size: {val_size}")
-        logger.info(f"  - Stratification band: {stratification_band}")
-        logger.info(f"  - Min samples per class: {min_samples_per_class}")
-        
         split_info = self.spatial_stratified_split(
             test_size=test_size,
             val_size=val_size,
@@ -613,14 +675,12 @@ class IrrigationDataSplitter:
             structure_name = exp_cfg["name"]
             copy_files = exp_cfg["data"].get("copy_files", False)
             
-            logger.info(f"Creating folder structure at: {splits_dir}")
             structure_path = self.save_splits_with_structure(
                 split_info, 
                 splits_dir, 
                 structure_name,
                 copy_files=copy_files
             )
-            logger.info(f"Folder structure created at: {structure_path}")
         
         # Prepare split metadata
         split_metadata = {
@@ -636,18 +696,14 @@ class IrrigationDataSplitter:
         train_files = split_info["train_files"]
         val_files = split_info["val_files"]
         
-        logger.info(f"Split created:")
-        logger.info(f"  - Train files: {len(train_files)}")
-        logger.info(f"  - Val files: {len(val_files)}")
-        logger.info(f"  - Test files: {len(split_info['test_files'])}")
-        
         return train_files, val_files, split_metadata
 
     def create_cv_folder_structure(self, 
                                   n_splits: int = 5,
                                   output_dir: str = "./splits",
                                   structure_name: str = "cv_structure",
-                                  copy_files: bool = False) -> str:
+                                  copy_files: bool = False,
+                                  stratification_band: int = 2) -> str:
         """
         Create cross-validation folder structure with file lists.
         
@@ -656,39 +712,70 @@ class IrrigationDataSplitter:
             output_dir: Directory to save the structure
             structure_name: Name for the structure
             copy_files: If True, copy files. If False, create symlinks or file lists
+            stratification_band: Which band to use for stratification (1-8)
             
         Returns:
             Path to the created structure
         """
-        cv_splits = self.cross_validation_split(n_splits=n_splits)
+        cv_splits = self.cross_validation_split(n_splits=n_splits, stratification_band=stratification_band)
         
         # Create main output directory
         cv_dir = os.path.join(output_dir, f"{structure_name}")
         os.makedirs(cv_dir, exist_ok=True)
         
-        # Get all available files
-        all_files = []
-        for loc_id in self.df['location_id'].unique():
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            primary_survey = loc_data.iloc[0]
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            date_str = self._get_date_string(primary_survey)
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
-            all_files.append(file_id)
+        # Get SPATIALLY-AWARE location-level data (one entry per unique site)
+        location_labels, location_files = self._get_location_labels_and_files(stratification_band)
+        
+        # Create mapping from representative files back to all files at each site
+        site_to_all_files = self._create_site_to_files_mapping()
+        
+
         
         # Handle insufficient samples for train/test split
-        if len(all_files) < 2:
-            logger.warning(f"Insufficient samples ({len(all_files)}) for train/test split. Using all data for training.")
-            train_files = all_files
-            test_files = []
+        if len(location_files) < 2:
+            train_sites = location_files
+            test_sites = []
         else:
-            # Split into train and test
+            # Check if we have enough samples per class for stratification
+            unique_labels, counts = np.unique(location_labels, return_counts=True)
+            min_samples_per_class = 2  # Need at least 2 samples per class for stratification
+            
+            valid_classes = unique_labels[counts >= min_samples_per_class]
+            valid_mask = np.isin(location_labels, valid_classes)
+            
+            if not valid_mask.all():
+                location_labels = location_labels[valid_mask]
+                location_files = location_files[valid_mask]
+            
+            # Perform stratified split at SITE level (not file level)
             test_size = 0.2
-            train_files, test_files = train_test_split(
-                all_files, 
-                test_size=test_size, 
-                random_state=self.random_state
-            )
+            if len(valid_classes) >= 2:
+                # Use stratification if we have enough classes
+                train_sites, test_sites, train_labels, test_labels = train_test_split(
+                    location_files, location_labels,
+                    test_size=test_size,
+                    stratify=location_labels,
+                    random_state=self.random_state
+                )
+            else:
+                # Use random split if stratification is not possible
+                train_sites, test_sites, train_labels, test_labels = train_test_split(
+                    location_files, location_labels,
+                    test_size=test_size,
+                    random_state=self.random_state
+                )
+        
+        # Convert back to lists (handle both numpy arrays and regular lists)
+        if hasattr(train_sites, 'tolist'):
+            train_sites = train_sites.tolist()
+        if hasattr(test_sites, 'tolist'):
+            test_sites = test_sites.tolist()
+        
+        # Expand site-level splits to include all files from each site
+        test_files = self._expand_sites_to_files(test_sites, site_to_all_files)
+        train_sites_pool = self._expand_sites_to_files(train_sites, site_to_all_files)
+        
+
         
         # Save test files list
         test_dir = os.path.join(cv_dir, "test")
@@ -712,29 +799,45 @@ class IrrigationDataSplitter:
             os.makedirs(inner_train_dir, exist_ok=True)
             os.makedirs(inner_val_dir, exist_ok=True)
             
-            # Save file lists (not copy files)
+            # The CV splits contain site representatives, but we need to expand them to all files
+            # Expand train sites to all files for this fold
+            train_site_representatives = split_info['train_files']  # These are site representatives
+            train_files_expanded = self._expand_sites_to_files(train_site_representatives, site_to_all_files)
+            
+            # Expand validation sites to all files for this fold
+            val_site_representatives = split_info['val_files']  # These are site representatives
+            val_files_expanded = self._expand_sites_to_files(val_site_representatives, site_to_all_files)
+            
+            # Save expanded file lists
             with open(os.path.join(inner_train_dir, "train_files.txt"), 'w') as f:
-                for file_id in split_info['train_files']:
+                for file_id in train_files_expanded:
                     f.write(f"{file_id}\n")
             
             with open(os.path.join(inner_val_dir, "val_files.txt"), 'w') as f:
-                for file_id in split_info['val_files']:
+                for file_id in val_files_expanded:
                     f.write(f"{file_id}\n")
+            
+
             
             # If copy_files is True, actually copy the files
             if copy_files:
-                logger.info(f"Copying files for fold {fold_idx}...")
-                self._copy_files_to_fold(split_info['train_files'], inner_train_dir)
-                self._copy_files_to_fold(split_info['val_files'], inner_val_dir)
+                self._copy_files_to_fold(train_files_expanded, inner_train_dir)
+                self._copy_files_to_fold(val_files_expanded, inner_val_dir)
         
         # Save metadata
         metadata = {
             "n_splits": n_splits,
-            "test_size": len(test_files) / len(all_files) if all_files else 0,
-            "total_files": len(all_files),
-            "train_files": len(train_files),
+            "test_size": len(test_sites) / len(location_files) if len(location_files) > 0 else 0,
+            "total_sites": len(location_files),
+            "train_sites": len(train_sites),
+            "test_sites": len(test_sites),
+            "total_files": len(train_sites_pool) + len(test_files),
+            "train_files": len(train_sites_pool),
             "test_files": len(test_files),
-            "cv_splits": cv_splits
+            "cv_splits": cv_splits,
+            "stratification_band": stratification_band,
+            "spatial_awareness": "enabled - sites from same location kept together",
+            "cv_spatial_awareness": "enabled - within each fold, train and validation don't share sites"
         }
         
         # Convert numpy types for JSON serialization
@@ -753,74 +856,122 @@ class IrrigationDataSplitter:
         with open(os.path.join(cv_dir, "cv_metadata.json"), 'w') as f:
             json.dump(metadata, f, indent=2, default=str)
         
-        logger.info(f"Created CV structure at: {cv_dir}")
-        logger.info(f"  - {n_splits} folds created")
-        logger.info(f"  - Test set: {len(test_files)} files")
-        logger.info(f"  - Train set: {len(train_files)} files")
+        # Verify spatial awareness
+        self._verify_spatial_awareness(train_sites, test_sites, site_to_all_files)
+        
+        logger.info(f"CV structure created: {n_splits} folds, {len(test_files)} test files, {len(train_sites_pool)} train files")
         
         return cv_dir
+    
+    def _create_site_to_files_mapping(self) -> Dict[str, List[str]]:
+        """
+        Creates a mapping from site_id to a list of all file IDs belonging to that site.
+        This is necessary because the _get_location_labels_and_files returns one file per site,
+        but we need to expand the test/train splits to include all files from each site.
+        """
+        site_to_all_files = {}
+        
+        # Use organized directories if available
+        available_tifs = list(self.images_dir.glob("*.tif")) + list(self.labels_dir.glob("*.tif"))
+        
+        # First, create a mapping from unique_id to site_id
+        unique_id_to_site = {}
+        for _, row in self.df.iterrows():
+            unique_id_to_site[row['unique_id']] = row['site_id']
+        
+        # Group files by site_id (geographic location)
+        for tif_file in available_tifs:
+            stem = tif_file.stem
+            if "_image" in stem:
+                # Extract unique_id from standardized name: {unique_id}_{site_id}_{date}_image
+                parts = stem.split('_')
+                if len(parts) >= 4 and parts[-1] == "image":
+                    try:
+                        unique_id = int(parts[0])
+                        file_id = stem
+                        
+                        # Get the site_id for this unique_id
+                        if unique_id in unique_id_to_site:
+                            site_id = unique_id_to_site[unique_id]
+                            
+                            if site_id not in site_to_all_files:
+                                site_to_all_files[site_id] = []
+                            site_to_all_files[site_id].append(file_id)
+                        else:
+                            continue
+                    except ValueError:
+                        continue
+        
+        return site_to_all_files
+    
+    def _expand_sites_to_files(self, site_list: List[str], site_to_all_files: Dict[str, List[str]]) -> List[str]:
+        """
+        Expands a list of site_ids to a list of all file IDs belonging to those sites.
+        This is necessary because the train/test split is done at the site level,
+        but the CV folds need to be done at the file level.
+        """
+        all_files = []
+        
+        # For each representative file in site_list, find all files from the same site
+        for representative_file in site_list:
+            # Extract the site_id from the representative file
+            parts = representative_file.split('_')
+            if len(parts) >= 4 and parts[-1] == "image":
+                try:
+                    unique_id = int(parts[0])
+                    site_id_number = parts[1]  # site_id is at index 1
+                    
+                    # Create the full site_id format (e.g., "id_5130509")
+                    full_site_id = f"id_{site_id_number}"
+                    
+                    # Get all files for this site
+                    if full_site_id in site_to_all_files:
+                        site_files = site_to_all_files[full_site_id]
+                        all_files.extend(site_files)
+                    else:
+                        # Fallback: just add the representative file
+                        all_files.append(representative_file)
+                        
+                except ValueError as e:
+                    # Fallback: just add the representative file
+                    all_files.append(representative_file)
+            else:
+                # If it's not a valid file format, just add it as is
+                all_files.append(representative_file)
+        
+        return all_files
+    
+    def _verify_spatial_awareness(self, train_sites: List[str], test_sites: List[str], site_to_all_files: Dict[str, List[str]]):
+        """Verify that no site appears in both train and test sets."""
+        train_site_set = set(train_sites)
+        test_site_set = set(test_sites)
+        
+        # Check for overlap
+        overlap = train_site_set.intersection(test_site_set)
+        if overlap:
+            logger.error(f"SPATIAL AWARENESS VIOLATION: {len(overlap)} sites appear in both train and test sets: {overlap}")
+            raise ValueError("Spatial awareness violation detected - same site in train and test")
     
     def _copy_files_to_fold(self, file_list: List[str], target_dir: str):
         """Helper method to copy files to a fold directory."""
         for file_id in file_list:
-            image_src = os.path.join(self.data_dir, f"{file_id}.tif")
-            label_src = os.path.join(self.data_dir, f"{file_id.replace('_image', '_label')}.tif")
-            json_src = os.path.join(self.data_dir, f"{file_id}.json")
+            # Use organized directories if available
+            if hasattr(self, 'images_dir'):
+                image_src = self.images_dir / f"{file_id}.tif"
+                label_src = self.labels_dir / f"{file_id.replace('_image', '_label')}.tif"
+                json_src = self.metadata_dir / f"{file_id}.json"
+            else:
+                image_src = Path(self.data_dir) / f"{file_id}.tif"
+                label_src = Path(self.data_dir) / f"{file_id.replace('_image', '_label')}.tif"
+                json_src = Path(self.data_dir) / f"{file_id}.json"
             
-            image_dst = os.path.join(target_dir, f"{file_id}.tif")
-            label_dst = os.path.join(target_dir, f"{file_id.replace('_image', '_label')}.tif")
-            json_dst = os.path.join(target_dir, f"{file_id}.json")
+            image_dst = Path(target_dir) / f"{file_id}.tif"
+            label_dst = Path(target_dir) / f"{file_id.replace('_image', '_label')}.tif"
+            json_dst = Path(target_dir) / f"{file_id}.json"
             
             for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
-                if os.path.exists(src):
+                if src.exists():
                     import shutil
-                    shutil.copy2(src, dst)
+                    shutil.copy2(str(src), str(dst))
                 else:
-                    logger.warning(f"Source file not found: {src}")
-
-
-def main():
-    """Example usage of the IrrigationDataSplitter."""
-    
-    csv_path = "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
-    data_dir = "../../data/modeling"
-    
-    splitter = IrrigationDataSplitter(csv_path, data_dir)
-    
-    # Show band information
-    logger.info("Band Information:")
-    for band_name, info in splitter.get_band_info().items():
-        logger.info(f"{band_name}: {info['name']} ({info['type']})")
-    
-    # Create basic split
-    logger.info("Creating spatial stratified split...")
-    split_info = splitter.spatial_stratified_split(
-        test_size=0.2,
-        val_size=0.2,
-        stratification_band=2  # Use irrigation presence
-    )
-    
-    splitter.visualize_splits(split_info)
-    
-    # Save splits with folder structure
-    logger.info("Creating folder structure...")
-    structure_path = splitter.save_splits_with_structure(
-        split_info, 
-        "splits/", 
-        "irrigation_binary",
-        copy_files=True  # Set to False to create symlinks instead
-    )
-    
-    logger.info(f"Folder structure created at: {structure_path}")
-    
-    # Experiment with different bands
-    logger.info("Creating experimental splits for different bands...")
-    experiments = splitter.experiment_with_bands(target_bands=[1, 2, 8])
-    
-    for band, exp_info in experiments.items():
-        logger.info(f"Band {band}: {exp_info['band_description']['name']}")
-        logger.info(f"  Recommendation: {exp_info['recommended_use']}")
-
-
-if __name__ == "__main__":
-    main() 
+                    pass

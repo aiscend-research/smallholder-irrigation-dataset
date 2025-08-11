@@ -8,9 +8,9 @@ data:
   
   # Automatic data splitting configuration
   use_auto_splitting: true  # Enable automatic splitting
-  csv_path: "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
-  data_dir: "../../data/modeling"
-  splits_dir: "../../data/modeling/splits"  # Where to save splits
+  csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+  data_dir: "data/modeling"
+  splits_dir: "data/modeling/splits"  # Where to save splits
   
   # Split parameters
   test_size: 0.2          # 20% for test
