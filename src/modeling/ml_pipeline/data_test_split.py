@@ -112,12 +112,6 @@ def _read_internal_id_from_mask_metadata(mask_meta_json: str) -> Optional[int]:
         pass
     return None
 
-def _select_indices(uids_sorted: List[str], max_samples: Optional[int]) -> List[int]:
-    idxs = list(range(len(uids_sorted)))
-    if max_samples is not None:
-        idxs = idxs[: max_samples]
-    return idxs
-
 def _train_val_split(indices: List[int], val_frac: float) -> Tuple[List[int], List[int]]:
     n = len(indices)
     n_val = int(round(n * val_frac))
@@ -163,14 +157,18 @@ def main():
     # Sort by numeric unique id (derived from filename) so selection is deterministic
     mask_records.sort(key=lambda r: int(r["unique"]))
 
-    # Pair with images via internal_id from mask metadata -> images_map
+    # Pair with images via unique id from mask record -> images_map
     paired = []
     for rec in mask_records:
-        iid = rec["internal_id"]
-        if iid is None or iid not in images_map:
-            print(f"[WARN] Could not pair mask (unique={rec['unique']}) — internal_id missing or not found in images.")
+        try:
+            unique = int(rec["unique"])
+        except Exception:
+            print(f"[WARN] Could not parse unique id for mask: {rec}")
             continue
-        img_tif, img_json = images_map[iid]
+        if unique not in images_map:
+            print(f"[WARN] Could not pair mask (unique={rec['unique']}) — unique id not found in images.")
+            continue
+        img_tif, img_json = images_map[unique]
         paired.append((rec, img_tif, img_json))
 
     if not paired:
@@ -199,18 +197,19 @@ def main():
 
             dst_img  = os.path.join(out_images, f"{prefix}_image.tif")
             dst_lab  = os.path.join(out_labels, f"{prefix}_label.tif")
-            dst_json = os.path.join(out_json,   f"{prefix}.json")
+            dst_json_image = os.path.join(out_json,   f"{prefix}_image.json")
+            dst_json_label = os.path.join(out_json,   f"{prefix}_label.json")
 
             if DRY_RUN:
                 print(f"[DRY] {img_tif}  -> {dst_img}")
                 print(f"[DRY] {rec['mask_tif']} -> {dst_lab}")
-                print(f"[DRY] {img_json} -> {dst_json} (image json preferred; will fallback to mask json if missing)")
+                print(f"[DRY] {img_json} -> {dst_json_image} (image json)")
+                print(f"[DRY] {rec['mask_json']} -> {dst_json_label} (mask json)")
             else:
                 _copy(img_tif, dst_img, COPY_MODE)
                 _copy(rec["mask_tif"], dst_lab, COPY_MODE)
-                # Prefer the image json as the canonical metadata. If missing, use mask json.
-                json_src = img_json if os.path.exists(img_json) else rec["mask_json"]
-                _copy(json_src, dst_json, COPY_MODE)
+                _copy(img_json, dst_json_image, COPY_MODE)
+                _copy(rec["mask_json"], dst_json_label, COPY_MODE)
 
     emit("train", [paired[i] for i in train_idx])
     emit("val",   [paired[i] for i in val_idx])
