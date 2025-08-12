@@ -1,115 +1,17 @@
 import argparse
 import os
-import shutil
-from pathlib import Path
-
-
-def create_dirs(base_dir):
-    for sub_dir in ['images', 'labels', 'json']:
-        dir_path = base_dir / sub_dir
-        dir_path.mkdir(parents=True, exist_ok=True)
-
-
-def copy_files(files, src_dir, dst_dir, mode):
-    for file in files:
-        src_file = src_dir / file
-        if file.endswith('.jpg') or file.endswith('.png'):
-            subfolder = 'images'
-        elif file.endswith('.txt'):
-            subfolder = 'labels'
-        elif file.endswith('.json'):
-            subfolder = 'json'
-        else:
-            continue
-
-        dst_file = dst_dir / subfolder / file
-        if mode == 'copy':
-            shutil.copy2(src_file, dst_file)
-        elif mode == 'link':
-            os.link(src_file, dst_file)
-        elif mode == 'symlink':
-            os.symlink(src_file, dst_file)
-
-
-def main(args):
-    src_dir = Path(args.source)
-    train_files = args.train_files
-    val_files = args.val_files
-
-    train_dir = Path(args.output) / 'train_dataset'
-    val_dir = Path(args.output) / 'val_dataset'
-
-    if not args.dry_run:
-        create_dirs(train_dir)
-        create_dirs(val_dir)
-
-        copy_files(train_files, src_dir, train_dir, args.mode)
-        copy_files(val_files, src_dir, val_dir, args.mode)
-    else:
-        print(f'Dry run mode: would create directories {train_dir} and {val_dir} with subfolders images, labels, json')
-        print(f'Would copy/link/symlink train files to {train_dir}')
-        print(f'Would copy/link/symlink val files to {val_dir}')
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Split dataset into train and val with structured directories.')
-    parser.add_argument('--source', type=str, required=True, help='Source directory containing files.')
-    parser.add_argument('--output', type=str, required=True, help='Output directory for split dataset.')
-    parser.add_argument('--train-files', nargs='+', required=True, help='List of train files.')
-    parser.add_argument('--val-files', nargs='+', required=True, help='List of val files.')
-    parser.add_argument('--mode', choices=['copy', 'link', 'symlink'], default='copy', help='File operation mode.')
-    parser.add_argument('--dry-run', action='store_true', help='Do not perform any file operations.')
-    args = parser.parse_args()
-
-    main(args)
-
-#!/usr/bin/env python3
-"""
-data_test_split.py
-
-Utility to:
-1) Normalize "bad" raw images/masks into the modeling convention:
-      <PREFIX>_image.tif, <PREFIX>_label.tif, <PREFIX>.json
-   where PREFIX = "<unique_id>_<site_id>_<YYYY.MM.DD>"
-
-2) Pair images and masks using the numeric `internal_id` parsed from the image
-   metadata json name (e.g., 'site_-10.00_28.75_2019_1703.json' -> internal_id=1703)
-   matched against the *mask* metadata json content field `internal_id`.
-
-3) Split into train/val (default 80/20) and (optionally) downselect to the first N
-   samples while preserving original `unique_id` from the mask filename. We DO NOT
-   reassign or shuffle `unique_id` — it is taken from the mask filename prefix.
-
-Expected inputs:
-- images_dir: directory of raw image stacks (*.tif) with accompanying metadata jsons
-              named like: 'site_<lat>_<lon>_<year>_<internal>.json'
-              and matching .tif with the same basename.
-- masks_dir : directory of mask rasters named like: '<unique>_<siteId>_<YYYY.MM.DD>_KL.tif'
-              and mask metadata jsons named like: '<same>_metadata.json'
-Outputs (under out_root):
-  out_root/
-    train/images/, train/labels/, train/json/
-    val/images/,   val/labels/,   val/json/
-All files are *copied* by default (use --link for hardlinks; --symlink for symlinks).
-
-Usage:
-  python -m modeling.ml_pipeline.data_test_split \
-      --images-dir /path/to/images \
-      --masks-dir  /path/to/masks \
-      --out-root   /path/to/paired_dataset \
-      --val-frac 0.2 \
-      --max-samples 200 \
-      --seed 42 \
-      [--link | --symlink] \
-      [--dry-run]
-"""
-
-import argparse
-import os
 import re
 import json
 import shutil
 from typing import Dict, List, Tuple, Optional
+
+IMAGES_DIR = "/path/to/images"
+MASKS_DIR = "/path/to/masks"
+OUT_ROOT = "/path/to/paired_dataset"
+VAL_FRAC = 0.2
+MAX_SAMPLES = 200
+COPY_MODE = "copy"  # or "link", "symlink"
+DRY_RUN = False
 
 def _copy(src: str, dst: str, mode: str):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -221,33 +123,13 @@ def _train_val_split(indices: List[int], val_frac: float) -> Tuple[List[int], Li
     return train_idx, val_idx
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--images-dir", required=True, help="Folder with image stacks and site_*.json metadata")
-    ap.add_argument("--masks-dir", required=True, help="Folder with mask tif and *_metadata.json")
-    ap.add_argument("--out-root", required=True, help="Output root folder for paired dataset")
-    ap.add_argument("--val-frac", type=float, default=0.2)
-    ap.add_argument("--max-samples", type=int, default=None, help="Keep at most N samples (after ordering by unique_id)")
-    ap.add_argument("--seed", type=int, default=42, help="Not used for IDs; only for potential future shuffles")
-    mode_group = ap.add_mutually_exclusive_group()
-    mode_group.add_argument("--copy", action="store_true", help="Default: copy files")
-    mode_group.add_argument("--link", action="store_true", help="Use hard links")
-    mode_group.add_argument("--symlink", action="store_true", help="Use symlinks")
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-
-    copy_mode = "copy"
-    if args.link:
-        copy_mode = "link"
-    elif args.symlink:
-        copy_mode = "symlink"
-
-    images_map = _gather_images(args.images_dir)
+    images_map = _gather_images(IMAGES_DIR)
     if not images_map:
-        raise SystemExit(f"No image json+tif pairs discovered under: {args.images_dir}")
+        raise SystemExit(f"No image json+tif pairs discovered under: {IMAGES_DIR}")
 
     # Index all masks
     mask_records = []
-    for root, _, files in os.walk(args.masks_dir):
+    for root, _, files in os.walk(MASKS_DIR):
         for f in files:
             if not f.lower().endswith(".tif"):
                 continue
@@ -274,13 +156,13 @@ def main():
             })
 
     if not mask_records:
-        raise SystemExit(f"No masks discovered under: {args.masks_dir}")
+        raise SystemExit(f"No masks discovered under: {MASKS_DIR}")
 
     # Sort by numeric unique id (derived from filename) so selection is deterministic
     mask_records.sort(key=lambda r: int(r["unique"]))
 
     # Keep only first N if requested
-    sel_indices = _select_indices([r["unique"] for r in mask_records], args.max_samples)
+    sel_indices = _select_indices([r["unique"] for r in mask_records], MAX_SAMPLES)
     selected = [mask_records[i] for i in sel_indices]
 
     # Pair with images via internal_id from mask metadata -> images_map
@@ -297,12 +179,12 @@ def main():
         raise SystemExit("No pairs could be made. Ensure mask metadata has an 'internal_id' that exists in image json names.")
 
     # Split 80/20 (or val_frac), preserving order; unique_id stays from mask name
-    train_idx, val_idx = _train_val_split(list(range(len(paired))), args.val_frac)
+    train_idx, val_idx = _train_val_split(list(range(len(paired))), VAL_FRAC)
 
     def emit(split_name: str, items: List[Tuple[dict, str, str]]):
-        out_images = os.path.join(args.out_root, split_name, "images")
-        out_labels = os.path.join(args.out_root, split_name, "labels")
-        out_json   = os.path.join(args.out_root, split_name, "json")
+        out_images = os.path.join(OUT_ROOT, split_name, "images")
+        out_labels = os.path.join(OUT_ROOT, split_name, "labels")
+        out_json   = os.path.join(OUT_ROOT, split_name, "json")
         os.makedirs(out_images, exist_ok=True)
         os.makedirs(out_labels, exist_ok=True)
         os.makedirs(out_json, exist_ok=True)
@@ -314,21 +196,21 @@ def main():
             dst_lab  = os.path.join(out_labels, f"{prefix}_label.tif")
             dst_json = os.path.join(out_json,   f"{prefix}.json")
 
-            if args.dry_run:
+            if DRY_RUN:
                 print(f"[DRY] {img_tif}  -> {dst_img}")
                 print(f"[DRY] {rec['mask_tif']} -> {dst_lab}")
                 print(f"[DRY] {img_json} -> {dst_json} (image json preferred; will fallback to mask json if missing)")
             else:
-                _copy(img_tif, dst_img, copy_mode)
-                _copy(rec["mask_tif"], dst_lab, copy_mode)
+                _copy(img_tif, dst_img, COPY_MODE)
+                _copy(rec["mask_tif"], dst_lab, COPY_MODE)
                 # Prefer the image json as the canonical metadata. If missing, use mask json.
                 json_src = img_json if os.path.exists(img_json) else rec["mask_json"]
-                _copy(json_src, dst_json, copy_mode)
+                _copy(json_src, dst_json, COPY_MODE)
 
     emit("train", [paired[i] for i in train_idx])
     emit("val",   [paired[i] for i in val_idx])
 
-    print(f"Done. Wrote dataset to: {args.out_root}")
+    print(f"Done. Wrote dataset to: {OUT_ROOT}")
     print(f" Train: {len(train_idx)} samples  |  Val: {len(val_idx)} samples")
 
 if __name__ == "__main__":
