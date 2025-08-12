@@ -29,30 +29,22 @@ def _copy(src: str, dst: str, mode: str):
     else:
         raise ValueError(f"Unknown copy mode: {mode}")
 
-def _parse_internal_id_from_image_json_name(name: str) -> Optional[int]:
-    """
-    From a filename like 'site_-10.00_28.75_2019_1703.json' extract 1703.
-    Returns None if no trailing integer found.
-    """
-    base = os.path.basename(name)
-    m = re.search(r"_([0-9]+)\.json$", base)
-    return int(m.group(1)) if m else None
-
 def _gather_images(images_dir: str) -> Dict[int, Tuple[str, str]]:
     """
-    Returns mapping: internal_id -> (image_tif_path, image_json_path)
+    Returns mapping: unique_id -> (image_tif_path, image_json_path)
     We expect a .json and a .tif sharing the same stem (minus extension).
+    Unique id is the first number before the first underscore in the filename.
     """
     mapping: Dict[int, Tuple[str, str]] = {}
-    # Index all JSONs first
     for root, _, files in os.walk(images_dir):
         for f in files:
             if not f.lower().endswith(".json"):
                 continue
-            json_path = os.path.join(root, f)
-            internal_id = _parse_internal_id_from_image_json_name(f)
-            if internal_id is None:
+            base = os.path.basename(f)
+            m = re.match(r"^(\d+)_", base)
+            if not m:
                 continue
+            unique_id = int(m.group(1))
             stem = f[:-5]  # drop .json
             tif_guess = os.path.join(root, stem + ".tif")
             if not os.path.exists(tif_guess):
@@ -63,7 +55,7 @@ def _gather_images(images_dir: str) -> Dict[int, Tuple[str, str]]:
                 else:
                     # no image stack found
                     continue
-            mapping[internal_id] = (tif_guess, json_path)
+            mapping[unique_id] = (tif_guess, os.path.join(root, f))
     return mapping
 
 def _parse_mask_name(mask_tif_name: str) -> Tuple[str, str, str]:
@@ -94,24 +86,6 @@ def _find_mask_metadata(mask_tif_path: str) -> Optional[str]:
     meta_path = f"{stem}_metadata.json"
     return meta_path if os.path.exists(meta_path) else None
 
-def _read_internal_id_from_mask_metadata(mask_meta_json: str) -> Optional[int]:
-    """
-    Try to read 'internal_id' from the mask metadata json content if present.
-    """
-    try:
-        with open(mask_meta_json, "r") as f:
-            data = json.load(f)
-        # allow different casings/keys
-        for key in ("internal_id", "internalId", "id_internal", "image_number", "image_id"):
-            if key in data and isinstance(data[key], (int, str)):
-                try:
-                    return int(str(data[key]))
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    return None
-
 def _train_val_split(indices: List[int], val_frac: float) -> Tuple[List[int], List[int]]:
     n = len(indices)
     n_val = int(round(n * val_frac))
@@ -130,25 +104,17 @@ def main():
         for f in files:
             if not f.lower().endswith(".tif"):
                 continue
-            # Removed check for "_KL" in filename to accept any optional suffix
             mask_path = os.path.join(root, f)
-            meta_path = _find_mask_metadata(mask_path)
-            if meta_path is None:
-                print(f"[WARN] No metadata json for mask: {mask_path}")
-                continue
             try:
                 unique_id, site_id, date_str = _parse_mask_name(mask_path)
             except ValueError as e:
                 print(f"[WARN] {e}")
                 continue
-            internal_id = _read_internal_id_from_mask_metadata(meta_path)
             mask_records.append({
                 "unique": unique_id,
                 "site": site_id,
                 "date": date_str,             # 'YYYY.MM.DD'
                 "mask_tif": mask_path,
-                "mask_json": meta_path,
-                "internal_id": internal_id,   # may be None
             })
 
     if not mask_records:
@@ -172,7 +138,7 @@ def main():
         paired.append((rec, img_tif, img_json))
 
     if not paired:
-        raise SystemExit("No pairs could be made. Ensure mask metadata has an 'internal_id' that exists in image json names.")
+        raise SystemExit("No pairs could be made. Ensure mask filenames unique ids exist in image json names.")
 
     # Sort paired by mask record's numeric unique id for deterministic naming
     paired.sort(key=lambda tup: int(tup[0]["unique"]))
@@ -185,31 +151,31 @@ def main():
     train_idx, val_idx = _train_val_split(list(range(len(paired))), VAL_FRAC)
 
     def emit(split_name: str, items: List[Tuple[dict, str, str]]):
-        out_images = os.path.join(OUT_ROOT, split_name, "images")
-        out_labels = os.path.join(OUT_ROOT, split_name, "labels")
-        out_json   = os.path.join(OUT_ROOT, split_name, "json")
-        os.makedirs(out_images, exist_ok=True)
-        os.makedirs(out_labels, exist_ok=True)
-        os.makedirs(out_json, exist_ok=True)
+        out_split_dir = os.path.join(OUT_ROOT, split_name)
+        os.makedirs(out_split_dir, exist_ok=True)
 
         for rec, img_tif, img_json in items:
             prefix = f"{rec['unique']}_{rec['site']}_{rec['date']}"  # e.g., '1_5168346_2023.09.06'
 
-            dst_img  = os.path.join(out_images, f"{prefix}_image.tif")
-            dst_lab  = os.path.join(out_labels, f"{prefix}_label.tif")
-            dst_json_image = os.path.join(out_json,   f"{prefix}_image.json")
-            dst_json_label = os.path.join(out_json,   f"{prefix}_label.json")
+            dst_img  = os.path.join(out_split_dir, f"{prefix}_image.tif")
+            dst_lab  = os.path.join(out_split_dir, f"{prefix}_label.tif")
+            dst_img_json = os.path.join(out_split_dir, f"{prefix}_image.json")
+            dst_lab_json = os.path.join(out_split_dir, f"{prefix}_label.json")
 
             if DRY_RUN:
                 print(f"[DRY] {img_tif}  -> {dst_img}")
                 print(f"[DRY] {rec['mask_tif']} -> {dst_lab}")
-                print(f"[DRY] {img_json} -> {dst_json_image} (image json)")
-                print(f"[DRY] {rec['mask_json']} -> {dst_json_label} (mask json)")
+                print(f"[DRY] {img_json} -> {dst_img_json} (image json)")
+                meta_path = _find_mask_metadata(rec["mask_tif"])
+                if meta_path is not None:
+                    print(f"[DRY] {meta_path} -> {dst_lab_json} (mask json)")
             else:
                 _copy(img_tif, dst_img, COPY_MODE)
                 _copy(rec["mask_tif"], dst_lab, COPY_MODE)
-                _copy(img_json, dst_json_image, COPY_MODE)
-                _copy(rec["mask_json"], dst_json_label, COPY_MODE)
+                _copy(img_json, dst_img_json, COPY_MODE)
+                meta_path = _find_mask_metadata(rec["mask_tif"])
+                if meta_path is not None:
+                    _copy(meta_path, dst_lab_json, COPY_MODE)
 
     emit("train", [paired[i] for i in train_idx])
     emit("val",   [paired[i] for i in val_idx])
