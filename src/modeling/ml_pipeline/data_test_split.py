@@ -13,6 +13,7 @@ MAX_SAMPLES = 50
 COPY_MODE = "copy"  # or "link", "symlink"
 DRY_RUN = False
 
+
 def _copy(src: str, dst: str, mode: str):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if mode == "copy":
@@ -67,19 +68,21 @@ def _gather_images(images_dir: str) -> Dict[int, Tuple[str, str]]:
 
 def _parse_mask_name(mask_tif_name: str) -> Tuple[str, str, str]:
     """
-    From '1_5168346_2023.09.06_KL.tif' -> (unique='1', site='5168346', date='2023.09.06')
+    Parse mask filename of the form:
+      '<unique>_<site>_<YYYY.MM.DD>[ _<Suffix> ].tif(f)'
+    The trailing analyst/code suffix after the date is optional and may be any
+    non-space string without dots (e.g., KL, MV, JL, DSB, etc.).
+
+    Examples:
+      '1_5168346_2023.09.06_KL.tif'      -> ('1','5168346','2023.09.06')
+      '2_5168346_2019.10.30.tif'         -> ('2','5168346','2019.10.30')
+      '/path/3_3581818_2024.06.30_JL.tiff' -> ('3','3581818','2024.06.30')
     """
-    stem = os.path.basename(mask_tif_name)
-    stem = os.path.splitext(stem)[0]
-    # Drop optional trailing '_KL'
-    if stem.endswith("_KL"):
-        stem_core = stem[:-3]
-    else:
-        stem_core = stem
-    parts = stem_core.split("_")
-    if len(parts) < 3:
-        raise ValueError(f"Mask name not in expected form '<unique>_<site>_<YYYY.MM.DD>[_KL].tif': {mask_tif_name}")
-    unique_id, site_id, date_str = parts[0], parts[1], parts[2]
+    base = os.path.basename(mask_tif_name)
+    m = re.match(r"^(\d+)_(\d+)_(\d{4}\.\d{2}\.\d{2})(?:_[^.\s]+)?\.(?:tif|tiff)$", base, flags=re.IGNORECASE)
+    if not m:
+        raise ValueError(f"Mask name not in expected form '<unique>_<site>_<YYYY.MM.DD>[_SUFFIX].tif(f)': {mask_tif_name}")
+    unique_id, site_id, date_str = m.group(1), m.group(2), m.group(3)
     return unique_id, site_id, date_str
 
 def _find_mask_metadata(mask_tif_path: str) -> Optional[str]:
@@ -133,8 +136,7 @@ def main():
         for f in files:
             if not f.lower().endswith(".tif"):
                 continue
-            if "_KL" not in f:  # safety net; keep the convention
-                continue
+            # Removed check for "_KL" in filename to accept any optional suffix
             mask_path = os.path.join(root, f)
             meta_path = _find_mask_metadata(mask_path)
             if meta_path is None:
@@ -161,13 +163,9 @@ def main():
     # Sort by numeric unique id (derived from filename) so selection is deterministic
     mask_records.sort(key=lambda r: int(r["unique"]))
 
-    # Keep only first N if requested
-    sel_indices = _select_indices([r["unique"] for r in mask_records], MAX_SAMPLES)
-    selected = [mask_records[i] for i in sel_indices]
-
     # Pair with images via internal_id from mask metadata -> images_map
     paired = []
-    for rec in selected:
+    for rec in mask_records:
         iid = rec["internal_id"]
         if iid is None or iid not in images_map:
             print(f"[WARN] Could not pair mask (unique={rec['unique']}) — internal_id missing or not found in images.")
@@ -177,6 +175,13 @@ def main():
 
     if not paired:
         raise SystemExit("No pairs could be made. Ensure mask metadata has an 'internal_id' that exists in image json names.")
+
+    # Sort paired by mask record's numeric unique id for deterministic naming
+    paired.sort(key=lambda tup: int(tup[0]["unique"]))
+
+    # Keep only first N if requested (after pairing and sorting)
+    if MAX_SAMPLES is not None:
+        paired = paired[:MAX_SAMPLES]
 
     # Split 80/20 (or val_frac), preserving order; unique_id stays from mask name
     train_idx, val_idx = _train_val_split(list(range(len(paired))), VAL_FRAC)
@@ -212,6 +217,7 @@ def main():
 
     print(f"Done. Wrote dataset to: {OUT_ROOT}")
     print(f" Train: {len(train_idx)} samples  |  Val: {len(val_idx)} samples")
+
 
 if __name__ == "__main__":
     main()
