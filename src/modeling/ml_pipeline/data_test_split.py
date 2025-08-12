@@ -5,11 +5,11 @@ import json
 import shutil
 from typing import Dict, List, Tuple, Optional
 
-IMAGES_DIR = "/path/to/images"
-MASKS_DIR = "/path/to/masks"
-OUT_ROOT = "/path/to/paired_dataset"
+IMAGES_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/features/"
+MASKS_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
+OUT_ROOT = "/home/waves/data/smallholder-irrigation-dataset/data/modeling"
 VAL_FRAC = 0.2
-MAX_SAMPLES = 200
+MAX_SAMPLES = 50
 COPY_MODE = "copy"  # or "link", "symlink"
 DRY_RUN = False
 
