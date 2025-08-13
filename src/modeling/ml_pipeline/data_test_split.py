@@ -37,7 +37,7 @@ def _scan_images(images_dir: str) -> List[Dict]:
 
 def _scan_masks(masks_dir: str) -> List[Dict]:
     pattern = re.compile(
-        r"^(?P<uid>\d+)_(?P<site_id>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)\.(?P<ext>tif|json)$",
+        r"^(?P<uid>\d+?)_(?P<site_id>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     masks_by_uid = {}
@@ -52,6 +52,7 @@ def _scan_masks(masks_dir: str) -> List[Dict]:
         site_id = m.group("site_id")
         date = m.group("date")
         ext = m.group("ext").lower()
+        print(f"Mask match: {file_path.name} -> UID {uid}, site_id {site_id}")
         if uid not in masks_by_uid:
             masks_by_uid[uid] = {"uid": uid, "site_id": site_id, "date": date, "tif": None, "json": None}
         if ext == "tif":
