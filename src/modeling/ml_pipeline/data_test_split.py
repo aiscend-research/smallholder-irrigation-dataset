@@ -27,6 +27,7 @@ def _scan_images(images_dir: str) -> List[Dict]:
             continue
         uid = m.group("uid")
         ext = m.group("ext").lower()
+        print(f"Image match: {file_path.name} -> UID {uid}")
         if uid not in files_by_uid:
             files_by_uid[uid] = {"uid": uid, "tif": None, "json": None}
         if ext == "tif":
@@ -88,6 +89,7 @@ def _pair_records(images: List[Dict], masks: List[Dict]) -> List[Dict]:
             'mask_tif': mask_best['tif'],
             'mask_json': mask_best['json']
         })
+        print(f"Paired UID {uid}: image=({img['tif'].name}, {img['json'].name}), mask=({mask_best['tif'].name}, {mask_best['json'].name})")
     return pairs
 
 def _copy_pair(pair: Dict, dst_dir: str):
