@@ -22,8 +22,10 @@ def _scan_images(images_dir: str) -> List[Dict]:
     for file_path in images_path.iterdir():
         if not file_path.is_file():
             continue
+        print(f"Raw image file: {file_path.name}")
         m = pattern.match(file_path.name)
         if not m:
+            print(f"No match for image file: {file_path.name}")
             continue
         uid = m.group("uid")
         ext = m.group("ext").lower()
