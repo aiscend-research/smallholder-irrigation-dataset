@@ -14,7 +14,7 @@ MAX_SAMPLES = 50
 
 def _scan_images(images_dir: str) -> List[Dict]:
     pattern = re.compile(
-        r"^(?:.*_)?(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        r"_(?P<uid>\d+)\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     files_by_uid = {}
