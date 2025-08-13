@@ -14,7 +14,7 @@ MAX_SAMPLES = 50
 
 def _scan_images(images_dir: str) -> List[Dict]:
     pattern = re.compile(
-        r"^site_(?P<lat>-?\d+(?:\.\d+)?)_(?P<lon>-?\d+(?:\.\d+)?)_(?P<year>\d{4})_(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        r"^(?:.*_)?(?P<uid>\d+)\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     files_by_uid = {}
@@ -27,11 +27,8 @@ def _scan_images(images_dir: str) -> List[Dict]:
             continue
         uid = m.group("uid")
         ext = m.group("ext").lower()
-        lat = m.group("lat")
-        lon = m.group("lon")
-        year = m.group("year")
         if uid not in files_by_uid:
-            files_by_uid[uid] = {"uid": uid, "lat_lon": f"{lat}_{lon}", "year": year, "tif": None, "json": None}
+            files_by_uid[uid] = {"uid": uid, "tif": None, "json": None}
         if ext == "tif":
             files_by_uid[uid]["tif"] = file_path
         elif ext == "json":
@@ -57,16 +54,10 @@ def _scan_masks(masks_dir: str) -> List[Dict]:
         ext = m.group("ext").lower()
         if uid not in masks_by_uid:
             masks_by_uid[uid] = {"uid": uid, "site_id": site_id, "date": date, "tif": None, "json": None}
-        else:
-            # Update only if date is more recent (string compare)
-            if date > masks_by_uid[uid]["date"]:
-                masks_by_uid[uid] = {"uid": uid, "site_id": site_id, "date": date, "tif": None, "json": None}
-        # Assign tif or json if matches current date entry
-        if masks_by_uid[uid]["date"] == date:
-            if ext == "tif":
-                masks_by_uid[uid]["tif"] = file_path
-            elif ext == "json":
-                masks_by_uid[uid]["json"] = file_path
+        if ext == "tif":
+            masks_by_uid[uid]["tif"] = file_path
+        elif ext == "json":
+            masks_by_uid[uid]["json"] = file_path
     # Filter out entries missing tif or json
     result = []
     for mask in masks_by_uid.values():
