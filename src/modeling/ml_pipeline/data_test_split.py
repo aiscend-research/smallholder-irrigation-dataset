@@ -36,11 +36,13 @@ def _scan_images(images_dir: str) -> List[Dict]:
             files_by_uid[uid]["tif"] = file_path
         elif ext == "json":
             files_by_uid[uid]["json"] = file_path
-    return list(files_by_uid.values())
+    images_list = list(files_by_uid.values())
+    print(f"Loaded image UIDs: {[img['uid'] for img in images_list]}")
+    return images_list
 
 def _scan_masks(masks_dir: str) -> List[Dict]:
     pattern = re.compile(
-        r"^(?P<uid>\d+?)_(?P<site_id>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)\.(?P<ext>tif|json)$",
+        r"^(?P<uid>\d+?)_(?P<site_id>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)(_metadata)?\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     masks_by_uid = {}
@@ -66,13 +68,16 @@ def _scan_masks(masks_dir: str) -> List[Dict]:
     for mask in masks_by_uid.values():
         if mask["tif"] and mask["json"]:
             result.append(mask)
+    print(f"Loaded mask UIDs: {[mask['uid'] for mask in result]}")
     return result
 
 def _pair_records(images: List[Dict], masks: List[Dict]) -> List[Dict]:
     pairs = []
-    masks_by_uid = {m['uid']: m for m in masks}
+    masks_by_uid = {m['uid'].strip(): m for m in masks}
     for img in images:
         uid = img.get('uid')
+        if uid is not None:
+            uid = uid.strip()
         
         #DEBUG
         print(f"Trying to pair UID {uid}: "
