@@ -5,6 +5,7 @@ import json
 import shutil
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
+import random
 
 IMAGES_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/features/"
 MASKS_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
@@ -106,7 +107,7 @@ def _pair_records(images: List[Dict], masks: List[Dict]) -> List[Dict]:
     return pairs
 
 def _copy_pair(pair: Dict, dst_dir: str):
-    base = pair['uid']
+    base = f"{pair['uid']}_{pair['site_id']}_{pair['date']}"
     # image tif
     dst_img_tif = dst_dir / f"{base}_image.tif"
     shutil.copy2(str(pair['image_tif']), str(dst_img_tif))
@@ -125,13 +126,22 @@ def main():
     masks = _scan_masks(MASKS_DIR)
     pairs = _pair_records(images, masks)
 
-    # Limit pairs to MAX_SAMPLES
-    pairs = pairs[:MAX_SAMPLES]
+    # Deterministic shuffle, then cap to MAX_SAMPLES
+    random.seed(42)
+    random.shuffle(pairs)
 
-    # Split into train and val
-    val_count = int(len(pairs) * VAL_FRAC)
-    train_pairs = pairs[val_count:]
+    total = len(pairs)
+    cap = min(MAX_SAMPLES if MAX_SAMPLES is not None and MAX_SAMPLES > 0 else total, total)
+    pairs = pairs[:cap]
+
+    # Compute split counts based on VAL_FRAC
+    val_count = int(cap * VAL_FRAC)
+    train_count = cap - val_count
+
     val_pairs = pairs[:val_count]
+    train_pairs = pairs[val_count:val_count + train_count]
+
+    print(f"Sampling summary -> total: {total}, capped: {cap}, train: {len(train_pairs)}, val: {len(val_pairs)}")
 
     from pathlib import Path
     train_dir = Path(OUT_ROOT) / "train"
