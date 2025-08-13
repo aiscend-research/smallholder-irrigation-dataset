@@ -14,7 +14,7 @@ MAX_SAMPLES = 50
 
 def _scan_images(images_dir: str) -> List[Dict]:
     pattern = re.compile(
-        r"_(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        r"^site_[^_]+_[^_]+_\d{4}_(?P<uid>\d+)\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     files_by_uid = {}
@@ -55,7 +55,6 @@ def _scan_masks(masks_dir: str) -> List[Dict]:
         site_id = m.group("site_id")
         date = m.group("date")
         ext = m.group("ext").lower()
-        print(f"Mask match: {file_path.name} -> UID {uid}, site_id {site_id}")
         if uid not in masks_by_uid:
             masks_by_uid[uid] = {"uid": uid, "site_id": site_id, "date": date, "tif": None, "json": None}
         if ext == "tif":
@@ -74,6 +73,13 @@ def _pair_records(images: List[Dict], masks: List[Dict]) -> List[Dict]:
     masks_by_uid = {m['uid']: m for m in masks}
     for img in images:
         uid = img.get('uid')
+        
+        #DEBUG
+        print(f"Trying to pair UID {uid}: "
+              f"Image tif? {bool(img.get('tif'))},"
+              f"image json? {bool(img.get('json'))}, "
+              f"mask exists? {uid in masks_by_uid}")
+        
         mask_best = masks_by_uid.get(uid)
         if not img or not img.get('tif') or not img.get('json'):
             continue  # require image tif AND json
