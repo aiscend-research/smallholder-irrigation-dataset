@@ -2,12 +2,12 @@
 name: "rf_baseline"
 
 imputation:
-  mode: temporal   # options: none, drop, temporal
+  mode: none   # options: none, drop, temporal
   fill_constant: 0.0   # used only for temporal
 
 data:
-  train_dir: "../../data/modeling/train"
-  val_dir: "../../data/modeling/val"
+  train_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/train"
+  val_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/val"
   image_bands: null   # e.g. ["B3"], use null for default
   time_step_selection: null
 
@@ -36,4 +36,4 @@ evaluation:
   compute_detailed_metrics: true
 
 output:
-  base_dir: "./experiments"
+  base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

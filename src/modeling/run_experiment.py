@@ -5,7 +5,6 @@ import json
 import shutil
 from datetime import datetime
 from joblib import dump
-import torch
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
