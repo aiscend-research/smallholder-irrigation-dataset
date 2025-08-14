@@ -11,7 +11,7 @@ import numpy as np
 import os
 from itertools import product
 
-LABEL_CSV = get_data_root() + "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+LABEL_CSV =  "/home/madhav/smallholder-irrigation-dataset/data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
 MULTI_CLASSES = ['Not irrigated','Small-scale','Tree crop','Industrial','Lawn','Covered']
 BINARY_CLASSES = ['Not irrigated','Irrigated']
