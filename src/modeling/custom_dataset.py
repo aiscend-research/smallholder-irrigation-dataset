@@ -99,16 +99,16 @@ class MultiTemporalCropDataset(Dataset):
         self.image_band_count = self.num_bands * self.num_timesteps
         self.time_step_selection = time_step_selection
 
-        # Find *_image.tif and *_label.tif files according to new naming convention
+        # Find files according to the new naming convention: *_image.tif and *_mask.tif
+        # (also accept legacy *_label.tif if present)
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
-        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
+        mask_files  = sorted(glob.glob(os.path.join(self.label_dir, "*_mask.tif")))
+        legacy_label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
 
-        # The prefix is everything before '_image.tif' or '_label.tif'
+        # The prefix is everything before the suffix
         def extract_prefix(filename, suffix):
             base = os.path.basename(filename)
-            if base.endswith(suffix):
-                return base[:-len(suffix)]
-            return None
+            return base[:-len(suffix)] if base.endswith(suffix) else None
 
         image_prefix_to_file = {}
         for f in image_files:
@@ -116,10 +116,15 @@ class MultiTemporalCropDataset(Dataset):
             if prefix:
                 image_prefix_to_file[prefix] = f
 
+        # Prefer new *_mask.tif; fall back to legacy *_label.tif when present
         label_prefix_to_file = {}
-        for f in label_files:
+        for f in mask_files:
+            prefix = extract_prefix(f, "_mask.tif")
+            if prefix and prefix not in label_prefix_to_file:
+                label_prefix_to_file[prefix] = f
+        for f in legacy_label_files:
             prefix = extract_prefix(f, "_label.tif")
-            if prefix:
+            if prefix and prefix not in label_prefix_to_file:
                 label_prefix_to_file[prefix] = f
 
         # Pair files that share the exact prefix
@@ -127,6 +132,9 @@ class MultiTemporalCropDataset(Dataset):
         self.paired_image_files = [image_prefix_to_file[p] for p in paired_prefixes]
         self.paired_mask_files = [label_prefix_to_file[p] for p in paired_prefixes]
         self.paired_unique_ids = paired_prefixes  # string unique id for each sample
+        logger.info(f"Paired samples found: {len(self.paired_unique_ids)}")
+        if len(self.paired_unique_ids) == 0:
+            logger.warning("No pairs found. Check that files follow '<uid>_<site>_<date>_{image|mask}.tif' and directories are correct.")
 
     def __len__(self):
         return len(self.paired_image_files)
