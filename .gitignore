@@ -206,5 +206,5 @@ secrets/earthengine-key.json
 .Rhistory
 data/labels/labeled_surveys/random_sample/images_districts_ag.csv
 
-.idea
-*/.idea
+.idea/*
+*/.idea/*
