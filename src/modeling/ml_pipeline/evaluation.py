@@ -2,16 +2,15 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.metrics import root_mean_squared_error, classification_report, mean_squared_error, mean_absolute_error
 import calendar
 import json
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from utils.utils import get_data_root
-from utils.utils import get_data_root
+import os
 import pandas as pd
 import numpy as np
 import os
 from itertools import product
 
-LABEL_CSV =  "/home/madhav/smallholder-irrigation-dataset/data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+
+
+LABEL_CSV =  "/home/waves/data/smallholder-irrigation-dataset/data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
 MULTI_CLASSES = ['Not irrigated','Small-scale','Tree crop','Industrial','Lawn','Covered']
 BINARY_CLASSES = ['Not irrigated','Irrigated']
@@ -95,20 +94,17 @@ def export_feature_importances(
         prefix: Optional filename prefix (e.g., "fold1_").
         num_bands: Optional int to explicitly set number of bands (overrides len(band_names) if provided).
     """
-    import numpy as _np
-    import pandas as _pd
-    import os as _os
 
     # Ensure output directory exists
-    _os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     # 1) Get raw feature importances as a 1D array
     if hasattr(clf, "estimators_"):
         # MultiOutputClassifier: average per-target importances
-        all_imp = _np.array([est.feature_importances_ for est in clf.estimators_])
+        all_imp = np.array([est.feature_importances_ for est in clf.estimators_])
         importances = all_imp.mean(axis=0)
     else:
-        importances = _np.asarray(getattr(clf, "feature_importances_", None))
+        importances = np.asarray(getattr(clf, "feature_importances_", None))
         if importances is None:
             raise ValueError("Provided model does not expose feature_importances_.")
 
@@ -142,7 +138,7 @@ def export_feature_importances(
     expected_len = num_bands * num_timesteps
     if len(importances) < expected_len:
         # pad with zeros (some estimators may drop constant features)
-        importances = _np.concatenate([importances, _np.zeros(expected_len - len(importances))])
+        importances = np.concatenate([importances, np.zeros(expected_len - len(importances))])
         print(f"[WARNING] Importances shorter than expected; padded with zeros to {expected_len}.")
     elif len(importances) > expected_len:
         print(f"[WARNING] Importances longer than expected ({len(importances)}>{expected_len}); truncating.")
@@ -151,7 +147,7 @@ def export_feature_importances(
     # 5) Construct feature grid names and DataFrame
     feature_names = [f"{band_names[b]}_t{t+1}" for t in range(num_timesteps) for b in range(num_bands)]
 
-    df = _pd.DataFrame({
+    df = pd.DataFrame({
         "feature": feature_names,
         "importance": importances
     })
@@ -163,9 +159,9 @@ def export_feature_importances(
     agg_time = df.groupby("time_step", as_index=False)["importance"].sum().sort_values("time_step")
 
     # 7) Save CSVs
-    detailed_csv = _os.path.join(out_dir, f"{prefix}feature_importance_detailed.csv")
-    band_csv = _os.path.join(out_dir, f"{prefix}feature_importance_by_band.csv")
-    time_csv = _os.path.join(out_dir, f"{prefix}feature_importance_by_time.csv")
+    detailed_csv = os.path.join(out_dir, f"{prefix}feature_importance_detailed.csv")
+    band_csv = os.path.join(out_dir, f"{prefix}feature_importance_by_band.csv")
+    time_csv = os.path.join(out_dir, f"{prefix}feature_importance_by_time.csv")
     df.to_csv(detailed_csv, index=False)
     agg_band.to_csv(band_csv, index=False)
     agg_time.to_csv(time_csv, index=False)

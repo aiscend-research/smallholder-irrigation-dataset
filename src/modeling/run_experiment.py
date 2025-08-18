@@ -7,11 +7,8 @@ from datetime import datetime
 from joblib import dump
 import numpy as np
 from tqdm import tqdm
-import pandas as pd
 from ml_pipeline.ml_model import train_model
-from ml_pipeline.evaluation import model_metrics
-from ml_pipeline.evaluation import metrics_over_factors, plot_metrics_over_factors
-from ml_pipeline.evaluation import export_feature_importances, plot_band_time_importance
+from ml_pipeline.evaluation import model_metrics, metrics_over_factors, plot_metrics_over_factors, export_feature_importances, plot_band_time_importance
 import glob  # Place at the top of the file if not already present
 from ml_pipeline.visualization import plot_ml_predictions
 from custom_dataset import MultiTemporalCropDataset, SHORT_BAND_NAMES
@@ -21,7 +18,6 @@ from ml_pipeline.build_features import (
     time_interpolate_features,
 )
 from ml_pipeline.evaluation import plot_band_importance, plot_time_importance
-from pathlib import Path
 
 
 # --- Suppress Rasterio NotGeoreferencedWarning if present ---
@@ -50,7 +46,6 @@ def run_experiment(exp_cfg, config_path):
     experiment_dir = os.path.join(base_dir, run_name)
 
     if os.path.exists(experiment_dir):
-        print(f"Skipping: {run_name} already exists.")
         return
 
     os.makedirs(experiment_dir, exist_ok=True)
@@ -114,55 +109,53 @@ def run_experiment(exp_cfg, config_path):
 
             print("Flattening train dataset...")
             X_train, y_train = flatten_dataset(train_dataset)
-            print(f"[DEBUG] X_train shape: {X_train.shape}")
-            print(f"[DEBUG] y_train shape: {y_train.shape}")
-            if X_train.size:
-                print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
-                print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
-            else:
-                print("[DEBUG] X_train is EMPTY")
-            if y_train.size:
-                print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
-                print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
-            else:
-                print("[DEBUG] y_train is EMPTY")
-            print(f"After flatten_dataset(train_dataset):")
-            print(f"  X_train shape: {X_train.shape}")
-            print(f"  y_train shape: {y_train.shape}")
-            if isinstance(X_train, np.ndarray):
-                print(f"  X_train dtype: {X_train.dtype}")
-            if isinstance(y_train, np.ndarray):
-                print(f"  y_train dtype: {y_train.dtype}")
-            print(f"  X_train min: {np.nanmin(X_train) if X_train.size > 0 else 'EMPTY'}")
-            print(f"  X_train max: {np.nanmax(X_train) if X_train.size > 0 else 'EMPTY'}")
-            print(f"  y_train min: {np.nanmin(y_train) if y_train.size > 0 else 'EMPTY'}")
-            print(f"  y_train max: {np.nanmax(y_train) if y_train.size > 0 else 'EMPTY'}")
+            # if X_train.size:
+            #     print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
+            #     print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
+            # else:
+            #     print("[DEBUG] X_train is EMPTY")
+            # if y_train.size:
+            #     print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
+            #     print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
+            # else:
+            #     print("[DEBUG] y_train is EMPTY")
+            # print(f"After flatten_dataset(train_dataset):")
+            # print(f"  X_train shape: {X_train.shape}")
+            # print(f"  y_train shape: {y_train.shape}")
+            # if isinstance(X_train, np.ndarray):
+            #     print(f"  X_train dtype: {X_train.dtype}")
+            # if isinstance(y_train, np.ndarray):
+            #     print(f"  y_train dtype: {y_train.dtype}")
+            # print(f"  X_train min: {np.nanmin(X_train) if X_train.size > 0 else 'EMPTY'}")
+            # print(f"  X_train max: {np.nanmax(X_train) if X_train.size > 0 else 'EMPTY'}")
+            # print(f"  y_train min: {np.nanmin(y_train) if y_train.size > 0 else 'EMPTY'}")
+            # print(f"  y_train max: {np.nanmax(y_train) if y_train.size > 0 else 'EMPTY'}")
 
             print("Flattening val dataset...")
             X_val, y_val = flatten_dataset(val_dataset)
-            print(f"[DEBUG] X_val shape: {X_val.shape}")
-            print(f"[DEBUG] y_val shape: {y_val.shape}")
-            if X_val.size:
-                print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
-                print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
-            else:
-                print("[DEBUG] X_val is EMPTY")
-            if y_val.size:
-                print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
-                print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
-            else:
-                print("[DEBUG] y_val is EMPTY")
-            print(f"After flatten_dataset(val_dataset):")
-            print(f"  X_val shape: {X_val.shape}")
-            print(f"  y_val shape: {y_val.shape}")
-            if isinstance(X_val, np.ndarray):
-                print(f"  X_val dtype: {X_val.dtype}")
-            if isinstance(y_val, np.ndarray):
-                print(f"  y_val dtype: {y_val.dtype}")
-            print(f"  X_val min: {np.nanmin(X_val) if X_val.size > 0 else 'EMPTY'}")
-            print(f"  X_val max: {np.nanmax(X_val) if X_val.size > 0 else 'EMPTY'}")
-            print(f"  y_val min: {np.nanmin(y_val) if y_val.size > 0 else 'EMPTY'}")
-            print(f"  y_val max: {np.nanmax(y_val) if y_val.size > 0 else 'EMPTY'}")
+            # print(f"[DEBUG] X_val shape: {X_val.shape}")
+            # print(f"[DEBUG] y_val shape: {y_val.shape}")
+            # if X_val.size:
+            #     print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
+            #     print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
+            # else:
+            #     print("[DEBUG] X_val is EMPTY")
+            # if y_val.size:
+            #     print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
+            #     print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
+            # else:
+            #     print("[DEBUG] y_val is EMPTY")
+            # print(f"After flatten_dataset(val_dataset):")
+            # print(f"  X_val shape: {X_val.shape}")
+            # print(f"  y_val shape: {y_val.shape}")
+            # if isinstance(X_val, np.ndarray):
+            #     print(f"  X_val dtype: {X_val.dtype}")
+            # if isinstance(y_val, np.ndarray):
+            #     print(f"  y_val dtype: {y_val.dtype}")
+            # print(f"  X_val min: {np.nanmin(X_val) if X_val.size > 0 else 'EMPTY'}")
+            # print(f"  X_val max: {np.nanmax(X_val) if X_val.size > 0 else 'EMPTY'}")
+            # print(f"  y_val min: {np.nanmin(y_val) if y_val.size > 0 else 'EMPTY'}")
+            # print(f"  y_val max: {np.nanmax(y_val) if y_val.size > 0 else 'EMPTY'}")
 
 
             # Preserve full label tensors for evaluation; use only first two bands for training/inference
@@ -315,16 +308,6 @@ def run_experiment(exp_cfg, config_path):
                 os.makedirs(fi_plot_dir, exist_ok=True)
                 # --- Export feature importances to CSV subfolder ---
                 export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv_dir)
-                # Back-compat: if exporter still wrote into experiment_dir, move them under csv/
-                legacy_csvs = glob.glob(os.path.join(experiment_dir, "feature_importance*.csv"))
-                for src in tqdm(legacy_csvs, desc="Reorganizing FI CSVs", unit="file"):
-                    dst = os.path.join(fi_csv_dir, os.path.basename(src))
-                    try:
-                        if os.path.abspath(src) != os.path.abspath(dst):
-                            shutil.move(src, dst)
-                            print(f"Moved legacy CSV {src} -> {dst}")
-                    except Exception as e:
-                        print(f"[WARN] Could not move CSV {src} -> {dst}: {e}")
                 # Discover CSVs from the csv/ folder
                 fi_csvs = glob.glob(os.path.join(fi_csv_dir, "feature_importance*.csv"))
                 print(f"Found feature importance CSV files: {fi_csvs}")

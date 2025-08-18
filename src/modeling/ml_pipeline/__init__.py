@@ -1,2 +1,2 @@
-#rf_pipeline/__init__.py
+#ml_pipeline/__init__.py
 #Empty file

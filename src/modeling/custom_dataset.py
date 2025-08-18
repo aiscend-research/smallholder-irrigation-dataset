@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import torch
 import glob
 import numpy as np
@@ -8,8 +7,10 @@ import logging
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap
 import rasterio
+
+### --- HELPER FUNCTIONS for Band Selection --- ###
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ S2_BAND_NAMES = [
 #Short bsnd names
 SHORT_BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
-
 # Band name to index mapping (both short code and full name)
 S2_BAND_NAME_TO_INDEX = {}
 for i, name in enumerate(S2_BAND_NAMES):
@@ -60,13 +60,13 @@ def get_band_indices(band_names):
             raise ValueError(f"Band identifier must be str or int, got {type(b)}")
     return indices
 
+### --- CUSTOM DATASET CLASS --- ###
+
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None):
+    def __init__(self, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None):
         """
         Args:
-            image_dir (str): Path to directory containing Sentinel-2 input .tif files.
-            label_dir (str): Path to directory containing label .tif files.
-            data_dir (str, optional): If provided, overrides both image_dir and label_dir.
+            data_dir (str): Path to directory containing both image and label files.
             label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
             image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
                 If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
@@ -79,13 +79,9 @@ class MultiTemporalCropDataset(Dataset):
         Note:
             If data_dir is provided, it overrides both image_dir and label_dir.
         """
-        # Override image_dir and label_dir if data_dir is provided
-        if data_dir is not None:
-            image_dir = data_dir
-            label_dir = data_dir
 
-        self.image_dir = image_dir
-        self.label_dir = label_dir
+        self.data_dir = data_dir
+
         if not image_band_names:
             self.image_band_names = S2_BAND_NAMES
         else:
@@ -94,16 +90,16 @@ class MultiTemporalCropDataset(Dataset):
             self.label_bands = list(range(1, 9))
         else:
             self.label_bands = label_bands
+
+        #Default values for num_bands and num_timesteps    
         self.num_bands = 14
         self.num_timesteps = 37
         self.image_band_count = self.num_bands * self.num_timesteps
         self.time_step_selection = time_step_selection
 
         # Find files according to the new naming convention: *_image.tif and *_mask.tif
-        # (also accept legacy *_label.tif if present)
-        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
-        mask_files  = sorted(glob.glob(os.path.join(self.label_dir, "*_mask.tif")))
-        legacy_label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
+        image_files = sorted(glob.glob(os.path.join(self.data_dir, "*_image.tif")))
+        mask_files  = sorted(glob.glob(os.path.join(self.data_dir, "*_mask.tif")))
 
         # The prefix is everything before the suffix
         def extract_prefix(filename, suffix):
@@ -116,14 +112,10 @@ class MultiTemporalCropDataset(Dataset):
             if prefix:
                 image_prefix_to_file[prefix] = f
 
-        # Prefer new *_mask.tif; fall back to legacy *_label.tif when present
+        # Only use *_mask.tif files for labels
         label_prefix_to_file = {}
         for f in mask_files:
             prefix = extract_prefix(f, "_mask.tif")
-            if prefix and prefix not in label_prefix_to_file:
-                label_prefix_to_file[prefix] = f
-        for f in legacy_label_files:
-            prefix = extract_prefix(f, "_label.tif")
             if prefix and prefix not in label_prefix_to_file:
                 label_prefix_to_file[prefix] = f
 
@@ -143,15 +135,6 @@ class MultiTemporalCropDataset(Dataset):
         image_path = self.paired_image_files[idx]
         mask_path = self.paired_mask_files[idx]
         unique_id = self.paired_unique_ids[idx]
-
-        # Load metadata (assume .json with same basename as image)
-        sample_name = os.path.splitext(os.path.basename(image_path))[0]
-        json_path = os.path.join(self.image_dir, f"{sample_name}.json")
-        if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
 
         # Load Sentinel-2 time series stack
         with rasterio.open(image_path) as src:
@@ -173,6 +156,7 @@ class MultiTemporalCropDataset(Dataset):
                     raise ValueError(f"time_step_selection element must be int or list, got {type(sel)}")
             image_tensor = torch.cat(selected, dim=1)  # (C, S, H, W) where S=len(selection)
 
+        # --- Band selection --- 
         if self.image_band_names is not None:
             band_indices = get_band_indices(self.image_band_names)
             image_tensor = image_tensor[band_indices, ...]
@@ -190,7 +174,6 @@ class MultiTemporalCropDataset(Dataset):
         return {
             "image": image_tensor,
             "mask": mask_tensor,
-            "metadata": metadata,
             "id": unique_id
         }
 
@@ -339,12 +322,10 @@ class MultiTemporalCropDataset(Dataset):
 # sample = ds[0]
 # img = sample["image"]
 # mask = sample["mask"]
-# meta = sample["metadata"]
 
 # print("First sample shapes:")
 # print("  image:", img.shape)  # (14, 37, H, W)
 # print("  mask:", mask.shape)  # (8, H, W) or (H, W)
-# print("  metadata:", meta)
 
 # # Plot first band at t=0
 # print("\nShow all bands at first timepoint:")

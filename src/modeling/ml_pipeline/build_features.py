@@ -1,16 +1,6 @@
 import os
-# def test_flatten_dataset_with_dummy_data():
-#     import torch
-#
-# NOTE: Setting per_band_time=True in flatten_dataset will flatten as one row per (band, time, pixel),
-# filtering pixels only at that specific (band, time, pixel) location (not across all bands/times).
-
 import numpy as np
 from tqdm import tqdm
-import torch
-
-from sklearn.impute import SimpleImputer, KNNImputer
-from typing import Optional, Tuple
 
 # --- Time interpolation imputer (temporal) ---
 def _time_interp_row(row: np.ndarray, T: int, C: int, fill_constant: float = 0.0) -> np.ndarray:
@@ -45,7 +35,7 @@ def time_interpolate_features(X: np.ndarray, T: int, C: int, fill_constant: floa
         out[i] = _time_interp_row(X[i], T, C, fill_constant=fill_constant)
     return out
 
-def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_time=False):
+def flatten_dataset(dataset, per_band_time=False):
     """
     Flattens a multi-temporal crop dataset for ML.
     If per_band_time=True, returns one row per (band, time, pixel).
@@ -54,16 +44,13 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
         dataset: PyTorch Dataset where each sample is a dict:
             'image': Tensor (C, T, H, W)
             'mask' : Tensor (H, W) or (B, H, W)
-        ignore_value_in_image: Optional value in image pixels to ignore (e.g., -9999 for clouds)
-        debug: If True, print per-sample debug info.
         per_band_time: If True, use new flattening logic (one row per (band, time, pixel))
     Returns:
         X: np.ndarray
         y: np.ndarray
     Notes:
-        - Only filters out pixels for which the value at (band, time, x, y) is NaN/ignore_value_in_image.
+        - Only filters out pixels for which the value at (band, time, x, y) is NaN.
     """
-    import torch
 
     if not per_band_time:
         # Original logic (row per x,y)
@@ -85,13 +72,9 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
             image = image.permute(2, 3, 1, 0)  # (H, W, T, C)
             image_flat = image.reshape(H * W, T * C)
 
-            # Replace -9999 with nan by default
+            # Replace -9999 with nan
             image_flat = image_flat.clone()
             image_flat[image_flat == -9999] = float('nan')
-
-            # Optionally mask out ignore_value_in_image (e.g. -9999)
-            if ignore_value_in_image is not None:
-                image_flat[image_flat == ignore_value_in_image] = float('nan')
 
             # Handle mask: always return all bands
             if mask.ndim == 2:
@@ -134,7 +117,7 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
     # New logic: per (band, time, pixel)
     X_list = []
     y_list = []
-    for idx, sample in enumerate(tqdm(dataset, desc="Flattening per-band-time")):
+    for sample in enumerate(tqdm(dataset, desc="Flattening per-band-time")):
         image = sample['image']  # (C, T, H, W)
         mask = sample['mask']    # (H, W) or (B, H, W)
 
@@ -152,8 +135,6 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
                 band_time_pixels = image_np[c, t]    # (H, W)
                 # Replace -9999 with nan by default
                 band_time_pixels = np.where(band_time_pixels == -9999, np.nan, band_time_pixels)
-                if ignore_value_in_image is not None:
-                    band_time_pixels = np.where(band_time_pixels == ignore_value_in_image, np.nan, band_time_pixels)
                 band_time_pixels = band_time_pixels.reshape(-1)  # (N,)
 
                 # For each mask band
