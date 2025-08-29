@@ -1,102 +1,152 @@
-
 ## Overview
-This folder contains a machine learning pipeline for running experiments on multi-temporal satellite imagery. The dataset format is the TerraTorch (TorchGeo-style) format.
 
-## Warning
-The pipeline is specifically designed for the multi-temporal-crop-dataset as used by terratorch, so it may not work for other datasets. This sample dataset is currently located in the cluster under the path `/home/waves/data/smallholder-irrigation-dataset/data/modeling/test_data`. Code in the modeling folder has not been updated to run with this file path.
+This folder contains a **machine learning pipeline for running experiments on multi-temporal Sentinel-2 satellite imagery** for irrigation classification. The pipeline is built for a specific dataset structure—each sample consists of a `.tif` image file, a corresponding `.tif` mask file, and a `.json` metadata file, with support for spatial-aware data splitting and 8-band irrigation label structure.
 
-## About the test dataset
-The test dataset is from one of the example multi-temporal-crop datasets used by terratorch. Can be found at (https://huggingface.co/datasets/ibm-nasa-geospatial/multi-temporal-crop-classification). 
+---
 
-## Structure
+## Dataset Structure
+
+- **Images:** Each `.tif` image contains 14 spectral bands × 37 time steps (total 518 bands per sample).
+- **Masks:** Each `.tif` mask contains 8 bands representing different irrigation classification targets.
+- **Metadata:** Each `.json` file contains location and temporal information.
+- **File Naming:** Consistent convention `{unique_id}_{site_id}_{date}_{type}.tif`
+
+### 8-Band Irrigation Label Structure
+- **Band 1**: Per-pixel irrigation type classification (0-5)
+- **Band 2**: Per-pixel irrigation presence (0-1) 
+- **Bands 3-7**: Binary uncertainty explanation masks
+- **Band 8**: Irrigation certainty score (0-4)
+
+Example layout:
 ```
-├── run_experiment.py          # Entry point to run an experiment
-├── final_test.py              # Entry point to evaluate a best model's performance to the test dataset (in progress)
-├── experiments.yaml           # Specify experiment details
-├── custom_dataset.py          # Custom dataset class
-├── custom_datamodule.py       # Custom datamodule class
-├── README.md                  # This file
-├── ml_pipeline/               # Core ML pipeline modules
-│   ├── __init__.py            # Makes ml_pipeline a Python package
-│   ├── build_features.py      # Data loading and flattening
+data/modeling/
+├── 1_5168346_2023.09.06_image.tif
+├── 1_5168346_2023.09.06_label.tif
+├── 1_5168346_2023.09.06_image.json
+└── ...
+```
+
+---
+
+## Repository Structure
+
+```
+├── run_experiment.py          # Main experiment runner (config-driven)
+├── final_test.py              # (WIP) Test a final/best model
+├── experiment.yaml            # Config file for experiments
+├── custom_dataset.py          # PyTorch Dataset for multi-temporal Sentinel-2 data
+├── ml_pipeline/               # Core ML pipeline
+│   ├── data_splitting.py      # Spatial-aware data splitting
+│   ├── build_features.py      # Data flattening
 │   ├── ml_model.py            # Model training
-│   ├── evaluation.py          # Model prediction and metrics
-│   └── visualization.py       # Plotting predictions and confusion matrix
+│   ├── evaluation.py          # Model metrics
+│   └── visualization.py       # Visualize predictions
 ```
-### Machine Learning Pipeline:
 
-#### `build_features.py`
-`get_datamodule(dataset_path)`: Loads a TerraTorch-style datamodule from the given path.
-`flatten_dataset(dataset)`: Converts multi-dimensional satellite imagery into a **tabular format** where each pixel becomes a row with multi-temporal features. This is so that you can run classical ML models like Random Forests. Flattening removes spatial context, so this is intended for pixel-wise classification only.
+## Pipeline Components
 
- #### `ml_model.py`
- Contains a `train_randomForest` function that uses sklearn to train a randomForest model on training data. Contains a similar function for a gradient boosted model.
+### Core Components
+- **custom_dataset.py:**  
+  Loads `.tif` image/mask files, reshapes to (14, 37, H, W) for images, (8, H, W) for masks. Supports band selection and metadata extraction.
 
- #### `evaluation.py`
- Contains the `model_metrics` function that use sklearn to provide metrics such as the accuracy and the f1 score.
+- **data_splitting.py:**  
+  `IrrigationDataSplitter` class for spatial-aware data splitting with stratified sampling. Prevents spatial data leakage and maintains class balance. 
 
- #### `visualization.py`
- `print_confusion_matix(y_true, y_pred)`: Displays a confusion matrix using `matplotlib`.
-`plot_ml_predictions(dataset, clf, class_names, colors)`: Visualizes the model’s pixel-wise predictions vs ground truth masks for selected samples, using color-coded masks. Class colors and names are dataset-dependent and should be passed in as arguments. This function will have to changed depending on the dataset.
+- **build_features.py:**  
+  `get_datasets()` factory function creates train/val/test datasets. Supports different label band configurations.
+  `flatten_dataset(dataset)` flattens all pixels and time/band features into a 2D table for ML 
+  (one row per pixel).
 
-### Custom Dataset and Datamodule
+- **ml_model.py:**  
+  Model training (Random Forest, Gradient Boosting) and inference. Supports multi-label (multi-band) targets.
 
-`custom_dataset.py`
-The MultiTemporalBarebonesDataset is a custom PyTorch Dataset designed to load and process multi-temporal Sentinel-2 .tif files for crop classification or land cover tasks. Each .tif file is expected to contain a stacked array of 481 image bands representing 37 time steps × 13 features (Sentinel-2 bands and vegetation indices). An optional irrigation mask can be extracted from an additional band if present.
+- **evaluation.py:**  
+  Reports per-band accuracy and F1 scores for irrigation classification.
 
-Features:
-	•	Automatically reshapes image data into the format (13, 37, H, W) for modeling.
-	•	Includes a built-in method to visualize temporal progression for any spectral band.
+- **visualization.py:**  
+  Plots model predictions and ground truth masks for selected samples.
 
-Example Output:
-	•	image: Tensor of shape (13, 37, H, W)
-	•	mask: Tensor of shape (H, W)
+### Experiment Runner
+- **run_experiment.py:**  
+  Main experiment runner that loads configuration from YAML and orchestrates the entire pipeline.
 
-Potential future additions include:
-   * Metadata Handling
-   * Preprocessing and Transformation
-      - Reshaping, normalization, transforms, NaN values
-   * Label Adjustments
-   * Sample Enrichment
-    - adding more details 
+## Data Splitting
 
-`custom_datamodule.py`
-Class that helps to combine multiple dataset samples, and create train/val/test spilts. Inherits from PyTorch Lightening for more flexiblity. 
+The pipeline supports cross-validation experiments with file-list based organization (no file duplication). Each experiment can have its own CV structure.
 
-### Running Experiments Using the ML Pipeline
+### CV Folder Structure
+```
+data/modeling/splits/
+└── irrigation_cv/                    # ← cv_structure_name
+    ├── train/
+    │   ├── fold_1/
+    │   │   ├── inner_train/
+    │   │   │   └── train_files.txt  # ← File list for training
+    │   │   └── inner_val/
+    │   │       └── val_files.txt    # ← File list for validation
+    │   ├── fold_2/
+    │   │   ├── inner_train/
+    │   │   │   └── train_files.txt
+    │   │   └── inner_val/
+    │   │       └── val_files.txt
+    │   └── ...
+    ├── test/
+    │   └── test_files.txt           # ← Held-out test set
+    └── cv_metadata.json             # ← CV metadata
+```
 
-This pipeline is designed to make it easy to run, track, and reproduce machine learning experiments. The workflow is configuration-driven, so you can specify all experiment details in a YAML file and run them with a single script.
+### Different Experiment Configurations
 
-#### **Configuration: `experiment.yaml`**
+For different experiments (e.g., different bands), use different `cv_structure_name`:
 
-- This file contains all the settings for a single experiment, including:
-  - **Experiment name** (for tracking)
-  - **Data settings** (train/validation/test subset sizes)
-  - **Model type** (e.g., `random_forest`, `gradient_boosting`)
-  - **Model hyperparameters** (grouped by model type)
-  - **Visualization options** (class colors, number of samples to plot)
-  - **Output directory** (where results will be saved)
+```yaml
+# Experiment 1: Band 2 (irrigation presence)
+name: "rf_band2_experiment"
+data:
+  cv_structure_name: "band2_cv"
+  label_bands: [2]
 
-The `experiment.yaml` file is listed in the `.gitignore`, so users may tweak it at their will for a given experiment, but the default configurations will remain untouched. 
+# Experiment 2: Band 1 (irrigation type)  
+name: "rf_band1_experiment"
+data:
+  cv_structure_name: "band1_cv"
+  label_bands: [1]
+```
 
-#### **Running Experiments: `run_experiment.py`**
+This creates separate CV structures:
+```
+data/modeling/splits/
+├── band2_cv/              # For irrigation presence experiments
+└── band1_cv/              # For irrigation type experiments
+```
 
-- This script loads the experiment configuration from `experiment.yaml` and runs the full ML pipeline. Dataset path is specified in this file. 
+---
 
-#### **Expected Outputs**
+## Experiment Workflow
 
-For each experiment run, a new subfolder is created in the specified output directory (default: `./experiments`). The name of the folder corresponds to the experiment name as specified in `experiment.yaml, concatenated with a datetime stamp. 
+1. **Configure experiment in `experiment.yaml`.**
+2. **Run**  
+   ```
+   python run_experiment.py
+   ```
+3. **Results**  
+   For each experiment, a new subfolder in `./experiments/` contains:
+   - Copy of the experiment config
+   - Trained model (`model.pkl`)
+   - Evaluation metrics (`metrics.json`)
+   - Plots (`visualization.png`)
+   - Log file (`run.log`)
 
-This folder contains:
-- `experiment.yaml`: A copy of the experiment configurations used to devise this experiment
-- `model.pkl`: The trained model, serialized with joblib.
-- `metrics.json`: Evaluation metrics (accuracy, F1 score, etc.) on the validation set.
-- `visualization.png`: Plots of model predictions and confusion matrices.
-- `config.yaml`: A snapshot of the exact configuration used for this run.
-- `run.log`: A complete log of the experiment, including all print statements and errors.
+---
 
-This structure ensures that every experiment is fully reproducible: you can always trace back from results to the exact code and configuration used.
+## Usage Notes
 
-#### **Best Practices**
+- `-9999` in images and `-1` in masks are treated as invalid/masked pixels and are ignored.
+- Georeferencing is not required for ML (Rasterio warnings are safe to ignore).
 
-- **Commit your code before running experiments.** This ensures you can always match results to the code that produced them. 
+## Best Practices
+
+- Commit code before running experiments.
+- Use file lists for cross-validation to save disk space.
+- Choose appropriate bands based on your classification task.
+- Validate data splits visually using the built-in visualization tools.
