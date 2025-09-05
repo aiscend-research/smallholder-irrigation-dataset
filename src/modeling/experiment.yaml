@@ -1,4 +1,9 @@
+# NOTE: Data splitting logic is disabled for this test config. Manual split in use.
 name: "rf_baseline"
+
+imputation:
+  mode: none   # options: none, drop, temporal
+  fill_constant: 0.0   # used only for temporal
 
 data:
   # Cross-validation configuration
@@ -65,5 +70,8 @@ model:
 visualization:
   num_samples: 2
 
+evaluation:
+  compute_detailed_metrics: true
+
 output:
-  base_dir: "./experiments"
+  base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

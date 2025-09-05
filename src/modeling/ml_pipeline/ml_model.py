@@ -5,7 +5,8 @@ def train_random_forest(X_train, y_train, n_estimators=100, random_state=42):
     base_model = RandomForestClassifier(
         n_estimators=n_estimators,
         random_state=random_state,
-        n_jobs=-1
+        n_jobs=-1,
+        class_weight='balanced_subsample'
     )
     if y_train.ndim == 1 or (y_train.ndim == 2 and y_train.shape[1] == 1):
         clf = base_model

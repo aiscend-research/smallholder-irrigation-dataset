@@ -176,6 +176,7 @@ data/sampling/samples/*
 !data/sampling/samples/random_sample/*
 !data/targeting/
 data/targeting/features/
+data/modeling
 
 *.sh
 
@@ -186,6 +187,7 @@ src/modeling/prototyping.ipynb
 .ipynb_checkpoints/
 *.tar.gz
 *.zip
+!data/labels/labeled_surveys/random_sample/raw/*.zip
 *.pkl
 models/
 experiments/
@@ -202,3 +204,7 @@ secrets/earthengine-key.json
 
 .RData
 .Rhistory
+data/labels/labeled_surveys/random_sample/images_districts_ag.csv
+
+.idea/*
+*/.idea/*

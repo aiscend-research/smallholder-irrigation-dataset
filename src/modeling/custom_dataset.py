@@ -32,6 +32,9 @@ S2_BAND_NAMES = [
     "SCL (Scene Classification Layer)"
 ]
 
+# Short band names
+SHORT_BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
+
 # Band name to index mapping (both short code and full name)
 S2_BAND_NAME_TO_INDEX = {}
 for i, name in enumerate(S2_BAND_NAMES):
@@ -57,11 +60,12 @@ def get_band_indices(band_names):
     return indices
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir, label_dir, label_bands=None, image_band_names=None, time_step_selection=None):
+    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
             label_dir (str): Path to directory containing label .tif files.
+            data_dir (str, optional): If provided, overrides both image_dir and label_dir.
             label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
             image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
                 If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
@@ -71,78 +75,65 @@ class MultiTemporalCropDataset(Dataset):
                 Example: [0, [1,2,3], 4] => output will have three time slices per band:
                     1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
 
-        This dataset finds all .tif files in image_dir and label_dir, extracts unique IDs from filenames
-        (for images: last underscore-separated field before '.tif'; for masks: first underscore-separated field),
-        and only keeps pairs that have both an image and a mask for the same unique ID.
-        It stores lists of paired image filenames, mask filenames, and integer unique IDs.
+        Note:
+            If data_dir is provided, it overrides both image_dir and label_dir.
 
-        When fetching a sample, returns a dict with:
-            "image": Tensor of shape (bands, timesteps, H, W)
-            "mask": Tensor of shape (B, H, W) or (H, W)
-            "metadata": metadata dict for the sample
+        Naming expected:
+            {unique_id}_image.tif
+            {unique_id}_label.tif
         """
+        # Override image_dir and label_dir if data_dir is provided
+        if data_dir is not None:
+            image_dir = data_dir
+            label_dir = data_dir
+
         self.image_dir = image_dir
         self.label_dir = label_dir
-        # Default image_band_names: all bands if None/empty
         if not image_band_names:
             self.image_band_names = S2_BAND_NAMES
         else:
             self.image_band_names = image_band_names
-        # Default label_bands: all 8 mask bands if None/empty
         if not label_bands:
             self.label_bands = list(range(1, 9))
         else:
             self.label_bands = label_bands
-        self.num_bands = 14  # 10 Sentinel-2 + NDVI + EVI + NDWI + SCL
+        self.num_bands = 14
         self.num_timesteps = 37
-        self.image_band_count = self.num_bands * self.num_timesteps  # = default: 518
+        self.image_band_count = self.num_bands * self.num_timesteps
         self.time_step_selection = time_step_selection
 
-        # Find all image and label .tif files
-        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*.tif")))
-        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*.tif")))
+        # === Integrated block (strict *_image.tif + *_label.tif) ===
+        # Find files according to the naming convention: *_image.tif and *_label.tif
+        image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
+        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))  # only label.tif
 
-        # Extract unique IDs for images: handle both old and new naming conventions
+        # Extract unique IDs for images: handle new standardized naming {base}_image.tif
         image_id_to_file = {}
         for f in image_files:
             base = os.path.splitext(os.path.basename(f))[0]
-            parts = base.split('_')
-            
-            # Handle new standardized naming: {base}_image.tif
             if base.endswith('_image'):
-                unique_id = base[:-6]  # Remove '_image' suffix
-            # Handle old naming: last underscore-separated field
-            elif len(parts) >= 2:
-                unique_id = parts[-1]
+                unique_id = base[:-6]  # strip '_image'
             else:
-                continue
-                
+                unique_id = base
             image_id_to_file[unique_id] = f
 
-        # Extract unique IDs for masks: handle both old and new naming conventions
+        # Extract unique IDs for labels: only *_label.tif supported
         mask_id_to_file = {}
         for f in label_files:
             base = os.path.splitext(os.path.basename(f))[0]
-            parts = base.split('_')
-            
-            # Handle new standardized naming: {base}_label.tif
             if base.endswith('_label'):
-                unique_id = base[:-6]  # Remove '_label' suffix
-            # Handle old naming: first underscore-separated field
-            elif len(parts) >= 1:
-                unique_id = parts[0]
+                unique_id = base[:-6]  # strip '_label'
             else:
-                continue
-                
+                unique_id = base
             mask_id_to_file[unique_id] = f
 
-        # Find intersection of IDs that have both image and mask (matching by unique_id)
+        # Intersect IDs so we only keep samples that have both image and label
         paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
-        
+
         logger.info(f"Found {len(image_files)} image files, {len(label_files)} label files")
         logger.info(f"Extracted {len(image_id_to_file)} image IDs, {len(mask_id_to_file)} label IDs")
         logger.info(f"Matched {len(paired_ids)} paired IDs")
-        
+
         self.paired_image_files = []
         self.paired_mask_files = []
         self.paired_unique_ids = []
@@ -150,6 +141,7 @@ class MultiTemporalCropDataset(Dataset):
             self.paired_image_files.append(image_id_to_file[uid])
             self.paired_mask_files.append(mask_id_to_file[uid])
             self.paired_unique_ids.append(int(uid) if uid.isdigit() else i)
+        # === End integrated block ===
 
     def __len__(self):
         return len(self.paired_image_files)
@@ -157,6 +149,7 @@ class MultiTemporalCropDataset(Dataset):
     def __getitem__(self, idx):
         image_path = self.paired_image_files[idx]
         mask_path = self.paired_mask_files[idx]
+        unique_id = self.paired_unique_ids[idx]
 
         # Load metadata (assume .json with same basename as image)
         sample_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -173,19 +166,13 @@ class MultiTemporalCropDataset(Dataset):
             image_tensor = torch.from_numpy(full_array).float()
             H, W = image_tensor.shape[1:]
             image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
-            
-            # Handle -9999 values (Sentinel-2 no-data) more carefully
-            # Instead of converting to NaN, we'll use a reasonable replacement value
-            # -9999 typically indicates no data, so we can replace with 0 or mean values
+
+            # Replace -9999 (no-data)
             if torch.any(image_tensor == -9999):
-                # Count how many -9999 values we have
                 invalid_count = torch.sum(image_tensor == -9999)
                 total_pixels = image_tensor.numel()
                 invalid_percentage = (invalid_count / total_pixels) * 100
-                
                 print(f"Sample {idx}: Found {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                
-                # Replace -9999 with 0 (or could use mean values per band)
                 image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
 
         # --- Time step selection/averaging ---
@@ -198,39 +185,35 @@ class MultiTemporalCropDataset(Dataset):
                     selected.append(image_tensor[:, sel, :, :].mean(dim=1, keepdim=True))  # (C, 1, H, W)
                 else:
                     raise ValueError(f"time_step_selection element must be int or list, got {type(sel)}")
-            image_tensor = torch.cat(selected, dim=1)  # (C, S, H, W) where S=len(selection)
+            image_tensor = torch.cat(selected, dim=1)  # (C, S, H, W)
 
         if self.image_band_names is not None:
             band_indices = get_band_indices(self.image_band_names)
             image_tensor = image_tensor[band_indices, ...]
 
-        # Load mask (single block, correct naming)
+        # Load mask/label
         with rasterio.open(mask_path) as label_src:
             mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
             mask_tensor = torch.from_numpy(mask_array).float()
-            
-            # Handle -9999 values in mask data as well
+
             if torch.any(mask_tensor == -9999):
                 invalid_count = torch.sum(mask_tensor == -9999)
                 total_pixels = mask_tensor.numel()
                 invalid_percentage = (invalid_count / total_pixels) * 100
-                
                 print(f"Sample {idx}: Mask has {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                
-                # Replace -9999 with 0 in mask
                 mask_tensor = torch.where(mask_tensor == -9999, torch.tensor(0.0), mask_tensor)
-            
-            # If only one band, squeeze to (H, W)
+
             if mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor[0]
 
         return {
             "image": image_tensor,
             "mask": mask_tensor,
-            "metadata": metadata
+            "metadata": metadata,
+            "id": unique_id
         }
 
-    @staticmethod 
+    @staticmethod
     def plot_mask_tensor(mask_tensor):
         band_titles = [
             "Band 1: Irrigation Type",
@@ -276,9 +259,8 @@ class MultiTemporalCropDataset(Dataset):
             ax.set_title(band_titles[i], fontsize=14)
             ax.axis('off')
 
-            # Place the legend to the right of each subplot
             ax.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(1.02, 0.5),
-                    borderaxespad=0., fontsize=10, frameon=False)
+                      borderaxespad=0., fontsize=10, frameon=False)
 
         plt.tight_layout()
         plt.subplots_adjust(wspace=0.4)
@@ -288,12 +270,11 @@ class MultiTemporalCropDataset(Dataset):
     def plot_all_bands_at_time(image_tensor, time_idx=0, band_names=None, band_cmaps=None):
         """
         Plot all 14 bands for a specific time index, each with a distinct colormap.
-
         Args:
             image_tensor: Tensor (14, 37, H, W)
             time_idx: Index of the timepoint to plot (0-based)
             band_names: List of 14 band names for titles
-            band_cmaps: List of 14 colormap names (e.g., ['Blues', 'Greens', ...])
+            band_cmaps: List of 14 colormap names
         """
         n_bands = image_tensor.shape[0]
         n_cols = 4
@@ -318,18 +299,15 @@ class MultiTemporalCropDataset(Dataset):
             ax.set_title(f"{band_names[b]} (t={time_idx})")
             ax.axis('off')
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        # Hide unused axes
         for ax in axes[n_bands:]:
             ax.axis('off')
         plt.tight_layout()
         plt.show()
-      
 
     @staticmethod
     def plot_band_over_time(image_tensor, band_idx=0, band_name=None, time_indices=None, band_names=S2_BAND_NAMES):
         """
         Plot one band (e.g. NDVI) for all 37 timepoints.
-
         Args:
             image_tensor: Tensor of shape (14, 37, H, W)
             band_idx: Which band to plot (0–13)
@@ -353,7 +331,6 @@ class MultiTemporalCropDataset(Dataset):
             ax.set_title(f"Time {t}")
             ax.axis('off')
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        # Hide unused axes
         for ax in axes[len(time_indices):]:
             ax.axis('off')
         plt.suptitle(f"{band_name or band_names[band_idx]} Over Time", fontsize=16)

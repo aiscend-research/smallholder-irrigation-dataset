@@ -6049,7 +6049,7 @@
         "day": 11,
         "year": 2018,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green;unclear signs of agriculture",
+        "uncertainty_explanation": "unclear signs of agriculture;only slightly green",
         "category": "small-scale"
       },
       "geometry": {
