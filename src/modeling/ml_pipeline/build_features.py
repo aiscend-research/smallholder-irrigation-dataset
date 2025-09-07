@@ -12,7 +12,7 @@ import torch
 from sklearn.impute import SimpleImputer, KNNImputer
 from typing import Optional, Tuple
 
-# --- Time interpolation imputer (temporal) ---
+# Time interpolation imputer
 def _time_interp_row(row: np.ndarray, T: int, C: int, fill_constant: float = 0.0) -> np.ndarray:
     """
     Reshape a 1D feature vector (length = T*C) to (T, C), linearly interpolate along time
@@ -31,7 +31,7 @@ def _time_interp_row(row: np.ndarray, T: int, C: int, fill_constant: float = 0.0
         elif m.sum() == 1:
             arr[:, c] = col[m][0]
         else:
-            arr[:, c] = np.interp(idx, idx[m], col[m])  # fills gaps; extends ends
+            arr[:, c] = np.interp(idx, idx[m], col[m]) 
     return arr.reshape(T * C)
 
 
@@ -89,23 +89,17 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
             image_flat = image_flat.clone()
             image_flat[image_flat == -9999] = float('nan')
 
-            # Optionally mask out ignore_value_in_image (e.g. -9999)
             if ignore_value_in_image is not None:
                 image_flat[image_flat == ignore_value_in_image] = float('nan')
 
-            # Handle mask: always return all bands
             if mask.ndim == 2:
                 mask_flat = mask.reshape(H * W, 1)  # (N, 1) for consistency
             else:
                 B = mask.shape[0]
                 mask_flat = mask.permute(1, 2, 0).reshape(H * W, B)  # (N, B)
 
-            # Validity: (debug) allow all pixels through for now
             mask_np = mask_flat.numpy()
             image_np = image_flat.numpy()
-            # mask_nan = np.isnan(mask_np)
-            # image_nan = np.isnan(image_np)
-            # valid = ~(np.any(mask_nan, axis=1) | np.any(image_nan, axis=1))
             valid = np.ones(mask_np.shape[0], dtype=bool)
 
             X_valid = image_np[valid]
@@ -131,7 +125,7 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
 
         return X, y
 
-    # New logic: per (band, time, pixel)
+    # per (band, time, pixel)
     X_list = []
     y_list = []
     
@@ -149,7 +143,6 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
         else:
             raise ValueError(f"Unexpected mask shape: {mask.shape}")
 
-        # Convert to numpy for easier handling
         image_np = image_flat.numpy()
         mask_np = mask_flat.numpy()
         
@@ -331,7 +324,6 @@ def flatten_dataset(dataset, ignore_value_in_image=None, debug=True, per_band_ti
 #     test_flatten_dataset_per_band_time_edge_cases()
 #     test_flatten_dataset_original_edge_cases()
 
-# --- NaN stats helpers ---
 def _write_nan_table_txt(path_txt: str, counts_ct: np.ndarray):
     """
     Save a pretty text table: one row per band, 37 integers per row (t0..t36).
@@ -366,7 +358,6 @@ def compute_nan_stats_for_dataset(dataset, out_dir: str, split_name: str = "trai
         os.makedirs(out_dir, exist_ok=True)
         return
 
-    # Infer C,T from the first sample
     first = dataset[0]
     C, T = int(first["image"].shape[0]), int(first["image"].shape[1])
 
@@ -384,5 +375,4 @@ def compute_nan_stats_for_dataset(dataset, out_dir: str, split_name: str = "trai
             uid_safe = str(uid).replace("/", "_")
             _save_nan_counts(out_dir, f"{split_name}_{uid_safe}", counts)
 
-    # Aggregate over the split
     _save_nan_counts(out_dir, f"{split_name}_AGGREGATE", agg)

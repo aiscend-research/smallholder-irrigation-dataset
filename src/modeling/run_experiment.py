@@ -200,7 +200,7 @@ def run_single_experiment(exp_cfg: dict, experiment_dir: str):
             save_fi = exp_cfg.get("model", {}).get("save_feature_importance", False)
             if save_fi and hasattr(clf, "estimators_"):
                 BAND_NAMES = ["B2","B3","B4","B5","B6","B7","B8","B8A","B11","B12","NDVI","EVI","NDWI","SCL"]
-                N_TIMESTEPS = 37  # TODO: adapt if your dataset differs
+                N_TIMESTEPS = 37 
                 fi_csv = os.path.join(experiment_dir, "feature_importance.csv")
                 export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv)
                 fi_png = os.path.join(experiment_dir, "band_time_importance.png")
@@ -274,7 +274,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
                 if d:
                     shutil.rmtree(d, ignore_errors=True)
 
-    # Aggregate CV metrics if available
+    # Aggregate CV metrics
     if results:
         metric_structure = results[0]["metrics"]
         summary = {"n_folds_completed": len(results), "fold_details": results}
@@ -311,9 +311,9 @@ def main():
     run_dir = os.path.join(out_root, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Copy the resolved config alongside the run for reproducibility
-    cfg_path = resolve_config_path(args.config)                      # ← resolved absolute path
-    shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))  # ← copy from cfg_path
+    # Copy the config
+    cfg_path = resolve_config_path(args.config)                      
+    shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))  
     fh = logging.FileHandler(os.path.join(run_dir, "run.log"), encoding="utf-8")
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

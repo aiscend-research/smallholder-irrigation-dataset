@@ -8,25 +8,25 @@ imputation:
 data:
   # Cross-validation configuration
   use_cross_validation: true  # Set to true for CV, false for single train/val
-  n_folds: 5                   # Number of CV folds (only used if use_cross_validation: true)
-  cv_structure_name: "band2_cv"  # Name for CV structure (only used if use_cross_validation: true)
+  n_folds: 5                   # Number of CV folds 
+  cv_structure_name: "band2_cv"  # Name for CV structure
   
   # Automatic data splitting configuration
   use_auto_splitting: true  # Enable automatic splitting
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
   data_dir: "data/modeling"
-  splits_dir: "data/modeling/splits"  # Where to save splits
+  splits_dir: "data/modeling/splits"  
   
   # Split parameters
   test_size: 0.2          # 20% for test
   val_size: 0.2           # 20% for validation
   stratification_band: 2   # Use irrigation presence for stratification
   min_samples_per_class: 5 # Minimum samples per class
-  random_state: 42        # For reproducible splits
+  random_state: 42      
   
   # Folder structure options
   create_folder_structure: true  # Create train/val/test folders
-  copy_files: false              # Use symlinks instead of copying (saves space)
+  copy_files: false              
   
   # Data processing
   label_bands: [2]      # Which label bands to use
@@ -40,25 +40,17 @@ data:
   #image_bands: ["EVI"] # e.g. ["B2", "B3"]
 
   # time_step_selection: Specify which time steps to use from the image tensor.
-  # For example:
-  #   [1, 6, 10]         # Select only time steps 1, 6, and 10, in that order.
-  #   [[1,10], 18, [36,37,1]]  # Create 3 output time bands:
-  #      - the first is the average of time steps 1 to 10 (inclusive),
-  #      - the second is just time step 18,
-  #      - the third is the average of time steps 36, 37, and 1.
-  # If not specified or set to null, all time steps will be used as-is.
   time_step_selection: null
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
   save_feature_importance: true  # If true, saves feature importance to CSV
-  # Only the hyperparameters corresponding to the above model type will be used in the experiment designation
-  hyperparameters: # ignored if not a random_forest model
+  hyperparameters: 
     random_forest: 
       n_estimators: 100
       random_state: 42
     
-    gradient_boosting: # ignored if not a gradient_boosting model
+    gradient_boosting: 
       n_estimators: 200
       learning_rate: 0.05
       max_depth: 4
