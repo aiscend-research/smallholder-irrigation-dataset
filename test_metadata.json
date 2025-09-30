@@ -1,0 +1,20 @@
+{
+  "filename": "s2_-15.0403_26.6874_2023-09-06_2023-09-06_off+0.tif",
+  "location": {
+    "lat": -15.040310386969027,
+    "lon": 26.687395420902995
+  },
+  "date_range": [
+    "2023-09-06",
+    "2023-09-06"
+  ],
+  "offset_days": 0,
+  "bands": [
+    "B2",
+    "B3",
+    "B4",
+    "B8"
+  ],
+  "description": "Sentinel-2 mosaic example",
+  "source": "Zambia_0.05_n_725-749.csv"
+}
