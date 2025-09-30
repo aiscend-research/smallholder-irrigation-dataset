@@ -7,9 +7,14 @@ from datetime import datetime
 from joblib import dump
 import numpy as np
 from tqdm import tqdm
+import pandas as pd
+from pathlib import Path
+
 from ml_pipeline.ml_model import train_model
-from ml_pipeline.evaluation import model_metrics, metrics_over_factors, plot_metrics_over_factors, export_feature_importances, plot_band_time_importance
-import glob  # Place at the top of the file if not already present
+from ml_pipeline.evaluation import model_metrics
+from ml_pipeline.evaluation import metrics_over_factors, plot_metrics_over_factors
+from ml_pipeline.evaluation import export_feature_importances, plot_band_time_importance
+import glob
 from ml_pipeline.visualization import plot_ml_predictions
 from custom_dataset import MultiTemporalCropDataset, SHORT_BAND_NAMES
 from ml_pipeline.build_features import (
@@ -19,23 +24,59 @@ from ml_pipeline.build_features import (
 )
 from ml_pipeline.evaluation import plot_band_importance, plot_time_importance
 
-
 # --- Suppress Rasterio NotGeoreferencedWarning if present ---
 import warnings
 try:
     from rasterio.errors import NotGeoreferencedWarning
-    warnings.filterwarnings(
-        "ignore",
-        category=NotGeoreferencedWarning,
-        module=r"rasterio"
-    )
+    warnings.filterwarnings("ignore", category=NotGeoreferencedWarning, module=r"rasterio")
 except Exception:
-    # rasterio might not be installed in some environments; ignore if import fails
     pass
+
+
+# ---------------- GRIT defaults + helpers ----------------
+# These are used ONLY if your YAML doesn't provide train/val dirs.
+GRIT_IMAGES_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/features"
+GRIT_MASKS_DIR  = "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
+GRIT_OUT_ROOT   = "/home/waves/data/smallholder-irrigation-dataset/data/modeling"
+
+def _resolve_path(p: str | os.PathLike | None) -> str:
+    if p is None:
+        return None  # let caller decide fallback
+    return str(Path(os.path.expandvars(os.path.expanduser(str(p)))).resolve())
+
+def _resolve_split_dirs(data_cfg: dict) -> tuple[str, str]:
+    """
+    Decide where to read train/val from.
+    Priority (for each): YAML 'train_dir'/'val_dir' -> GRIT_OUT_ROOT/train|val
+    """
+    train_dir = data_cfg.get("train_dir")
+    val_dir   = data_cfg.get("val_dir")
+
+    train_dir = _resolve_path(train_dir) if train_dir else os.path.join(GRIT_OUT_ROOT, "train")
+    val_dir   = _resolve_path(val_dir)   if val_dir   else os.path.join(GRIT_OUT_ROOT, "val")
+
+    # sanity checks with helpful hints
+    if not os.path.isdir(train_dir):
+        raise FileNotFoundError(
+            f"Train directory not found: {train_dir}\n"
+            f"Hint: On GRIT this is typically {GRIT_OUT_ROOT}/train. "
+            f"If you haven't created splits yet, run your splitter to populate "
+            f"'{GRIT_OUT_ROOT}/train' and '{GRIT_OUT_ROOT}/val' with "
+            "<uid>_<site>_<YYYY.MM.DD>_image.tif/json and ..._mask.tif/json\" files."
+        )
+    if not os.path.isdir(val_dir):
+        raise FileNotFoundError(
+            f"Val directory not found: {val_dir}\n"
+            f"Hint: On GRIT this is typically {GRIT_OUT_ROOT}/val. "
+            f"If you used a different location, set data.val_dir in experiment.yaml."
+        )
+    return train_dir, val_dir
+
 
 def load_experiment(config_path="experiment.yaml"):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
+
 
 def run_experiment(exp_cfg, config_path):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -43,9 +84,11 @@ def run_experiment(exp_cfg, config_path):
     run_name = f"{base_name}_{timestamp}"
 
     base_dir = exp_cfg["output"]["base_dir"]
+    base_dir = _resolve_path(base_dir)
     experiment_dir = os.path.join(base_dir, run_name)
 
     if os.path.exists(experiment_dir):
+        print(f"Skipping: {run_name} already exists.")
         return
 
     os.makedirs(experiment_dir, exist_ok=True)
@@ -66,10 +109,13 @@ def run_experiment(exp_cfg, config_path):
             print(f"[{timestamp}] Starting experiment: {base_name}")
             print(f"Saving outputs to: {experiment_dir}")
 
-            data_cfg   = exp_cfg.get("data", {})
-            train_dir  = data_cfg.get("train_dir") 
-            val_dir    = data_cfg.get("val_dir")   
+            data_cfg    = exp_cfg.get("data", {})
             image_bands = data_cfg.get("image_bands")
+
+            # --- GRIT-aware split directories (train/val) ---
+            train_dir, val_dir = _resolve_split_dirs(data_cfg)
+            print(f"Using train_dir: {train_dir}")
+            print(f"Using   val_dir: {val_dir}")
 
             if not image_bands:
                 BAND_NAMES = SHORT_BAND_NAMES
@@ -79,9 +125,11 @@ def run_experiment(exp_cfg, config_path):
             print("Loading train dataset...")
             train_dataset = MultiTemporalCropDataset(data_dir=train_dir, image_band_names=image_bands)
             print(f"Train dataset loaded. Samples: {len(train_dataset)}")
+
             print("Loading val dataset...")
             val_dataset = MultiTemporalCropDataset(data_dir=val_dir, image_band_names=image_bands)
             print(f"Val dataset loaded. Samples: {len(val_dataset)}")
+
             print(f"Loaded datasets -> train: {len(train_dataset)} | val: {len(val_dataset)}")
             if len(train_dataset) > 0:
                 sample_train = train_dataset[0]
@@ -109,54 +157,33 @@ def run_experiment(exp_cfg, config_path):
 
             print("Flattening train dataset...")
             X_train, y_train = flatten_dataset(train_dataset)
-            # if X_train.size:
-            #     print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
-            #     print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
-            # else:
-            #     print("[DEBUG] X_train is EMPTY")
-            # if y_train.size:
-            #     print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
-            #     print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
-            # else:
-            #     print("[DEBUG] y_train is EMPTY")
-            # print(f"After flatten_dataset(train_dataset):")
-            # print(f"  X_train shape: {X_train.shape}")
-            # print(f"  y_train shape: {y_train.shape}")
-            # if isinstance(X_train, np.ndarray):
-            #     print(f"  X_train dtype: {X_train.dtype}")
-            # if isinstance(y_train, np.ndarray):
-            #     print(f"  y_train dtype: {y_train.dtype}")
-            # print(f"  X_train min: {np.nanmin(X_train) if X_train.size > 0 else 'EMPTY'}")
-            # print(f"  X_train max: {np.nanmax(X_train) if X_train.size > 0 else 'EMPTY'}")
-            # print(f"  y_train min: {np.nanmin(y_train) if y_train.size > 0 else 'EMPTY'}")
-            # print(f"  y_train max: {np.nanmax(y_train) if y_train.size > 0 else 'EMPTY'}")
+            print(f"[DEBUG] X_train shape: {X_train.shape}")
+            print(f"[DEBUG] y_train shape: {y_train.shape}")
+            if X_train.size:
+                print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
+                print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
+            else:
+                print("[DEBUG] X_train is EMPTY")
+            if y_train.size:
+                print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
+                print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
+            else:
+                print("[DEBUG] y_train is EMPTY")
 
             print("Flattening val dataset...")
             X_val, y_val = flatten_dataset(val_dataset)
-            # print(f"[DEBUG] X_val shape: {X_val.shape}")
-            # print(f"[DEBUG] y_val shape: {y_val.shape}")
-            # if X_val.size:
-            #     print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
-            #     print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
-            # else:
-            #     print("[DEBUG] X_val is EMPTY")
-            # if y_val.size:
-            #     print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
-            #     print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
-            # else:
-            #     print("[DEBUG] y_val is EMPTY")
-            # print(f"After flatten_dataset(val_dataset):")
-            # print(f"  X_val shape: {X_val.shape}")
-            # print(f"  y_val shape: {y_val.shape}")
-            # if isinstance(X_val, np.ndarray):
-            #     print(f"  X_val dtype: {X_val.dtype}")
-            # if isinstance(y_val, np.ndarray):
-            #     print(f"  y_val dtype: {y_val.dtype}")
-            # print(f"  X_val min: {np.nanmin(X_val) if X_val.size > 0 else 'EMPTY'}")
-            # print(f"  X_val max: {np.nanmax(X_val) if X_val.size > 0 else 'EMPTY'}")
-            # print(f"  y_val min: {np.nanmin(y_val) if y_val.size > 0 else 'EMPTY'}")
-            # print(f"  y_val max: {np.nanmax(y_val) if y_val.size > 0 else 'EMPTY'}")
-
+            print(f"[DEBUG] X_val shape: {X_val.shape}")
+            print(f"[DEBUG] y_val shape: {y_val.shape}")
+            if X_val.size:
+                print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
+                print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
+            else:
+                print("[DEBUG] X_val is EMPTY")
+            if y_val.size:
+                print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
+                print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
+            else:
+                print("[DEBUG] y_val is EMPTY")
 
             # Preserve full label tensors for evaluation; use only first two bands for training/inference
             y_train_full = y_train.copy()
@@ -230,7 +257,6 @@ def run_experiment(exp_cfg, config_path):
                 json.dump(metrics, f, indent=2)
             print("Metrics:", metrics)
 
-
             # --- Save metrics over factors if configured ---
             comp_deatailed_cfg = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics")
             if comp_deatailed_cfg:
@@ -243,7 +269,6 @@ def run_experiment(exp_cfg, config_path):
                     # Try to get unique IDs from the validation dataset directly
                     raw_ids = list(getattr(val_dataset, "paired_unique_ids", []))
                     if not raw_ids or len(raw_ids) != n_imgs:
-                        # fallback to pulling from __getitem__ if needed
                         raw_ids = [val_dataset[i]["id"] for i in range(n_imgs)]
                     ids = np.array([int(str(s).split('_', 1)[0]) for s in raw_ids], dtype=int)
 
@@ -290,7 +315,6 @@ def run_experiment(exp_cfg, config_path):
                     print("Failed to compute metrics over factors:", e)
                     traceback.print_exc()
 
-
             num_samples = exp_cfg["visualization"].get("num_samples", 2)
             print("Generating prediction visualizations...")
             plot_ml_predictions(
@@ -316,14 +340,13 @@ def run_experiment(exp_cfg, config_path):
                 else:
                     band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
                     time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
-                    # Support either of these names for band-time details
                     band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
 
                     model_tag = model_type
                     if os.path.exists(band_csv):
                         png_path = os.path.join(fi_plot_dir, f"band_importance_{model_tag}.png")
                         try:
-                            plot_band_importance(band_csv, band_names= BAND_NAMES, save_path=png_path)
+                            plot_band_importance(band_csv, band_names=BAND_NAMES, save_path=png_path)
                             print(f"Plotted band importance to {png_path}")
                         except Exception as e:
                             print(f"Failed to plot band importance for {band_csv}: {e}")
@@ -344,8 +367,8 @@ def run_experiment(exp_cfg, config_path):
                         png_path = os.path.join(fi_plot_dir, f"band_time_importance_{model_tag}_T{N_TIMESTEPS}.png")
                         try:
                             plot_band_time_importance(
-                                importance_df = band_time_csv,
-                                band_names= BAND_NAMES,
+                                importance_df=band_time_csv,
+                                band_names=BAND_NAMES,
                                 num_timesteps=N_TIMESTEPS,
                                 save_path=png_path
                             )
@@ -363,6 +386,7 @@ def run_experiment(exp_cfg, config_path):
         finally:
             sys.stdout = original_stdout
             print(f"Logged output to {log_path}")
+
 
 if __name__ == "__main__":
     config_path = "experiment.yaml"
