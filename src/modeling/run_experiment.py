@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 # Utilities
 def resolve_path(path_str: str, base_dir: str | None = None) -> str:
     """Resolve a path relative to the project root if not absolute."""
+    if path_str is None:
+        return None
     if os.path.isabs(path_str):
         return path_str
     base = base_dir or ROOT
@@ -86,14 +88,14 @@ def load_stems(txt_path: str) -> list[str]:
 
 
 # Dataset helper
-def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list[int]):
+def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list[int], manifest_df: pd.DataFrame | None = None):
     """
-    Keep your downstream unchanged by staging only the requested files into a temp dir
-    (so MultiTemporalCropDataset can point to a single directory). This stages a *small
-    subset* instead of moving the whole dataset.
+    Stage only the requested files into a temporary directory so that
+    MultiTemporalCropDataset can point to a single folder. This copies a small
+    subset instead of moving the whole dataset.
 
-    If you later adapt MultiTemporalCropDataset to accept explicit file paths, you can
-    remove this staging and read directly from manifest.csv.
+    If you later adapt MultiTemporalCropDataset to accept explicit file paths,
+    you can remove this staging and read directly from manifest.csv.
     """
     import tempfile
 
@@ -101,8 +103,36 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
     temp_dir = Path(tempfile.mkdtemp(prefix="filtered_data_"))
     logger.info(f"[staging] {len(stems)} stems -> {temp_dir}")
 
+    # If a manifest is provided (from data_splitting), prefer its absolute paths (supports GRIT)
+    manifest_index = None
+    if manifest_df is not None and not manifest_df.empty:
+        manifest_index = manifest_df.set_index("stem")
+
     copied = 0
     for s in stems:
+        if manifest_index is not None and s in manifest_index.index:
+            row = manifest_index.loc[s]
+            img_path = Path(str(row["image_path"]))
+            lab_path = Path(str(row["label_path"]))
+            jsn_path = Path(str(row["json_path"])) if "json_path" in row and pd.notna(row["json_path"]) else None
+
+            missing = []
+            if not img_path.exists(): missing.append(str(img_path))
+            if not lab_path.exists(): missing.append(str(lab_path))
+            if jsn_path is not None and not jsn_path.exists():
+                logger.warning(f"[staging] json missing for {s}: {jsn_path}")
+
+            if not missing:
+                shutil.copy2(img_path, temp_dir / img_path.name)
+                shutil.copy2(lab_path, temp_dir / lab_path.name)
+                if jsn_path is not None and jsn_path.exists():
+                    shutil.copy2(jsn_path, temp_dir / jsn_path.name)
+                copied += 1
+                continue  # already copied from manifest; skip local fallback
+            else:
+                logger.warning(f"[staging] missing files for stem '{s}': {missing} -> trying local organized fallback")
+
+        # Local organized fallback (unchanged behavior)
         img = src / "organized" / "images" / f"{s}.tif"
         lab = src / "organized" / "labels" / f"{s.replace('_image', '_label')}.tif"
         jsn_label = src / "organized" / "metadata" / f"{s.replace('_image', '_label')}.json"
@@ -110,13 +140,13 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
         jsn = jsn_label if jsn_label.exists() else jsn_image
 
         for p in [img, lab, jsn]:
-            if not p.exists():
-                logger.warning(f"Missing companion file for stem '{s}': {p.name}")
+            if (p is None) or (not Path(p).exists()):
+                logger.warning(f"Missing companion file for stem '{s}': {getattr(p, 'name', p)}")
                 break
         else:
             shutil.copy2(img, temp_dir / img.name)
             shutil.copy2(lab, temp_dir / lab.name)
-            if jsn is not None and jsn.exists():
+            if jsn is not None and Path(jsn).exists():
                 shutil.copy2(jsn, temp_dir / jsn.name)
             copied += 1
 
@@ -139,6 +169,10 @@ def run_single_experiment(exp_cfg: dict, experiment_dir: str):
     csv_path = exp_cfg["data"].get("csv_path")
     csv_path = resolve_path(csv_path) if csv_path else None
 
+    # GRIT paths (optional). If provided, data_splitting will scan cloud folders and write cloud-absolute paths in manifest.csv
+    grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir")) if exp_cfg["data"].get("grit_images_dir") else None
+    grit_masks_dir  = resolve_path(exp_cfg["data"].get("grit_masks_dir"))  if exp_cfg["data"].get("grit_masks_dir")  else None
+
     # Build splits and get paths
     paths = prepare_and_export_splits(
         data_root=data_root,
@@ -148,19 +182,21 @@ def run_single_experiment(exp_cfg: dict, experiment_dir: str):
         test_size=exp_cfg["data"].get("test_size", 0.2),
         val_size=exp_cfg["data"].get("val_size", 0.2),
         min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
+        grit_images_dir=grit_images_dir,
+        grit_masks_dir=grit_masks_dir,
     )
 
     # Read lists
     train_stems = load_stems(paths["train_list"])
     val_stems = load_stems(paths["val_list"])
-    manifest = pd.read_csv(paths["manifest_csv"])
+    manifest = pd.read_csv(paths["manifest_csv"]) if Path(paths["manifest_csv"]).exists() else None
 
     logger.info(f"[splits] train={len(train_stems)}, val={len(val_stems)}")
 
     # Build datasets
     label_bands = exp_cfg["data"]["label_bands"]
-    train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands)
-    val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands) if val_stems else (None, None)
+    train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands, manifest_df=manifest)
+    val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest) if val_stems else (None, None)
 
     try:
         # Feature extraction
@@ -200,7 +236,7 @@ def run_single_experiment(exp_cfg: dict, experiment_dir: str):
             save_fi = exp_cfg.get("model", {}).get("save_feature_importance", False)
             if save_fi and hasattr(clf, "estimators_"):
                 BAND_NAMES = ["B2","B3","B4","B5","B6","B7","B8","B8A","B11","B12","NDVI","EVI","NDWI","SCL"]
-                N_TIMESTEPS = 37 
+                N_TIMESTEPS = 37
                 fi_csv = os.path.join(experiment_dir, "feature_importance.csv")
                 export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv)
                 fi_png = os.path.join(experiment_dir, "band_time_importance.png")
@@ -218,6 +254,10 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     csv_path = exp_cfg["data"].get("csv_path")
     csv_path = resolve_path(csv_path) if csv_path else None
 
+    # GRIT paths (optional)
+    grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir")) if exp_cfg["data"].get("grit_images_dir") else None
+    grit_masks_dir  = resolve_path(exp_cfg["data"].get("grit_masks_dir"))  if exp_cfg["data"].get("grit_masks_dir")  else None
+
     # Build lists
     paths = prepare_and_export_splits(
         data_root=data_root,
@@ -227,12 +267,18 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         test_size=exp_cfg["data"].get("test_size", 0.2),
         val_size=0.0,
         min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
+        grit_images_dir=grit_images_dir,
+        grit_masks_dir=grit_masks_dir,
     )
     cv_root = Path(paths["cv_dir"])
 
     label_bands = exp_cfg["data"]["label_bands"]
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
+
+    # Load CV manifest (contains cloud-absolute paths in GRIT mode)
+    cv_manifest = Path(paths["cv_manifest_csv"])
+    manifest = pd.read_csv(cv_manifest) if cv_manifest.exists() else None
 
     # Iterate folds
     fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
@@ -248,8 +294,8 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         val_stems = load_stems(str(va_txt))
         logger.info(f"[fold {fold_dir.name}] train={len(train_stems)} val={len(val_stems)}")
 
-        train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands)
-        val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands)
+        train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands, manifest_df=manifest)
+        val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest)
 
         try:
             X_train, y_train = flatten_dataset(train_ds)
@@ -311,9 +357,9 @@ def main():
     run_dir = os.path.join(out_root, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Copy the config
-    cfg_path = resolve_config_path(args.config)                      
-    shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))  
+    # Copy the config for reproducibility
+    cfg_path = resolve_config_path(args.config)
+    shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))
     fh = logging.FileHandler(os.path.join(run_dir, "run.log"), encoding="utf-8")
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

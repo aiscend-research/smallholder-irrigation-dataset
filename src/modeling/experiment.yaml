@@ -1,55 +1,52 @@
-# NOTE: Data splitting logic is disabled for this test config. Manual split in use.
+# NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
 name: "rf_baseline"
 
 imputation:
-  mode: none   # options: none, drop, temporal
-  fill_constant: 0.0   # used only for temporal
+  mode: none        # options: none, drop, temporal
+  fill_constant: 0.0
 
 data:
-  # Cross-validation configuration
-  use_cross_validation: true  # Set to true for CV, false for single train/val
-  n_folds: 5                   # Number of CV folds 
-  cv_structure_name: "band2_cv"  # Name for CV structure
-  
-  # Automatic data splitting configuration
-  use_auto_splitting: true  # Enable automatic splitting
+  # --- Cross-validation and automatic splitting ---
+  use_cross_validation: true     # true: run K-fold CV; false: single train/val
+  n_folds: 5
+  test_size: 0.2
+  val_size: 0.2
+  min_samples_per_class: 5
+  random_state: 42
+  # y_mode defaults to "csv_then_label" (left unspecified in the runner)
+
+  # --- Label CSV (if provided, used for stratification; otherwise fallback to label Band-2) ---
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+
+  # --- Output root (used to write splits and experiments) ---
   data_dir: "data/modeling"
-  splits_dir: "data/modeling/splits"  
-  
-  # Split parameters
-  test_size: 0.2          # 20% for test
-  val_size: 0.2           # 20% for validation
-  stratification_band: 2   # Use irrigation presence for stratification
-  min_samples_per_class: 5 # Minimum samples per class
-  random_state: 42      
-  
-  # Folder structure options
-  create_folder_structure: true  # Create train/val/test folders
-  copy_files: false              
-  
-  # Data processing
-  label_bands: [2]      # Which label bands to use
-  image_bands: ["EVI"]    # e.g. ["B3"]
-  
-  # Fallback manual configuration (if use_auto_splitting: false)
+
+  # --- GRIT cloud paths (NEW and important) ---
+  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features"
+  grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
+
+  # --- Label/Image bands used downstream ---
+  label_bands: [2]          # keep as-is; training/eval will read the specified label band(s)
+  image_bands: ["EVI"]      # set if your Dataset expects specific image bands
+
+  # ---- The following keys are not used by the integrated runner (safe to keep; ignored) ----
+  use_auto_splitting: true
+  splits_dir: "data/modeling/splits"
+  create_folder_structure: true
+  copy_files: false
+  # Manual file lists are only relevant if you disable automatic splitting
   train_files: ["site_-15.04_26.69_2023_1"]
   val_files: ["site_-15.04_26.69_2023_1"]
-  label_bands: [1,2]
-  image_bands: null
-  #image_bands: ["EVI"] # e.g. ["B2", "B3"]
-
-  # time_step_selection: Specify which time steps to use from the image tensor.
-  time_step_selection: null
+  # Avoid duplicating label_bands here; the one above is used
+  # time_step_selection: null
 
 model:
-  type: "random_forest" # options: "gradient_boosting", "random_forest"
-  save_feature_importance: true  # If true, saves feature importance to CSV
+  type: "random_forest" 
+  save_feature_importance: true
   hyperparameters: 
     random_forest: 
       n_estimators: 100
       random_state: 42
-    
     gradient_boosting: 
       n_estimators: 200
       learning_rate: 0.05

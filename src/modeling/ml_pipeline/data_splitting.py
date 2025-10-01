@@ -60,7 +60,18 @@ class IrrigationDataSplitter:
         r'^(?P<uid>\d+)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<kind>image|label)$'
     )
 
-    def __init__(self, data_root: str, csv_path: Optional[str] = None, random_state: int = 42):
+    # Additional regexes for GRIT raw file naming (images/features and masks/labels)
+    _GRIT_IMG_RE = re.compile(
+        r"^site_[^_]+_[^_]+_\d{4}_(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        re.IGNORECASE,
+    )
+    _GRIT_MASK_RE = re.compile(
+        r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)(_metadata)?\.(?P<ext>tif|json)$",
+        re.IGNORECASE,
+    )
+
+    def __init__(self, data_root: str, csv_path: Optional[str] = None, random_state: int = 42,
+                 grit_images_dir: Optional[str] = None, grit_masks_dir: Optional[str] = None):
         """
         Args:
             data_root: path to "data/modeling" (the folder that contains 'organized').
@@ -70,10 +81,16 @@ class IrrigationDataSplitter:
         self.csv_path = csv_path
         self.random_state = random_state
 
+        # Local organized structure (kept for backward compatibility)
         self.organized = self.data_root / "organized"
         self.images_dir = self.organized / "images"
         self.labels_dir = self.organized / "labels"
         self.metadata_dir = self.organized / "metadata"
+
+        # GRIT mode: if both directories are provided, we scan cloud folders instead of local organized/*
+        self._grit_images_dir = Path(grit_images_dir).resolve() if grit_images_dir else None
+        self._grit_masks_dir = Path(grit_masks_dir).resolve() if grit_masks_dir else None
+        self._grit_mode = (self._grit_images_dir is not None) and (self._grit_masks_dir is not None)
 
         self.df = None
         if csv_path and os.path.exists(csv_path):
@@ -85,6 +102,10 @@ class IrrigationDataSplitter:
         self._sites: List[str] = []
         self._site_to_files: Dict[str, List[str]] = {}
         self._y_by_site: Optional[Dict[str, int]] = None
+
+        # In GRIT mode we build a mapping from standardized stem -> absolute cloud paths
+        # { stem: {"image_path": Path, "label_path": Path, "json_path": Path} }
+        self._stem_to_paths: Dict[str, Dict[str, Path]] = {}
 
     def _parse_stem(self, stem: str) -> Optional[Dict[str, str]]:
         m = self._STEM_RE.match(stem)
@@ -98,7 +119,85 @@ class IrrigationDataSplitter:
         return gd
 
     def _scan(self):
-        """Scan organized/{images,labels,metadata} and index files by siteNumeric."""
+        """Scan either GRIT folders or local organized/{images,labels,metadata}; index files by siteNumeric."""
+        # GRIT branch: pair feature (image) files and mask (label) files by UID; standardize stems
+        if self._grit_mode:
+            imgs_by_uid: Dict[str, Dict[str, Path]] = {}
+            masks_by_uid: Dict[str, Dict[str, Optional[Path]]] = {}
+
+            # Scan features/images
+            if not self._grit_images_dir.exists():
+                logger.warning(f"GRIT images dir not found: {self._grit_images_dir}")
+            else:
+                for fp in self._grit_images_dir.iterdir():
+                    if not fp.is_file():
+                        continue
+                    m = self._GRIT_IMG_RE.match(fp.name)
+                    if not m:
+                        continue
+                    uid = m.group("uid")
+                    ext = m.group("ext").lower()
+                    rec = imgs_by_uid.setdefault(uid, {"tif": None, "json": None})
+                    if ext == "tif":
+                        rec["tif"] = fp
+                    elif ext == "json":
+                        rec["json"] = fp
+
+            # Scan masks/labels
+            if not self._grit_masks_dir.exists():
+                logger.warning(f"GRIT masks dir not found: {self._grit_masks_dir}")
+            else:
+                for fp in self._grit_masks_dir.iterdir():
+                    if not fp.is_file():
+                        continue
+                    m = self._GRIT_MASK_RE.match(fp.name)
+                    if not m:
+                        continue
+                    uid = m.group("uid")
+                    site = m.group("site")
+                    date = m.group("date")
+                    ext = m.group("ext").lower()
+                    rec = masks_by_uid.setdefault(uid, {"site": site, "date": date, "tif": None, "json": None})
+                    if ext == "tif":
+                        rec["tif"] = fp
+                    elif ext == "json":
+                        rec["json"] = fp
+
+            # Pair image/mask by UID and build standardized stems: {uid}_{site}_{YYYY.MM.DD}_image
+            by_site: Dict[str, List[str]] = defaultdict(list)
+            self._stem_to_paths.clear()
+
+            for uid, img_rec in imgs_by_uid.items():
+                mrec = masks_by_uid.get(uid)
+                if not mrec:
+                    continue
+                if not img_rec.get("tif") or not img_rec.get("json"):
+                    continue
+                if not mrec.get("tif") or not mrec.get("json"):
+                    continue
+
+                site = str(mrec["site"])
+                date = str(mrec["date"])
+                stem_image = f"{uid}_{site}_{date}_image"
+
+                by_site[site].append(stem_image)
+                self._stem_to_paths[stem_image] = {
+                    "image_path": img_rec["tif"],
+                    # Use mask tif as label_path; this aligns with downstream expectations
+                    "label_path": mrec["tif"],
+                    # Choose the image JSON as metadata path (you can switch to mask JSON if preferred)
+                    "json_path": img_rec["json"],
+                }
+
+            self._site_to_files = {k: v for k, v in by_site.items()}
+            self._sites = sorted(self._site_to_files.keys())
+
+            if not self._sites:
+                logger.warning("No paired (image, mask) found under GRIT directories")
+
+            return  # End GRIT branch
+
+        # Local organized structure branch (unchanged)
         imgs = list(self.images_dir.glob("*_image.tif"))
         lbls = list(self.labels_dir.glob("*_label.tif"))
         jsons = list(self.metadata_dir.glob("*.json"))
@@ -115,7 +214,7 @@ class IrrigationDataSplitter:
             site = parts["site"]
             by_site[site].append(stem)
 
-            # simple consistency check
+            # Simple consistency check
             if stem.replace("_image", "_label") not in have_lbl:
                 logger.warning(f"Missing label tif for: {stem}")
 
@@ -159,20 +258,33 @@ class IrrigationDataSplitter:
                     y[site] = 0
                     continue
 
-                found_any = False
+                # In GRIT mode, read label_path from self._stem_to_paths.
+                # Otherwise, read from local organized/labels.
                 for stem in self._site_to_files.get(site, []):
-                    lbl_path = (self.labels_dir / f"{stem.replace('_image', '_label')}.tif")
-                    if not lbl_path.exists():
-                        continue
                     try:
-                        with rasterio.open(lbl_path) as ds:
-                            band2 = ds.read(2)
-                            found_any = True
-                            if (band2 > 0).any():
-                                y[site] = 1
-                                break
+                        if self._grit_mode:
+                            rec = self._stem_to_paths.get(stem)
+                            if not rec or not rec.get("label_path") or not Path(rec["label_path"]).exists():
+                                continue
+                            with rasterio.open(rec["label_path"]) as ds:
+                                band2 = ds.read(2)
+                                if (band2 > 0).any():
+                                    y[site] = 1
+                                    break
+                        else:
+                            lbl_path = (self.labels_dir / f"{stem.replace('_image', '_label')}.tif")
+                            if not lbl_path.exists():
+                                continue
+                            with rasterio.open(lbl_path) as ds:
+                                band2 = ds.read(2)
+                                if (band2 > 0).any():
+                                    y[site] = 1
+                                    break
                     except Exception:
+                        # On any read error, continue scanning other stems of the same site
                         continue
+
+                # Default to 0 if nothing set
                 if site not in y:
                     y[site] = 0
             else:
@@ -342,7 +454,7 @@ class IrrigationDataSplitter:
                 }
             cv_meta.append(meta)
 
-        # Save manifest.csv for all used stems
+        # Save manifest.csv for all used stems (paths are cloud absolute paths in GRIT mode)
         used_list = list(used)
         manifest = self._make_manifest_df(used_list)
         try:
@@ -366,13 +478,24 @@ class IrrigationDataSplitter:
             if not m:
                 continue
             gd = m.groupdict()
-            rows.append({
-                "stem": stem,
-                "image_path": str((self.images_dir / f"{stem}.tif").resolve()),
-                "label_path": str((self.labels_dir / f"{stem.replace('_image', '_label')}.tif").resolve()),
-                "json_path":  str((self.metadata_dir / f"{stem}.json").resolve()),
-                "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
-            })
+
+            if self._grit_mode and stem in self._stem_to_paths:
+                rec = self._stem_to_paths[stem]
+                rows.append({
+                    "stem": stem,
+                    "image_path": str(Path(rec["image_path"]).resolve()),
+                    "label_path": str(Path(rec["label_path"]).resolve()),
+                    "json_path":  str(Path(rec["json_path"]).resolve()),
+                    "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
+                })
+            else:
+                rows.append({
+                    "stem": stem,
+                    "image_path": str((self.images_dir / f"{stem}.tif").resolve()),
+                    "label_path": str((self.labels_dir / f"{stem.replace('_image', '_label')}.tif").resolve()),
+                    "json_path":  str((self.metadata_dir / f"{stem}.json").resolve()),
+                    "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
+                })
         return pd.DataFrame(rows)
 
     def _write_lists(self, output_dir: str, train: List[str], val: List[str], test: List[str], metadata: Dict) -> Dict:
@@ -401,7 +524,9 @@ def prepare_and_export_splits(data_root: str,
                               n_splits: int = 5,
                               test_size: float = 0.2,
                               val_size: float = 0.2,
-                              min_samples_per_class: int = 5) -> Dict:
+                              min_samples_per_class: int = 5,
+                              grit_images_dir: Optional[str] = None,
+                              grit_masks_dir: Optional[str] = None) -> Dict:
     """
     Export both one-shot split and CV lists under data_root/organized/splits.
     Returns a dict with useful paths for downstream training.
@@ -413,7 +538,9 @@ def prepare_and_export_splits(data_root: str,
     one_shot_dir.mkdir(parents=True, exist_ok=True)
     cv_dir.mkdir(parents=True, exist_ok=True)
 
-    splitter = IrrigationDataSplitter(str(data_root), csv_path=csv_path)
+    splitter = IrrigationDataSplitter(str(data_root), csv_path=csv_path,
+                                      grit_images_dir=grit_images_dir,
+                                      grit_masks_dir=grit_masks_dir)
     # one-shot
     one = splitter.export_split_lists(
         output_dir=str(one_shot_dir),
