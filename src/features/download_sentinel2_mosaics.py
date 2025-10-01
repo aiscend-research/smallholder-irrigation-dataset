@@ -40,7 +40,7 @@ from src.utils.utils import load_config, find_project_root
 from src.utils.geometries import get_ee_bounding_box
 
 config = load_config()
-bucket = config["earthengine"]["bucket_name"] 
+bucket = config["earthengine"]["bucket_name"]
 ee_key = os.path.join(project_root, config["earthengine"]["service_account_key"])
 fs = gcsfs.GCSFileSystem(token=ee_key, project="smallholder-irr")
 
@@ -48,7 +48,7 @@ LABEL_CSV    = os.path.join(project_root, "data/labels/labeled_surveys/random_sa
 DOWNLOAD_DIR = os.path.join(project_root, "data/features")
 TMP_DIR      = os.path.join(DOWNLOAD_DIR, "_tmp_tif")
 
-# Concurrency across rowss
+# Concurrency across rows
 MAX_PARALLEL_ROWS = int(os.environ.get("MAX_PARALLEL_ROWS", "1"))
 # how many EE exports may be RUNNING at once
 MAX_IN_FLIGHT_EXPORTS = int(os.environ.get("MAX_IN_FLIGHT_EXPORTS", "10"))
@@ -72,7 +72,7 @@ USE_SERVER_MASKED = True
 USE_QA60_IN_MASK  = True
 
 DROP_BY_MASK_FRAC = True        # soft-drop step if NO_DATA fraction too high
-MASK_FRAC_THRESH  = 0.80        # threshold on fraction of NO_DATA pixels in AFTER SCL
+MASK_FRAC_THRESH  = 0.80        # threshold on fraction of NO_DATA pixels AFTER SCL
 
 # Server-side mask tuning
 W_S2C, W_THICK, W_THIN = 0.6, 0.3, 0.1
@@ -254,7 +254,7 @@ def build_weighted_scl(raw_toa: ee.Image,
     scl = ee.Image(7).where(cloud, 9).where(cirrus, 10)
     return scl.toUint16()
 
-# Export utilities 
+# Export utilities
 def _inflight_exports() -> int:
     try:
         tasks = ee.data.getTaskList()
@@ -415,7 +415,7 @@ def _wipe_slice_to_nodata():
     """Return a full-slice array (14,H,W) filled with NO_DATA."""
     return np.full((len(FINAL_BANDS), 100, 100), NO_DATA, dtype=np.int16)
 
-# Main stack builder 
+# Main stack builder
 def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datetime):
     if REQUIRE_VERSION_TAG and (VERSION_TAG is None or VERSION_TAG.strip() == ""):
         raise RuntimeError("VERSION_TAG must be set (bump it for each full run).")
@@ -429,7 +429,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     region = get_ee_bounding_box(lat, lon)
 
     # Submit exports (skip if both files already exist)
-    task_records = []   
+    task_records = []
     for start, end in windows:
         s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
         base = f"{site_root}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
@@ -448,7 +448,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
         if t_un: task_records.append((t_un, "unmasked", base, False))
         if EXPORT_BOTH and t_ms: task_records.append((t_ms, "masked", base, False))
 
-    # Wait for submitted tasks 
+    # Wait for submitted tasks
     final_states = {}  # (base, kind) -> "COMPLETED"/...
     with ThreadPoolExecutor(max_workers=8) as ex:
         futures = {}
@@ -492,8 +492,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     # Download only visible ones
     os.makedirs(TMP_DIR, exist_ok=True)
     def _download(gs_path: str, local_path: str):
-        os.makedirs(os.path.dirname(local_path), exist_ok=True
-                    )
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
         fs.get(gs_path, local_path)
 
     with ThreadPoolExecutor(max_workers=16) as ex:
@@ -504,8 +503,8 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             except Exception as e:
                 logging.error(f"[DOWNLOAD] {e}")
 
-    # Build stacks
-    stack_after, stack_before, meta_list = [], [], []
+    # Build masked stack
+    stack_after, meta_list = [], []
     empty_window_count = 0
     ref_crs = ref_transform = None
 
@@ -515,11 +514,10 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
         un_path = os.path.join(TMP_DIR, f"{base}.tif")
         ms_path = os.path.join(TMP_DIR, f"{base}_masked.tif")
 
-        # Missing both → write an empty slice
+        # If we couldn't download anything for this window → write an empty slice
         if not os.path.exists(un_path):
             empty_window_count += 1
-            stack_before.append(_wipe_slice_to_nodata())
-            stack_after .append(_wipe_slice_to_nodata())
+            stack_after.append(_wipe_slice_to_nodata())
             meta_list.append({
                 "date_range": [s, e],
                 "cloud_fraction": 1.0,
@@ -529,14 +527,11 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
                 "mask_mode": "server" if (USE_SERVER_MASKED and EXPORT_BOTH) else "local",
                 "mean_ndvi_after_mask": NO_DATA,
                 "mean_evi_after_mask":  NO_DATA,
-                "mean_ndwi_after_mask": NO_DATA,
-                "mean_ndvi_before_mask": NO_DATA,
-                "mean_evi_before_mask":  NO_DATA,
-                "mean_ndwi_before_mask": NO_DATA
+                "mean_ndwi_after_mask": NO_DATA
             })
             continue
 
-        # BEFORE (unmasked)
+        # Read the unmasked (needed for reference/CRS and local fallback)
         with rasterio.open(un_path) as src:
             if ref_crs is None:
                 ref_crs = src.crs
@@ -564,12 +559,8 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
         ], axis=0).astype(np.int16)
 
         ndvi_un, evi_un, ndwi_un = calculate_indices(img10_un)
-        before_slice = np.concatenate(
-            (img10_un, ndvi_un[None], evi_un[None], ndwi_un[None], scl_un[None]), axis=0
-        ).astype(np.int16)
-        stack_before.append(before_slice)
 
-        # AFTER
+        # AFTER (masked) from server export if available; otherwise local fallback
         if USE_SERVER_MASKED and EXPORT_BOTH and os.path.exists(ms_path):
             with rasterio.open(ms_path) as srcm:
                 cube_ms = srcm.read().astype(np.int16)
@@ -592,7 +583,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
                 for b in FINAL_BANDS[:10]
             ], axis=0).astype(np.int16)
 
-            # force reflectance NO_DATA wherever SCL==NO_DATA 
+            # Force reflectance NO_DATA wherever SCL==NO_DATA
             img10_ms = np.where(scl_ms[None, :, :] == NO_DATA, NO_DATA, img10_ms)
 
             ndvi_ms, evi_ms, ndwi_ms = calculate_indices(img10_ms)
@@ -602,15 +593,14 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             after_slice = np.concatenate(
                 (img10_ms, ndvi_ms[None], evi_ms[None], ndwi_ms[None], scl_ms[None]), axis=0
             ).astype(np.int16)
-            dropped = False
 
-            # SOFT DROP: wipe the whole step if too blank, but keep index
             if DROP_BY_MASK_FRAC and (masked_fraction >= MASK_FRAC_THRESH):
                 after_slice = _wipe_slice_to_nodata()
-                dropped = True
+
+            mask_mode = "server"
 
         else:
-            # Local fallback (rare)
+            # Local fallback: derive a mask from SCL
             classes = SCL_MASK_CLASSES
             combined_mask = np.isin(scl_un, classes)
             if MASK_DILATE_RADIUS > 0:
@@ -632,14 +622,15 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             after_slice = np.concatenate(
                 (img10_ms, ndvi_ms[None], evi_ms[None], ndwi_ms[None], scl_ms[None]), axis=0
             ).astype(np.int16)
-            dropped = False
+
             if DROP_BY_MASK_FRAC and (masked_fraction >= MASK_FRAC_THRESH):
                 after_slice = _wipe_slice_to_nodata()
-                dropped = True
+
+            mask_mode = "local"
 
         stack_after.append(after_slice)
 
-        # Per-window metrics
+        # Per-window metrics (after mask only)
         def _mean_no_data(a):
             m = a[a != NO_DATA]
             return float(m.mean()) if m.size else NO_DATA
@@ -650,16 +641,13 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             "masked_fraction": masked_fraction,    # fraction of NO_DATA in AFTER SCL
             "dropped_by_mask_frac": bool(DROP_BY_MASK_FRAC and (masked_fraction >= MASK_FRAC_THRESH)),
             "drop_thresh": MASK_FRAC_THRESH,
-            "mask_mode": "server" if (USE_SERVER_MASKED and EXPORT_BOTH and os.path.exists(ms_path)) else "local",
+            "mask_mode": mask_mode,                # "server" or "local"
             "mean_ndvi_after_mask": _mean_no_data(after_slice[10]),
             "mean_evi_after_mask":  _mean_no_data(after_slice[11]),
             "mean_ndwi_after_mask": _mean_no_data(after_slice[12]),
-            "mean_ndvi_before_mask": _mean_no_data(before_slice[10]),
-            "mean_evi_before_mask":  _mean_no_data(before_slice[11]),
-            "mean_ndwi_before_mask": _mean_no_data(before_slice[12]),
         })
 
-    return stack_after, stack_before, meta_list, empty_window_count, ref_crs, ref_transform
+    return stack_after, meta_list, empty_window_count, ref_crs, ref_transform
 
 # Row processing & I/O
 def process_row(row):
@@ -675,23 +663,20 @@ def process_row(row):
 
     site_id = f"site_{lat:.2f}_{lon:.2f}_{date.year}_{uid}"
 
-    stack_after, stack_before, meta_list, empty_count, ref_crs, ref_transform = \
+    stack_after, meta_list, empty_count, ref_crs, ref_transform = \
         retrieve_time_series_stack(site_id, lat, lon, date)
 
-    arr_after  = np.stack(stack_after)   # (T, 14, 100, 100)
-    arr_before = np.stack(stack_before)  # (T, 14, 100, 100)
+    arr_after = np.stack(stack_after)   # (T, 14, 100, 100)
     T, B, H, W = arr_after.shape
     expected_shape = (37, len(FINAL_BANDS), 100, 100)
-    if arr_after.shape != expected_shape or arr_before.shape != expected_shape:
-        raise ValueError(f"Unexpected shapes: after={arr_after.shape}, before={arr_before.shape}, expected={expected_shape}")
+    if arr_after.shape != expected_shape:
+        raise ValueError(f"Unexpected shape for masked stack: {arr_after.shape}, expected={expected_shape}")
 
-    reshaped_after  = arr_after.transpose(1, 0, 2, 3).reshape(T*B, H, W)
-    reshaped_before = arr_before.transpose(1, 0, 2, 3).reshape(T*B, H, W)
+    reshaped_after = arr_after.transpose(1, 0, 2, 3).reshape(T*B, H, W)
 
-    out_image_tif  = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_image.tif")
-    out_label_tif  = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_label.tif")
-    out_image_json = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_image.json")
-    out_label_json = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_label.json")
+    # Outputs: produce ONLY image.tif (masked imagery) + image.json
+    out_image_tif  = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_image.tif")   # masked imagery (AFTER)
+    out_image_json = os.path.join(DOWNLOAD_DIR, f"{file_prefix}_image.json")  # metadata for masked imagery
 
     write_crs = ref_crs if ref_crs is not None else None
     write_transform = ref_transform if ref_transform is not None else from_origin(
@@ -699,18 +684,13 @@ def process_row(row):
         lat + 0.0005, 0.0001, 0.0001
     )
 
-    # BEFORE
+    # Write MASKED imagery
     with rasterio.open(out_image_tif, 'w', driver='GTiff',
-                       height=H, width=W, count=T*B, dtype='int16',
-                       crs=write_crs, transform=write_transform, nodata=NO_DATA) as dst:
-        dst.write(reshaped_before.astype('int16'))
-
-    # AFTER
-    with rasterio.open(out_label_tif, 'w', driver='GTiff',
                        height=H, width=W, count=T*B, dtype='int16',
                        crs=write_crs, transform=write_transform, nodata=NO_DATA) as dst:
         dst.write(reshaped_after.astype('int16'))
 
+    # Metadata (after-mask only)
     base_meta = {
         "site_id": site_id,
         "lat": float(lat), "lon": float(lon),
@@ -723,16 +703,8 @@ def process_row(row):
         "export_root": EXPORT_ROOT
     }
 
-    windows_before, windows_after = [], []
+    windows_after = []
     for w in meta_list:
-        windows_before.append({
-            "date_range": w["date_range"],
-            "cloud_fraction": w["cloud_fraction"],
-            "mean_ndvi": w["mean_ndvi_before_mask"],
-            "mean_evi":  w["mean_evi_before_mask"],
-            "mean_ndwi": w["mean_ndwi_before_mask"],
-            "mask_mode": "before_mask"
-        })
         windows_after.append({
             "date_range": w["date_range"],
             "cloud_fraction": w["cloud_fraction"],
@@ -742,16 +714,13 @@ def process_row(row):
             "mean_ndvi": w["mean_ndvi_after_mask"],
             "mean_evi":  w["mean_evi_after_mask"],
             "mean_ndwi": w["mean_ndwi_after_mask"],
-            "mask_mode": w["mask_mode"]
+            "mask_mode": w["mask_mode"]           # "server" or "local"
         })
 
     with open(out_image_json, 'w') as f:
-        json.dump({**base_meta, "dataset": "before_mask", "windows": windows_before}, f, indent=2)
-    with open(out_label_json, 'w') as f:
         json.dump({**base_meta, "dataset": "after_mask", "windows": windows_after}, f, indent=2)
 
-    logging.info(f"[DONE] BEFORE: {out_image_tif} + {out_image_json}")
-    logging.info(f"[DONE] AFTER : {out_label_tif} + {out_label_json}")
+    logging.info(f"[DONE] IMAGE (masked): {out_image_tif} + {out_image_json}")
     return f"Processed row {uid} successfully"
 
 # Driver
