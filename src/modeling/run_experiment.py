@@ -166,22 +166,39 @@ def load_dataset_from_manifest(
     return dataset
 
 
-def flatten_dataset_from_tuples(dataset: list) -> tuple:
+def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> tuple:
     """
-    Flatten dataset from list of (image, label) tuples.
+    Flatten dataset from list of (image, label) tuples with optional pixel sampling.
     Converts spatial image data into feature vectors for ML.
+    
+    Args:
+        dataset: List of (image, label) tuples
+        pixels_per_image: Number of pixels to randomly sample per image.
+                         If None, uses all pixels.
     """
     X_list = []
     y_list = []
     
-    logger.info(f"[flatten] Flattening {len(dataset)} samples...")
+    sampling_msg = f"sampling {pixels_per_image} pixels per image" if pixels_per_image else "using ALL pixels"
+    logger.info(f"[flatten] Flattening {len(dataset)} samples ({sampling_msg})...")
     
     for idx, (image, label) in enumerate(dataset):
         n_bands, height, width = image.shape
-        X_sample = image.reshape(n_bands, -1).T
+        total_pixels = height * width
         
-        n_label_bands = label.shape[0]
-        y_sample = label.reshape(n_label_bands, -1).T
+        # Flatten to (n_pixels, n_bands)
+        X_full = image.reshape(n_bands, -1).T
+        y_full = label.reshape(label.shape[0], -1).T
+        
+        # Sample random pixels if requested and image is larger than desired sample size
+        if pixels_per_image and total_pixels > pixels_per_image:
+            sample_indices = np.random.choice(total_pixels, pixels_per_image, replace=False)
+            X_sample = X_full[sample_indices]
+            y_sample = y_full[sample_indices]
+        else:
+            # Use all pixels
+            X_sample = X_full
+            y_sample = y_full
         
         X_list.append(X_sample)
         y_list.append(y_sample)
@@ -193,8 +210,78 @@ def flatten_dataset_from_tuples(dataset: list) -> tuple:
     y = np.vstack(y_list)
     
     logger.info(f"[flatten] Final shapes: X={X.shape}, y={y.shape}")
+    if pixels_per_image and total_pixels > pixels_per_image:
+        logger.info(f"[flatten] Memory reduction: {total_pixels}px -> {pixels_per_image}px per image ({100*(1-pixels_per_image/total_pixels):.1f}% reduction)")
     
     return X, y
+
+
+def flatten_in_batches(dataset: list, batch_size: int, output_dir: str, pixels_per_image: int = None):
+    """
+    Flatten dataset in batches and save to disk, then return a memory-mapped array.
+    This allows using ALL pixels with ANY model without OOM errors.
+    
+    Args:
+        dataset: List of (image, label) tuples
+        batch_size: Number of images to process at once
+        output_dir: Directory to save temporary files
+        pixels_per_image: If specified, samples this many pixels per image
+    
+    Returns:
+        X, y as memory-mapped numpy arrays
+    """
+    import tempfile
+    
+    logger.info(f"[flatten_batches] Processing {len(dataset)} samples in batches of {batch_size}...")
+    
+    # First pass: calculate total size
+    total_pixels = 0
+    sample_image, sample_label = dataset[0]
+    n_bands = sample_image.shape[0]
+    n_label_bands = sample_label.shape[0]
+    
+    for image, label in dataset:
+        h, w = image.shape[1], image.shape[2]
+        img_pixels = h * w if not pixels_per_image else min(pixels_per_image, h * w)
+        total_pixels += img_pixels
+    
+    logger.info(f"[flatten_batches] Total pixels across all images: {total_pixels:,}")
+    logger.info(f"[flatten_batches] Estimated memory: {total_pixels * n_bands * 4 / 1e9:.2f} GB for features")
+    
+    # Create memory-mapped arrays (stored on disk, accessed like RAM)
+    X_path = os.path.join(output_dir, 'X_memmap.dat')
+    y_path = os.path.join(output_dir, 'y_memmap.dat')
+    
+    X_mmap = np.memmap(X_path, dtype='float32', mode='w+', shape=(total_pixels, n_bands))
+    y_mmap = np.memmap(y_path, dtype='float32', mode='w+', shape=(total_pixels, n_label_bands))
+    
+    # Second pass: fill arrays in batches
+    offset = 0
+    n_batches = (len(dataset) + batch_size - 1) // batch_size
+    
+    for batch_idx in range(n_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(dataset))
+        batch = dataset[start_idx:end_idx]
+        
+        X_batch, y_batch = flatten_dataset_from_tuples(batch, pixels_per_image=pixels_per_image)
+        
+        batch_size_actual = X_batch.shape[0]
+        X_mmap[offset:offset + batch_size_actual] = X_batch
+        y_mmap[offset:offset + batch_size_actual] = y_batch
+        offset += batch_size_actual
+        
+        logger.info(f"[flatten_batches] Processed batch {batch_idx+1}/{n_batches} ({end_idx}/{len(dataset)} images)")
+        
+        # Force write to disk and free memory
+        X_mmap.flush()
+        y_mmap.flush()
+        del X_batch, y_batch
+    
+    logger.info(f"[flatten_batches] Created memory-mapped arrays at {output_dir}")
+    logger.info(f"[flatten_batches] Arrays can be used like normal numpy arrays but stay on disk")
+    
+    return X_mmap, y_mmap
 
 
 def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
@@ -244,8 +331,17 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
         logger.warning(f"[viz] Visualization failed: {e}")
 
 
-def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_type, hyperparams, fold_name=""):
-    """Train and evaluate a single fold (or train/val split)."""
+def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_type, hyperparams, 
+                           fold_name="", pixels_per_image=None, use_memmap=False, batch_size=100, output_dir=None):
+    """
+    Train and evaluate a single fold.
+    
+    Args:
+        pixels_per_image: If None, uses all pixels. Otherwise samples this many per image.
+        use_memmap: If True, uses memory-mapped files for out-of-core processing (supports ALL models + ALL pixels)
+        batch_size: Number of images to process at once when using memmap
+        output_dir: Directory for temporary memmap files
+    """
     
     logger.info(f"[{fold_name}] Loading training data...")
     train_ds = load_dataset_from_manifest(train_stems, manifest, label_bands)
@@ -253,9 +349,24 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     logger.info(f"[{fold_name}] Loading validation data...")
     val_ds = load_dataset_from_manifest(val_stems, manifest, label_bands)
 
-    logger.info(f"[{fold_name}] Extracting features...")
-    X_train, y_train = flatten_dataset_from_tuples(train_ds)
-    X_val, y_val = flatten_dataset_from_tuples(val_ds)
+    if use_memmap:
+        # Memory-mapped approach: processes in batches, stores on disk, supports ALL models
+        logger.info(f"[{fold_name}] Using memory-mapped arrays (batch_size={batch_size})...")
+        
+        fold_dir = os.path.join(output_dir, f"memmap_{fold_name}")
+        os.makedirs(fold_dir, exist_ok=True)
+        
+        logger.info(f"[{fold_name}] Flattening training data in batches...")
+        X_train, y_train = flatten_in_batches(train_ds, batch_size, fold_dir, pixels_per_image)
+        
+        logger.info(f"[{fold_name}] Flattening validation data in batches...")
+        X_val, y_val = flatten_in_batches(val_ds, batch_size, fold_dir, pixels_per_image)
+        
+    else:
+        # Standard approach: load all into RAM at once
+        logger.info(f"[{fold_name}] Extracting features (loading into RAM)...")
+        X_train, y_train = flatten_dataset_from_tuples(train_ds, pixels_per_image=pixels_per_image)
+        X_val, y_val = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
 
     # Use only first 2 label bands
     y_train = y_train[:, :2]
@@ -267,6 +378,15 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     logger.info(f"[{fold_name}] Evaluating...")
     y_pred = clf.predict(X_val)
     metrics = model_metrics(y_pred, y_val)
+    
+    # Clean up memmap files after training
+    if use_memmap and output_dir:
+        try:
+            import shutil
+            shutil.rmtree(fold_dir, ignore_errors=True)
+            logger.info(f"[{fold_name}] Cleaned up temporary memmap files")
+        except Exception as e:
+            logger.warning(f"[{fold_name}] Failed to clean up memmap files: {e}")
 
     return clf, metrics, val_ds, len(train_ds), len(val_ds)
 
@@ -297,6 +417,18 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     label_bands = exp_cfg["data"]["label_bands"]
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
+    
+    # Memory management configuration
+    pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)  # None = use all pixels
+    use_memmap = exp_cfg["data"].get("use_memmap", False)  # Memory-mapped files for large datasets
+    batch_size = exp_cfg["data"].get("batch_size", 100)
+    
+    if use_memmap:
+        logger.info(f"[cv] Using memory-mapped arrays (batch_size={batch_size}) - ALL pixels, supports ALL models")
+    elif pixels_per_image:
+        logger.info(f"[cv] Using pixel sampling: {pixels_per_image} pixels per image")
+    else:
+        logger.info(f"[cv] Loading all data into RAM (may cause OOM on large datasets)")
 
     cv_manifest_path = Path(paths["cv_manifest_csv"])
     if not cv_manifest_path.exists():
@@ -322,7 +454,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         logger.info(f"[{fold_dir.name}] train={len(train_stems)}, val={len(val_stems)}")
 
         clf, metrics, val_ds, train_size, val_size = train_and_evaluate_fold(
-            train_stems, val_stems, manifest, label_bands, model_type, hyperparams, fold_name=fold_dir.name
+            train_stems, val_stems, manifest, label_bands, model_type, hyperparams, 
+            fold_name=fold_dir.name, pixels_per_image=pixels_per_image, 
+            use_memmap=use_memmap, batch_size=batch_size, output_dir=experiment_dir
         )
 
         results.append({
