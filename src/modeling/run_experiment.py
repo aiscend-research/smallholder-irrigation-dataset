@@ -99,6 +99,25 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
     """
     import tempfile
 
+    # --- NEW: prefer linking over copying for speed and zero extra storage ---
+    # Hard link (same filesystem) -> Symlink (cross-filesystem) -> Copy (fallback)
+    def _link_or_copy(src: Path, dst: Path):
+        """Create a lightweight view of src at dst. Prefer hardlink, then symlink, then copy."""
+        try:
+            if not dst.exists():
+                os.link(src, dst)       # fast, no extra space if same filesystem
+            return
+        except Exception:
+            pass
+        try:
+            if not dst.exists():
+                os.symlink(src, dst)    # works across filesystems, also no data copy
+            return
+        except Exception:
+            pass
+        if not dst.exists():
+            shutil.copy2(src, dst)      # final fallback to keep pipeline robust
+
     src = Path(source_dir)
     temp_dir = Path(tempfile.mkdtemp(prefix="filtered_data_"))
     logger.info(f"[staging] {len(stems)} stems -> {temp_dir}")
@@ -108,13 +127,15 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
     if manifest_df is not None and not manifest_df.empty:
         manifest_index = manifest_df.set_index("stem")
 
-    copied = 0
+    staged = 0
     for s in stems:
         if manifest_index is not None and s in manifest_index.index:
             row = manifest_index.loc[s]
             img_path = Path(str(row["image_path"]))
             lab_path = Path(str(row["label_path"]))
-            jsn_path = Path(str(row["json_path"])) if "json_path" in row and pd.notna(row["json_path"]) else None
+            # json can be missing; handle gracefully
+            jsn_val = row["json_path"] if "json_path" in row else ""
+            jsn_path = Path(str(jsn_val)) if isinstance(jsn_val, str) and jsn_val.strip() else None
 
             missing = []
             if not img_path.exists(): missing.append(str(img_path))
@@ -123,12 +144,12 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
                 logger.warning(f"[staging] json missing for {s}: {jsn_path}")
 
             if not missing:
-                shutil.copy2(img_path, temp_dir / img_path.name)
-                shutil.copy2(lab_path, temp_dir / lab_path.name)
+                _link_or_copy(img_path, temp_dir / img_path.name)
+                _link_or_copy(lab_path, temp_dir / lab_path.name)
                 if jsn_path is not None and jsn_path.exists():
-                    shutil.copy2(jsn_path, temp_dir / jsn_path.name)
-                copied += 1
-                continue  # already copied from manifest; skip local fallback
+                    _link_or_copy(jsn_path, temp_dir / jsn_path.name)
+                staged += 1
+                continue  # already staged via manifest; skip local fallback
             else:
                 logger.warning(f"[staging] missing files for stem '{s}': {missing} -> trying local organized fallback")
 
@@ -144,13 +165,13 @@ def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list
                 logger.warning(f"Missing companion file for stem '{s}': {getattr(p, 'name', p)}")
                 break
         else:
-            shutil.copy2(img, temp_dir / img.name)
-            shutil.copy2(lab, temp_dir / lab.name)
+            _link_or_copy(img, temp_dir / img.name)
+            _link_or_copy(lab, temp_dir / lab.name)
             if jsn is not None and Path(jsn).exists():
-                shutil.copy2(jsn, temp_dir / jsn.name)
-            copied += 1
+                _link_or_copy(jsn, temp_dir / jsn.name)
+            staged += 1
 
-    if copied == 0:
+    if staged == 0:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError("No valid triplets were staged for the requested stems.")
 
