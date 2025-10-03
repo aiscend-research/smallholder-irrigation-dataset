@@ -171,7 +171,7 @@ class IrrigationDataSplitter:
                 mrec = masks_by_uid.get(uid)
                 if not mrec:
                     continue
-                # --- MOD: make JSON optional; require only both TIFs ---
+                # JSON optional; require both TIFs only
                 if not img_rec.get("tif") or not mrec.get("tif"):
                     continue
                 json_path = img_rec.get("json") or mrec.get("json")  # may be None
@@ -355,10 +355,18 @@ class IrrigationDataSplitter:
                 tr_idx, te_idx = next(sss_outer.split(sites_ok, y_ok))
                 train_pool, test_sites = sites_ok[tr_idx], sites_ok[te_idx]
                 y_train_pool = y_ok[tr_idx]
-                sss_inner = StratifiedShuffleSplit(n_splits=1, test_size=val_size/(1.0-test_size),
-                                                   random_state=self.random_state)
-                tr2_idx, va_idx = next(sss_inner.split(train_pool, y_train_pool))
-                train_sites, val_sites = train_pool[tr2_idx], train_pool[va_idx]
+
+                # --- IMPORTANT: allow val_size == 0.0 (used by CV builder) ---
+                if (val_size is None) or (float(val_size) == 0.0) or (len(train_pool) <= 1):
+                    train_sites, val_sites = train_pool, np.array([], dtype=train_pool.dtype)
+                else:
+                    sss_inner = StratifiedShuffleSplit(
+                        n_splits=1,
+                        test_size=val_size/(1.0-test_size),
+                        random_state=self.random_state
+                    )
+                    tr2_idx, va_idx = next(sss_inner.split(train_pool, y_train_pool))
+                    train_sites, val_sites = train_pool[tr2_idx], train_pool[va_idx]
                 stratified = True
 
         train_files = [f for s in train_sites for f in self._site_to_files.get(s, [])]
@@ -488,7 +496,6 @@ class IrrigationDataSplitter:
 
             if self._grit_mode and stem in self._stem_to_paths:
                 rec = self._stem_to_paths[stem]
-                # --- MOD: handle optional json_path safely (might be None) ---
                 jp = rec.get("json_path")
                 jp_str = str(Path(jp).resolve()) if jp else ""
                 rows.append({
