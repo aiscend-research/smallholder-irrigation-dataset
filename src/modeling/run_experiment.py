@@ -4,9 +4,11 @@
 This script:
 1. Builds spatially safe splits (siteNumeric grouping; optional stratification)
    by calling prepare_and_export_splits() from data_splitting.py.
-2. Consumes the produced *.txt lists (no file movement of the whole dataset).
-3. Runs either a one-shot train/val experiment or K-fold CV over the training
-   pool, with a held-out test list also produced for CV.
+2. Consumes the produced *.txt lists and manifest.csv (no file staging needed).
+3. Runs K-fold CV over the training pool with a held-out test list.
+
+Key change: Eliminates all staging/linking/copying by reading files directly
+from absolute paths in manifest.csv.
 """
 
 import os
@@ -18,7 +20,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-import uuid
+import numpy as np
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -29,9 +31,6 @@ from src.modeling.ml_pipeline.ml_model import train_model
 from src.modeling.ml_pipeline.evaluation import model_metrics
 from src.modeling.ml_pipeline.evaluation import export_feature_importances
 from src.modeling.ml_pipeline.evaluation import plot_band_time_importance
-from src.modeling.ml_pipeline.visualization import plot_ml_predictions
-from src.modeling.ml_pipeline.build_features import flatten_dataset
-from src.modeling.custom_dataset import MultiTemporalCropDataset
 from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
 logging.basicConfig(
@@ -76,7 +75,7 @@ def resolve_config_path(config_path: str = "src/modeling/experiment.yaml") -> st
 
 def load_experiment(config_path: str = "src/modeling/experiment.yaml") -> dict:
     cfg_path = resolve_config_path(config_path)
-    with open(cfg_path, "r", encoding="utf-8") as f:   # ← use resolved absolute path
+    with open(cfg_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -88,255 +87,188 @@ def load_stems(txt_path: str) -> list[str]:
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
-def get_staging_root(exp_cfg: dict, data_root: str, experiment_dir: str) -> Path:
-    """
-    Decide where to stage files (for datasets that need a single folder).
-    We avoid /tmp which can be small on the GRIT host.
-
-    Priority:
-      1) env STAGE_ROOT (if set),
-      2) exp_cfg['data']['staging_root'] (optional),
-      3) <data_root>/organized/.stage  (default; on big storage)
-    """
-    env_root = os.environ.get("STAGE_ROOT", "").strip()
-    if env_root:
-        root = Path(env_root)
-    else:
-        cfg_root = (exp_cfg.get("data", {}) or {}).get("staging_root")
-        if cfg_root:
-            root = Path(resolve_path(cfg_root))
-        else:
-            root = Path(data_root) / "organized" / ".stage"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _link_or_copy(src: Path, dst: Path) -> str:
-    """
-    Try to hard-link first (0 extra space); if it fails (e.g., cross-device),
-    fall back to a regular copy. Returns 'link' or 'copy'.
-    """
-    try:
-        # Remove any existing broken/old path first
-        if dst.exists() or dst.is_symlink():
-            dst.unlink()
-        os.link(src, dst)
-        return "link"
-    except Exception:
-        try:
-            shutil.copy2(src, dst)
-            return "copy"
-        except Exception as e:
-            raise e
-
-
-# Dataset helper
-def create_filtered_dataset(
-    source_dir: str,
+# Direct dataset loading from manifest (no staging)
+def load_dataset_from_manifest(
     stems: list[str],
+    manifest_df: pd.DataFrame,
     label_bands: list[int],
-    manifest_df: pd.DataFrame | None = None,
-    staging_root: Path | None = None,
-):
+) -> list:
     """
-    Stage only the requested files into a temporary directory so that
-    MultiTemporalCropDataset can point to a single folder. This now uses
-    HARD-LINKS when possible (no extra space). We also avoid /tmp by default.
-
-    If you later adapt MultiTemporalCropDataset to accept explicit file paths,
-    you can remove this staging and read directly from manifest.csv.
+    Load image/label data directly from absolute paths in manifest.
+    Returns a list of (image_array, label_array) tuples.
     """
-    src = Path(source_dir)
-    if staging_root is None:
-        staging_root = Path(source_dir)  # fallback, but we normally pass a real root
-    # Unique subdir per call to avoid collisions when running CV
-    temp_dir = staging_root / f"filtered_data_{uuid.uuid4().hex[:8]}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"[staging] {len(stems)} stems -> {temp_dir}")
-
-    # If a manifest is provided (from data_splitting), prefer its absolute paths (supports GRIT)
-    manifest_index = None
-    if manifest_df is not None and not manifest_df.empty:
-        manifest_index = manifest_df.set_index("stem")
-
-    copied = 0
-    linked = 0
-    requested = 0
-    matched_pairs = 0
-
-    for s in stems:
-        requested += 1
-        img_path = None
-        lab_path = None
-        jsn_path = None
-
-        if manifest_index is not None and s in manifest_index.index:
-            row = manifest_index.loc[s]
-            # JSON can be empty (""), so guard it
-            jp = str(row.get("json_path", "")).strip() if "json_path" in row else ""
-            img_path = Path(str(row["image_path"]))
-            lab_path = Path(str(row["label_path"]))
-            jsn_path = Path(jp) if jp else None
-        else:
-            # Local organized fallback (unchanged behavior)
-            img_path = src / "organized" / "images" / f"{s}.tif"
-            lab_path = src / "organized" / "labels" / f"{s.replace('_image', '_label')}.tif"
-            jsn_label = src / "organized" / "metadata" / f"{s.replace('_image', '_label')}.json"
-            jsn_image = src / "organized" / "metadata" / f"{s}.json"
-            jsn_path = jsn_label if jsn_label.exists() else (jsn_image if jsn_image.exists() else None)
-
-        missing = []
-        if not (img_path and img_path.exists()):
-            missing.append(f"{img_path}")
-        if not (lab_path and lab_path.exists()):
-            missing.append(f"{lab_path}")
-        # JSON is optional → just warn, do not drop the sample
-        if jsn_path is not None and not jsn_path.exists():
-            logger.warning(f"[staging] json missing for {s}: {jsn_path}")
-            jsn_path = None
-
-        if missing:
-            logger.warning(f"[staging] missing files for stem '{s}': {missing}")
-            continue
-
-        # Try to hard-link first; copy on failure
-        for src_path in (img_path, lab_path):
-            dst = temp_dir / src_path.name
-            try:
-                how = _link_or_copy(src_path, dst)
-                if how == "link":
-                    linked += 1
-                else:
-                    copied += 1
-            except Exception as e:
-                logger.warning(f"[staging] copy/link failed for stem '{s}', file '{src_path.name}': {e}")
-                break
-        else:
-            # Only try JSON if present; ignore failures
-            if jsn_path is not None:
-                dst_json = temp_dir / jsn_path.name
-                try:
-                    how = _link_or_copy(jsn_path, dst_json)
-                    if how == "link":
-                        linked += 1
-                    else:
-                        copied += 1
-                except Exception as e:
-                    logger.warning(f"[staging] json copy/link failed for stem '{s}': {e}")
-            matched_pairs += 1
-
-    logger.info(
-        f"[staging] manifest matches staged: {matched_pairs} / requested: {requested}"
-    )
-    logger.info(f"[staging] summary: linked={linked}, copied={copied}")
-
-    if matched_pairs == 0:
-        # Clean dir to avoid clutter
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise RuntimeError(
-            "No valid (image,label) pairs were staged for the requested stems. "
-            "Check that manifest paths exist and that your staging_root is on a filesystem with space."
-        )
-
-    ds = MultiTemporalCropDataset(
-        image_dir=str(temp_dir),
-        label_dir=str(temp_dir),
-        label_bands=label_bands,
-    )
-    return ds, str(temp_dir)
-
-
-# Core runners
-def run_single_experiment(exp_cfg: dict, experiment_dir: str):
-    """One-shot train/val using the lists written by data_splitting."""
-    data_root = resolve_path(exp_cfg["data"]["data_dir"])
-    csv_path = exp_cfg["data"].get("csv_path")
-    csv_path = resolve_path(csv_path) if csv_path else None
-
-    # GRIT paths (optional). If provided, data_splitting will scan cloud folders and write cloud-absolute paths in manifest.csv
-    grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir")) if exp_cfg["data"].get("grit_images_dir") else None
-    grit_masks_dir  = resolve_path(exp_cfg["data"].get("grit_masks_dir"))  if exp_cfg["data"].get("grit_masks_dir")  else None
-
-    # Build splits and get paths
-    paths = prepare_and_export_splits(
-        data_root=data_root,
-        csv_path=csv_path,
-        y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
-        n_splits=exp_cfg["data"].get("n_folds", 5),
-        test_size=exp_cfg["data"].get("test_size", 0.2),
-        val_size=exp_cfg["data"].get("val_size", 0.2),
-        min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
-        grit_images_dir=grit_images_dir,
-        grit_masks_dir=grit_masks_dir,
-    )
-
-    # Read lists
-    train_stems = load_stems(paths["train_list"])
-    val_stems = load_stems(paths["val_list"])
-    manifest = pd.read_csv(paths["manifest_csv"]) if Path(paths["manifest_csv"]).exists() else None
-
-    logger.info(f"[splits] train={len(train_stems)}, val={len(val_stems)}")
-
-    # Build datasets
-    label_bands = exp_cfg["data"]["label_bands"]
-    stage_root = get_staging_root(exp_cfg, data_root, experiment_dir)
-
-    train_ds, tmp_train = create_filtered_dataset(
-        data_root, train_stems, label_bands, manifest_df=manifest, staging_root=stage_root
-    )
-    val_ds, tmp_val = (
-        create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest, staging_root=stage_root)
-        if val_stems else (None, None)
-    )
-
     try:
-        # Feature extraction
-        X_train, y_train = flatten_dataset(train_ds)
-        if val_ds is not None and len(val_ds) > 0:
-            X_val, y_val = flatten_dataset(val_ds)
-        else:
-            X_val, y_val = None, None
+        import rasterio
+    except ImportError:
+        raise ImportError("rasterio is required for direct file loading. Install with: pip install rasterio")
+    
+    manifest_index = manifest_df.set_index("stem")
+    dataset = []
+    
+    logger.info(f"[load] Loading {len(stems)} samples directly from manifest paths...")
+    
+    missing_in_manifest = 0
+    missing_files = 0
+    failed_reads = 0
+    
+    for i, stem in enumerate(stems):
+        if stem not in manifest_index.index:
+            missing_in_manifest += 1
+            logger.warning(f"[load] Stem '{stem}' not found in manifest, skipping")
+            continue
+            
+        row = manifest_index.loc[stem]
+        img_path = Path(str(row["image_path"]))
+        lab_path = Path(str(row["label_path"]))
+        
+        if not img_path.exists():
+            missing_files += 1
+            logger.warning(f"[load] Image missing: {img_path}")
+            continue
+        if not lab_path.exists():
+            missing_files += 1
+            logger.warning(f"[load] Label missing: {lab_path}")
+            continue
+            
+        try:
+            with rasterio.open(img_path) as src:
+                image = src.read()
+            
+            with rasterio.open(lab_path) as src:
+                label = src.read(label_bands)
+            
+            dataset.append((image, label))
+            
+            if (i + 1) % 50 == 0:
+                logger.info(f"[load] Loaded {len(dataset)}/{i + 1} samples (progress: {i+1}/{len(stems)})")
+                
+        except Exception as e:
+            failed_reads += 1
+            logger.warning(f"[load] Failed to read {stem}: {e}")
+            continue
+    
+    logger.info(f"[load] Successfully loaded {len(dataset)}/{len(stems)} samples")
+    if missing_in_manifest > 0:
+        logger.warning(f"[load] {missing_in_manifest} stems not found in manifest")
+    if missing_files > 0:
+        logger.warning(f"[load] {missing_files} files missing on disk")
+    if failed_reads > 0:
+        logger.warning(f"[load] {failed_reads} files failed to read")
+    
+    if len(dataset) == 0:
+        raise RuntimeError(
+            f"No valid samples were loaded from manifest. "
+            f"Missing in manifest: {missing_in_manifest}, "
+            f"Missing files: {missing_files}, "
+            f"Failed reads: {failed_reads}"
+        )
+    
+    return dataset
 
-        y_train = y_train[:, :2]
-        if y_val is not None:
-            y_val = y_val[:, :2]
 
-        # Train
-        model_type = exp_cfg["model"]["type"].lower()
-        hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
-        logger.info(f"[train] model={model_type} hyperparams={hyperparams}")
-        clf = train_model(X_train, y_train, model_type, **hyperparams)
+def flatten_dataset_from_tuples(dataset: list) -> tuple:
+    """
+    Flatten dataset from list of (image, label) tuples.
+    Converts spatial image data into feature vectors for ML.
+    """
+    X_list = []
+    y_list = []
+    
+    logger.info(f"[flatten] Flattening {len(dataset)} samples...")
+    
+    for idx, (image, label) in enumerate(dataset):
+        n_bands, height, width = image.shape
+        X_sample = image.reshape(n_bands, -1).T
+        
+        n_label_bands = label.shape[0]
+        y_sample = label.reshape(n_label_bands, -1).T
+        
+        X_list.append(X_sample)
+        y_list.append(y_sample)
+        
+        if (idx + 1) % 100 == 0:
+            logger.info(f"[flatten] Processed {idx + 1}/{len(dataset)} samples")
+    
+    X = np.vstack(X_list)
+    y = np.vstack(y_list)
+    
+    logger.info(f"[flatten] Final shapes: X={X.shape}, y={y.shape}")
+    
+    return X, y
 
-        from joblib import dump
-        model_path = os.path.join(experiment_dir, "model.pkl")
-        dump(clf, model_path)
-        logger.info(f"[save] model -> {model_path}")
 
-        # Evaluate & visualize
-        if X_val is not None:
-            y_pred = clf.predict(X_val)
-            metrics = model_metrics(y_pred, y_val)
-            with open(os.path.join(experiment_dir, "metrics.json"), "w", encoding="utf-8") as f:
-                json.dump(metrics, f, indent=2)
-            logger.info(f"[metrics]\n{json.dumps(metrics, indent=2)}")
+def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
+    """Visualization function for tuple-based dataset."""
+    if save_path:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        import matplotlib.pyplot as plt
+        
+        sample_indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
+        
+        fig, axes = plt.subplots(num_samples, 3, figsize=(15, 5 * num_samples))
+        if num_samples == 1:
+            axes = axes.reshape(1, -1)
+        
+        for idx, sample_idx in enumerate(sample_indices):
+            image, label = dataset[sample_idx]
+            
+            n_bands, height, width = image.shape
+            X_sample = image.reshape(n_bands, -1).T
+            y_pred = model.predict(X_sample)
+            y_pred_img = y_pred.reshape(height, width, -1)
+            
+            if image.shape[0] >= 3:
+                rgb = np.stack([image[2], image[1], image[0]], axis=-1)
+                rgb = np.clip(rgb / rgb.max() * 255, 0, 255).astype(np.uint8)
+                axes[idx, 0].imshow(rgb)
+                axes[idx, 0].set_title(f"Sample {sample_idx}: RGB")
+            
+            axes[idx, 1].imshow(label[0], cmap='viridis')
+            axes[idx, 1].set_title("Ground Truth")
+            
+            axes[idx, 2].imshow(y_pred_img[:, :, 0], cmap='viridis')
+            axes[idx, 2].set_title("Prediction")
+            
+            for ax in axes[idx]:
+                ax.axis('off')
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            logger.info(f"[viz] Saved visualization to {save_path}")
+        plt.close()
+        
+    except Exception as e:
+        logger.warning(f"[viz] Visualization failed: {e}")
 
-            num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
-            vis_path = os.path.join(experiment_dir, "visualization.png")
-            plot_ml_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
 
-            save_fi = exp_cfg.get("model", {}).get("save_feature_importance", False)
-            if save_fi and hasattr(clf, "estimators_"):
-                BAND_NAMES = ["B2","B3","B4","B5","B6","B7","B8","B8A","B11","B12","NDVI","EVI","NDWI","SCL"]
-                N_TIMESTEPS = 37
-                fi_csv = os.path.join(experiment_dir, "feature_importance.csv")
-                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv)
-                fi_png = os.path.join(experiment_dir, "band_time_importance.png")
-                plot_band_time_importance(fi_csv, band_names=BAND_NAMES, n_timesteps=N_TIMESTEPS, save_path=fi_png)
-    finally:
-        # Clean staging dirs
-        for d in [tmp_train, tmp_val]:
-            if d:
-                shutil.rmtree(d, ignore_errors=True)
+def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_type, hyperparams, fold_name=""):
+    """Train and evaluate a single fold (or train/val split)."""
+    
+    logger.info(f"[{fold_name}] Loading training data...")
+    train_ds = load_dataset_from_manifest(train_stems, manifest, label_bands)
+    
+    logger.info(f"[{fold_name}] Loading validation data...")
+    val_ds = load_dataset_from_manifest(val_stems, manifest, label_bands)
+
+    logger.info(f"[{fold_name}] Extracting features...")
+    X_train, y_train = flatten_dataset_from_tuples(train_ds)
+    X_val, y_val = flatten_dataset_from_tuples(val_ds)
+
+    # Use only first 2 label bands
+    y_train = y_train[:, :2]
+    y_val = y_val[:, :2]
+
+    logger.info(f"[{fold_name}] Training model...")
+    clf = train_model(X_train, y_train, model_type, **hyperparams)
+    
+    logger.info(f"[{fold_name}] Evaluating...")
+    y_pred = clf.predict(X_val)
+    metrics = model_metrics(y_pred, y_val)
+
+    return clf, metrics, val_ds, len(train_ds), len(val_ds)
 
 
 def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
@@ -345,11 +277,10 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     csv_path = exp_cfg["data"].get("csv_path")
     csv_path = resolve_path(csv_path) if csv_path else None
 
-    # GRIT paths (optional)
     grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir")) if exp_cfg["data"].get("grit_images_dir") else None
     grit_masks_dir  = resolve_path(exp_cfg["data"].get("grit_masks_dir"))  if exp_cfg["data"].get("grit_masks_dir")  else None
 
-    # Build lists
+    logger.info("[splits] Building CV splits...")
     paths = prepare_and_export_splits(
         data_root=data_root,
         csv_path=csv_path,
@@ -367,62 +298,53 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
 
-    # Load CV manifest (contains cloud-absolute paths in GRIT mode)
-    cv_manifest = Path(paths["cv_manifest_csv"])
-    manifest = pd.read_csv(cv_manifest) if cv_manifest.exists() else None
+    cv_manifest_path = Path(paths["cv_manifest_csv"])
+    if not cv_manifest_path.exists():
+        raise RuntimeError(f"CV manifest CSV not found: {cv_manifest_path}")
+    
+    manifest = pd.read_csv(cv_manifest_path)
+    logger.info(f"[cv] Loaded manifest with {len(manifest)} entries")
 
-    # staging root (large disk; hard-link where possible)
-    stage_root = get_staging_root(exp_cfg, data_root, experiment_dir)
-
-    # Iterate folds
     fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
     results = []
+    
+    logger.info(f"[cv] Running {len(fold_dirs)} folds...")
+    
     for fold_dir in fold_dirs:
         tr_txt = fold_dir / "train_files.txt"
         va_txt = fold_dir / "val_files.txt"
         if not tr_txt.exists() or not va_txt.exists():
-            logger.warning(f"[skip] missing lists in {fold_dir}")
+            logger.warning(f"[skip] Missing lists in {fold_dir}")
             continue
 
         train_stems = load_stems(str(tr_txt))
         val_stems = load_stems(str(va_txt))
-        logger.info(f"[fold {fold_dir.name}] train={len(train_stems)} val={len(val_stems)}")
+        logger.info(f"[{fold_dir.name}] train={len(train_stems)}, val={len(val_stems)}")
 
-        train_ds, tmp_train = create_filtered_dataset(
-            data_root, train_stems, label_bands, manifest_df=manifest, staging_root=stage_root
-        )
-        val_ds, tmp_val = create_filtered_dataset(
-            data_root, val_stems, label_bands, manifest_df=manifest, staging_root=stage_root
+        clf, metrics, val_ds, train_size, val_size = train_and_evaluate_fold(
+            train_stems, val_stems, manifest, label_bands, model_type, hyperparams, fold_name=fold_dir.name
         )
 
-        try:
-            X_train, y_train = flatten_dataset(train_ds)
-            X_val, y_val = flatten_dataset(val_ds)
-
-            y_train = y_train[:, :2]
-            y_val = y_val[:, :2]
-
-            clf = train_model(X_train, y_train, model_type, **hyperparams)
-            y_pred = clf.predict(X_val)
-            metrics = model_metrics(y_pred, y_val)
-
-            results.append({
-                "fold": fold_dir.name,
-                "metrics": metrics,
-                "train_size": len(train_ds),
-                "val_size": len(val_ds),
-            })
-            logger.info(f"[{fold_dir.name}] metrics:\n{json.dumps(metrics, indent=2)}")
-        finally:
-            for d in [tmp_train, tmp_val]:
-                if d:
-                    shutil.rmtree(d, ignore_errors=True)
+        results.append({
+            "fold": fold_dir.name,
+            "metrics": metrics,
+            "train_size": train_size,
+            "val_size": val_size,
+        })
+        logger.info(f"[{fold_dir.name}] Metrics:\n{json.dumps(metrics, indent=2)}")
+        
+        # Save visualization for first fold only
+        if len(results) == 1:
+            num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
+            vis_path = os.path.join(experiment_dir, f"visualization_{fold_dir.name}.png")
+            plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
 
     # Aggregate CV metrics
     if results:
+        logger.info("[cv] Aggregating results...")
         metric_structure = results[0]["metrics"]
         summary = {"n_folds_completed": len(results), "fold_details": results}
-        import numpy as np
+        
         for mtype in metric_structure:
             means, stds = {}, {}
             for mname in metric_structure[mtype]:
@@ -434,43 +356,58 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
 
         out_json = Path(experiment_dir) / "cv_results.json"
         out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        logger.info(f"[cv] results -> {out_json}")
+        logger.info(f"[cv] Results saved to {out_json}")
+        
+        logger.info("[cv] Cross-validation summary:")
+        for mtype in metric_structure:
+            logger.info(f"  {mtype}_mean: {summary[f'{mtype}_mean']}")
+            logger.info(f"  {mtype}_std: {summary[f'{mtype}_std']}")
     else:
-        logger.error("[cv] no folds completed.")
+        logger.error("[cv] No folds completed successfully.")
 
 
 def main():
     import argparse
 
-    ap = argparse.ArgumentParser(description="Irrigation ML runner (site-aware splits + lists).")
-    ap.add_argument("--config", type=str, default="src/modeling/experiment.yaml")
+    ap = argparse.ArgumentParser(description="Irrigation ML runner (CV with site-aware splits + direct loading).")
+    ap.add_argument("--config", type=str, default="src/modeling/experiment.yaml",
+                    help="Path to experiment configuration YAML file")
     args = ap.parse_args()
 
     exp_cfg = load_experiment(args.config)
 
-    # Prepare run folder
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_name = f"{exp_cfg['name']}_{timestamp}"
     out_root = resolve_path(exp_cfg["output"]["base_dir"])
     run_dir = os.path.join(out_root, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Copy the config for reproducibility
     cfg_path = resolve_config_path(args.config)
     shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))
+    
     fh = logging.FileHandler(os.path.join(run_dir, "run.log"), encoding="utf-8")
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(fh)
 
+    logger.info("="*80)
+    logger.info(f"Starting experiment: {exp_cfg['name']}")
+    logger.info(f"Output directory: {run_dir}")
+    logger.info(f"Configuration: {cfg_path}")
+    logger.info("="*80)
+
     try:
-        if exp_cfg["data"].get("use_cross_validation", False):
-            logger.info("[mode] CV")
-            run_cv_experiment(exp_cfg, run_dir)
-        else:
-            logger.info("[mode] one-shot")
-            run_single_experiment(exp_cfg, run_dir)
-        logger.info("[done]")
+        run_cv_experiment(exp_cfg, run_dir)
+        
+        logger.info("="*80)
+        logger.info("[SUCCESS] Experiment completed successfully")
+        logger.info(f"Results saved to: {run_dir}")
+        logger.info("="*80)
+    except Exception as e:
+        logger.error("="*80)
+        logger.error(f"[FAILED] Experiment failed with error: {e}")
+        logger.error("="*80)
+        raise
     finally:
         logger.removeHandler(fh)
         fh.close()
