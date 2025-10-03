@@ -18,6 +18,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+import uuid
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -87,110 +88,154 @@ def load_stems(txt_path: str) -> list[str]:
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
+def get_staging_root(exp_cfg: dict, data_root: str, experiment_dir: str) -> Path:
+    """
+    Decide where to stage files (for datasets that need a single folder).
+    We avoid /tmp which can be small on the GRIT host.
+
+    Priority:
+      1) env STAGE_ROOT (if set),
+      2) exp_cfg['data']['staging_root'] (optional),
+      3) <data_root>/organized/.stage  (default; on big storage)
+    """
+    env_root = os.environ.get("STAGE_ROOT", "").strip()
+    if env_root:
+        root = Path(env_root)
+    else:
+        cfg_root = (exp_cfg.get("data", {}) or {}).get("staging_root")
+        if cfg_root:
+            root = Path(resolve_path(cfg_root))
+        else:
+            root = Path(data_root) / "organized" / ".stage"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _link_or_copy(src: Path, dst: Path) -> str:
+    """
+    Try to hard-link first (0 extra space); if it fails (e.g., cross-device),
+    fall back to a regular copy. Returns 'link' or 'copy'.
+    """
+    try:
+        # Remove any existing broken/old path first
+        if dst.exists() or dst.is_symlink():
+            dst.unlink()
+        os.link(src, dst)
+        return "link"
+    except Exception:
+        try:
+            shutil.copy2(src, dst)
+            return "copy"
+        except Exception as e:
+            raise e
+
+
 # Dataset helper
-def create_filtered_dataset(source_dir: str, stems: list[str], label_bands: list[int], manifest_df: pd.DataFrame | None = None):
+def create_filtered_dataset(
+    source_dir: str,
+    stems: list[str],
+    label_bands: list[int],
+    manifest_df: pd.DataFrame | None = None,
+    staging_root: Path | None = None,
+):
     """
     Stage only the requested files into a temporary directory so that
-    MultiTemporalCropDataset can point to a single folder. This copies a small
-    subset instead of moving the whole dataset.
+    MultiTemporalCropDataset can point to a single folder. This now uses
+    HARD-LINKS when possible (no extra space). We also avoid /tmp by default.
 
     If you later adapt MultiTemporalCropDataset to accept explicit file paths,
     you can remove this staging and read directly from manifest.csv.
     """
-    import tempfile
-
     src = Path(source_dir)
-    temp_dir = Path(tempfile.mkdtemp(prefix="filtered_data_"))
+    if staging_root is None:
+        staging_root = Path(source_dir)  # fallback, but we normally pass a real root
+    # Unique subdir per call to avoid collisions when running CV
+    temp_dir = staging_root / f"filtered_data_{uuid.uuid4().hex[:8]}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"[staging] {len(stems)} stems -> {temp_dir}")
 
     # If a manifest is provided (from data_splitting), prefer its absolute paths (supports GRIT)
     manifest_index = None
     if manifest_df is not None and not manifest_df.empty:
-        # --- NEW: normalize keys to plain strings without whitespace
-        mf = manifest_df.copy()
-        mf["stem"] = mf["stem"].astype(str).str.strip()
-        manifest_index = mf.set_index("stem")
-    else:
-        logger.info("[staging] No manifest provided or it is empty; will try local organized/* fallback.")
+        manifest_index = manifest_df.set_index("stem")
 
     copied = 0
-    manifest_hits = 0
-    manifest_misses = []
+    linked = 0
+    requested = 0
+    matched_pairs = 0
 
     for s in stems:
-        used_manifest = False
+        requested += 1
+        img_path = None
+        lab_path = None
+        jsn_path = None
+
         if manifest_index is not None and s in manifest_index.index:
-            used_manifest = True
             row = manifest_index.loc[s]
-            img_path = Path(str(row["image_path"])).expanduser()
-            lab_path = Path(str(row["label_path"])).expanduser()
-            jsn_path = Path(str(row["json_path"])).expanduser() if "json_path" in row and pd.notna(row["json_path"]) else None
+            # JSON can be empty (""), so guard it
+            jp = str(row.get("json_path", "")).strip() if "json_path" in row else ""
+            img_path = Path(str(row["image_path"]))
+            lab_path = Path(str(row["label_path"]))
+            jsn_path = Path(jp) if jp else None
+        else:
+            # Local organized fallback (unchanged behavior)
+            img_path = src / "organized" / "images" / f"{s}.tif"
+            lab_path = src / "organized" / "labels" / f"{s.replace('_image', '_label')}.tif"
+            jsn_label = src / "organized" / "metadata" / f"{s.replace('_image', '_label')}.json"
+            jsn_image = src / "organized" / "metadata" / f"{s}.json"
+            jsn_path = jsn_label if jsn_label.exists() else (jsn_image if jsn_image.exists() else None)
 
-            # --- IMPORTANT: JSON is optional. We only require image+label to exist.
-            missing = []
-            if not img_path.exists(): missing.append(str(img_path))
-            if not lab_path.exists(): missing.append(str(lab_path))
+        missing = []
+        if not (img_path and img_path.exists()):
+            missing.append(f"{img_path}")
+        if not (lab_path and lab_path.exists()):
+            missing.append(f"{lab_path}")
+        # JSON is optional → just warn, do not drop the sample
+        if jsn_path is not None and not jsn_path.exists():
+            logger.warning(f"[staging] json missing for {s}: {jsn_path}")
+            jsn_path = None
 
-            if missing:
-                manifest_misses.append((s, missing))
-            else:
-                try:
-                    shutil.copy2(img_path, temp_dir / img_path.name)
-                    shutil.copy2(lab_path, temp_dir / lab_path.name)
-                    if jsn_path is not None and jsn_path.exists():
-                        shutil.copy2(jsn_path, temp_dir / jsn_path.name)
-                except Exception as e:
-                    logger.warning(f"[staging] copy failed for stem '{s}': {e}")
+        if missing:
+            logger.warning(f"[staging] missing files for stem '{s}': {missing}")
+            continue
+
+        # Try to hard-link first; copy on failure
+        for src_path in (img_path, lab_path):
+            dst = temp_dir / src_path.name
+            try:
+                how = _link_or_copy(src_path, dst)
+                if how == "link":
+                    linked += 1
                 else:
                     copied += 1
-                    manifest_hits += 1
-                    continue  # done with this stem
-
-        # Local organized fallback (unchanged behavior)
-        # Only reached if: (a) no manifest, (b) stem not present in manifest, or (c) manifest entry missing files.
-        img = src / "organized" / "images" / f"{s}.tif"
-        lab = src / "organized" / "labels" / f"{s.replace('_image', '_label')}.tif"
-        jsn_label = src / "organized" / "metadata" / f"{s.replace('_image', '_label')}.json"
-        jsn_image = src / "organized" / "metadata" / f"{s}.json"
-        jsn = jsn_label if jsn_label.exists() else jsn_image
-
-        if img.exists() and lab.exists():
-            try:
-                shutil.copy2(img, temp_dir / img.name)
-                shutil.copy2(lab, temp_dir / lab.name)
-                if jsn is not None and Path(jsn).exists():
-                    shutil.copy2(jsn, temp_dir / jsn.name)
             except Exception as e:
-                logger.warning(f"[staging] local fallback copy failed for '{s}': {e}")
-            else:
-                copied += 1
+                logger.warning(f"[staging] copy/link failed for stem '{s}', file '{src_path.name}': {e}")
+                break
         else:
-            # Only log detailed misses sparsely to avoid spam
-            if used_manifest:
-                # We already recorded the miss above with reasons
-                pass
-            else:
-                manifest_misses.append((s, [str(img), str(lab)]))
+            # Only try JSON if present; ignore failures
+            if jsn_path is not None:
+                dst_json = temp_dir / jsn_path.name
+                try:
+                    how = _link_or_copy(jsn_path, dst_json)
+                    if how == "link":
+                        linked += 1
+                    else:
+                        copied += 1
+                except Exception as e:
+                    logger.warning(f"[staging] json copy/link failed for stem '{s}': {e}")
+            matched_pairs += 1
 
-    # --- NEW: diagnostics
-    if manifest_index is not None:
-        logger.info(f"[staging] manifest matches copied: {manifest_hits} / requested: {len(stems)}")
-    if manifest_misses:
-        sample = "\n  ".join([f"{stem} :: missing {paths}" for stem, paths in manifest_misses[:10]])
-        logger.warning(f"[staging] {len(manifest_misses)} stems could not be staged. First few:\n  {sample}")
+    logger.info(
+        f"[staging] manifest matches staged: {matched_pairs} / requested: {requested}"
+    )
+    logger.info(f"[staging] summary: linked={linked}, copied={copied}")
 
-    if copied == 0:
-        # Fail fast with an actionable message (avoid cryptic error later in flatten_dataset)
+    if matched_pairs == 0:
+        # Clean dir to avoid clutter
+        shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError(
-            "No valid (image,label) pairs were staged for the requested stems.\n"
-            "Common causes:\n"
-            "  • CV manifest paths are not visible on this node/container (check mounts/permissions),\n"
-            "  • Stems in the fold do not appear in manifest.csv (mismatch),\n"
-            "  • Files exist but only JSON is missing (should be OK) or filenames changed.\n"
-            f"Temp dir: {temp_dir}\n"
-            "Hints:\n"
-            "  - Open the CV manifest listed in the logs and verify a stem from this fold has image_path/label_path that exist.\n"
-            "  - Ensure the GRIT directories are mounted inside this Singularity session."
+            "No valid (image,label) pairs were staged for the requested stems. "
+            "Check that manifest paths exist and that your staging_root is on a filesystem with space."
         )
 
     ds = MultiTemporalCropDataset(
@@ -234,15 +279,19 @@ def run_single_experiment(exp_cfg: dict, experiment_dir: str):
 
     # Build datasets
     label_bands = exp_cfg["data"]["label_bands"]
-    train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands, manifest_df=manifest)
-    val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest) if val_stems else (None, None)
+    stage_root = get_staging_root(exp_cfg, data_root, experiment_dir)
+
+    train_ds, tmp_train = create_filtered_dataset(
+        data_root, train_stems, label_bands, manifest_df=manifest, staging_root=stage_root
+    )
+    val_ds, tmp_val = (
+        create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest, staging_root=stage_root)
+        if val_stems else (None, None)
+    )
 
     try:
-        # --- NEW: guard against empty dataset
-        if len(train_ds) == 0:
-            raise RuntimeError("Training dataset has 0 items after staging; cannot proceed.")
+        # Feature extraction
         X_train, y_train = flatten_dataset(train_ds)
-
         if val_ds is not None and len(val_ds) > 0:
             X_val, y_val = flatten_dataset(val_ds)
         else:
@@ -321,8 +370,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     # Load CV manifest (contains cloud-absolute paths in GRIT mode)
     cv_manifest = Path(paths["cv_manifest_csv"])
     manifest = pd.read_csv(cv_manifest) if cv_manifest.exists() else None
-    if manifest is not None:
-        logger.info(f"[cv] loaded manifest: {cv_manifest} with {len(manifest)} rows")
+
+    # staging root (large disk; hard-link where possible)
+    stage_root = get_staging_root(exp_cfg, data_root, experiment_dir)
 
     # Iterate folds
     fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
@@ -338,16 +388,14 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         val_stems = load_stems(str(va_txt))
         logger.info(f"[fold {fold_dir.name}] train={len(train_stems)} val={len(val_stems)}")
 
-        train_ds, tmp_train = create_filtered_dataset(data_root, train_stems, label_bands, manifest_df=manifest)
-        val_ds, tmp_val = create_filtered_dataset(data_root, val_stems, label_bands, manifest_df=manifest)
+        train_ds, tmp_train = create_filtered_dataset(
+            data_root, train_stems, label_bands, manifest_df=manifest, staging_root=stage_root
+        )
+        val_ds, tmp_val = create_filtered_dataset(
+            data_root, val_stems, label_bands, manifest_df=manifest, staging_root=stage_root
+        )
 
         try:
-            # --- NEW: guard before flattening
-            if len(train_ds) == 0:
-                raise RuntimeError(f"{fold_dir.name}: training dataset has 0 items after staging; cannot proceed.")
-            if len(val_ds) == 0:
-                raise RuntimeError(f"{fold_dir.name}: validation dataset has 0 items after staging; cannot proceed.")
-
             X_train, y_train = flatten_dataset(train_ds)
             X_val, y_val = flatten_dataset(val_ds)
 
