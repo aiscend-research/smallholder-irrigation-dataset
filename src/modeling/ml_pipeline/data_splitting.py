@@ -171,10 +171,10 @@ class IrrigationDataSplitter:
                 mrec = masks_by_uid.get(uid)
                 if not mrec:
                     continue
-                if not img_rec.get("tif") or not img_rec.get("json"):
+                # --- MOD: make JSON optional; require only both TIFs ---
+                if not img_rec.get("tif") or not mrec.get("tif"):
                     continue
-                if not mrec.get("tif") or not mrec.get("json"):
-                    continue
+                json_path = img_rec.get("json") or mrec.get("json")  # may be None
 
                 site = str(mrec["site"])
                 date = str(mrec["date"])
@@ -185,8 +185,8 @@ class IrrigationDataSplitter:
                     "image_path": img_rec["tif"],
                     # Use mask tif as label_path; this aligns with downstream expectations
                     "label_path": mrec["tif"],
-                    # Choose the image JSON as metadata path (you can switch to mask JSON if preferred)
-                    "json_path": img_rec["json"],
+                    # Choose the image JSON as metadata path if present; otherwise mask JSON; may be None
+                    "json_path": json_path,
                 }
 
             self._site_to_files = {k: v for k, v in by_site.items()}
@@ -194,6 +194,13 @@ class IrrigationDataSplitter:
 
             if not self._sites:
                 logger.warning("No paired (image, mask) found under GRIT directories")
+
+            # Optional summary to help debug usable count
+            try:
+                total_pairs = sum(len(v) for v in self._site_to_files.values())
+                logger.info(f"[scan] GRIT sites={len(self._sites)} paired_files={total_pairs}")
+            except Exception:
+                pass
 
             return  # End GRIT branch
 
@@ -481,11 +488,14 @@ class IrrigationDataSplitter:
 
             if self._grit_mode and stem in self._stem_to_paths:
                 rec = self._stem_to_paths[stem]
+                # --- MOD: handle optional json_path safely (might be None) ---
+                jp = rec.get("json_path")
+                jp_str = str(Path(jp).resolve()) if jp else ""
                 rows.append({
                     "stem": stem,
                     "image_path": str(Path(rec["image_path"]).resolve()),
                     "label_path": str(Path(rec["label_path"]).resolve()),
-                    "json_path":  str(Path(rec["json_path"]).resolve()),
+                    "json_path":  jp_str,
                     "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
                 })
             else:
