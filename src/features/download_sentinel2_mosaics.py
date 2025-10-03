@@ -383,33 +383,30 @@ def get_dense_time_windows(center_date: datetime):
     return [(start + i * window, start + (i + 1) * window) for i in range(total)]
 
 def calculate_indices(img10: np.ndarray):
-    img = img10.astype(np.float32) / 10000.0
-    B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12 = img[:10]
+    """
+    img10: (10,H,W) int16 reflectance in [0..10000], NO_DATA = -9999
+    returns: ndvi, evi, ndwi as int16 scaled by 10000, NO_DATA where invalid
+    """
+    # Helper: turn int16 → masked float in [0..1], masking NO_DATA pixels
+    def m(a_int):
+        return np.ma.masked_equal(a_int, NO_DATA).astype(np.float32) / 10000.0
 
-    ndvi = np.full(B2.shape, NO_DATA, dtype=np.int16)
-    evi  = np.full(B2.shape, NO_DATA, dtype=np.int16)
-    ndwi = np.full(B2.shape, NO_DATA, dtype=np.int16)
+    B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = [m(b) for b in img10[:10]]
 
-    valid_ndvi = (B8 + B4) != 0
-    valid_evi  = (B8 + 6*B4 - 7.5*B2 + 1) != 0
-    valid_ndwi = (B8 + B11) != 0
+    # Textbook formulas; masked arrays will auto-mask NO_DATA 和 denom==0
+    ndvi = (B8 - B4) / (B8 + B4)
+    evi  = 2.5 * (B8 - B4) / (B8 + 6.0 * B4 - 7.5 * B2 + 1.0)
+    ndwi = (B8 - B11) / (B8 + B11)
 
-    with np.errstate(divide='ignore', invalid='ignore'):
-        v = np.zeros_like(B2, dtype=np.float32)
+    # Clip to [-1,1] and convert back to int16 with NO_DATA where masked
+    def to_int16(ma):
+        ma = np.ma.clip(ma, -1.0, 1.0)
+        out = np.full(ma.shape, NO_DATA, dtype=np.int16)
+        valid = ~np.ma.getmaskarray(ma)
+        out[valid] = (ma[valid] * 10000.0).astype(np.int16)
+        return out
 
-        v.fill(0.0); num = (B8 - B4); den = (B8 + B4)
-        v[valid_ndvi] = num[valid_ndvi] / den[valid_ndvi]
-        v = np.clip(v, -1.0, 1.0); ndvi[valid_ndvi] = (v[valid_ndvi] * 10000).astype(np.int16)
-
-        v.fill(0.0); num = (B8 - B4) * 2.5; den = (B8 + 6*B4 - 7.5*B2 + 1)
-        ok = valid_evi; v[ok] = num[ok] / den[ok]
-        v = np.clip(v, -1.0, 1.0); evi[ok] = (v[ok] * 10000).astype(np.int16)
-
-        v.fill(0.0); num = (B8 - B11); den = (B8 + B11)
-        ok = valid_ndwi; v[ok] = num[ok] / den[ok]
-        v = np.clip(v, -1.0, 1.0); ndwi[ok] = (v[ok] * 10000).astype(np.int16)
-
-    return ndvi, evi, ndwi
+    return to_int16(ndvi), to_int16(evi), to_int16(ndwi)
 
 def _wipe_slice_to_nodata():
     """Return a full-slice array (14,H,W) filled with NO_DATA."""
