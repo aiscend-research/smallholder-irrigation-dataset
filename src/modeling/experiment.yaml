@@ -15,6 +15,11 @@ data:
   random_state: 42
   # y_mode defaults to "csv_then_label" (left unspecified in the runner)
 
+  # --- Memory management (NEW - prevents OOM errors) ---
+  use_memmap: true              # Use memory-mapped files for large datasets
+  batch_size: 100               # Process 100 images at a time
+  pixels_per_image: null        # null = use ALL pixels (with memmap)
+
   # --- Label CSV (if provided, used for stratification; otherwise fallback to label Band-2) ---
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
