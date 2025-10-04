@@ -13,12 +13,9 @@ data:
   val_size: 0.2
   min_samples_per_class: 5
   random_state: 42
-  # y_mode defaults to "csv_then_label" (left unspecified in the runner)
 
-  # --- Memory management (NEW - prevents OOM errors) ---
-  use_memmap: true              # Use memory-mapped files for large datasets
-  batch_size: 100               # Process 100 images at a time
-  pixels_per_image: null        # null = use ALL pixels (with memmap)
+  # --- Memory management (with 128GB RAM, load everything directly) ---
+  pixels_per_image: null        # null = use ALL pixels (loads into RAM)
 
   # --- Label CSV (if provided, used for stratification; otherwise fallback to label Band-2) ---
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
@@ -26,24 +23,13 @@ data:
   # --- Output root (used to write splits and experiments) ---
   data_dir: "data/modeling"
 
-  # --- GRIT cloud paths (NEW and important) ---
+  # --- GRIT cloud paths ---
   grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features"
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
 
   # --- Label/Image bands used downstream ---
-  label_bands: [2]          # keep as-is; training/eval will read the specified label band(s)
-  image_bands: ["EVI"]      # set if your Dataset expects specific image bands
-
-  # ---- The following keys are not used by the integrated runner (safe to keep; ignored) ----
-  use_auto_splitting: true
-  splits_dir: "data/modeling/splits"
-  create_folder_structure: true
-  copy_files: false
-  # Manual file lists are only relevant if you disable automatic splitting
-  train_files: ["site_-15.04_26.69_2023_1"]
-  val_files: ["site_-15.04_26.69_2023_1"]
-  # Avoid duplicating label_bands here; the one above is used
-  # time_step_selection: null
+  label_bands: [2]
+  image_bands: ["EVI"]
 
 model:
   type: "random_forest" 
