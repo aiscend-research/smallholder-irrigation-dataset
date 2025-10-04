@@ -288,9 +288,9 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     X_train, y_train = flatten_dataset_from_tuples(train_ds, pixels_per_image=pixels_per_image)
     X_val, y_val = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
 
-    # Use only first 2 label bands
-    y_train = y_train[:, :2]
-    y_val = y_val[:, :2]
+    # Use only first label band and flatten to 1D (scikit-learn expects 1D targets)
+    y_train = y_train[:, 0]  # Shape: (n_samples,)
+    y_val = y_val[:, 0]
 
     logger.info(f"[{fold_name}] Training model...")
     clf = train_model(X_train, y_train, model_type, **hyperparams)
