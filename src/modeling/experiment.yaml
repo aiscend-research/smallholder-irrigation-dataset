@@ -1,16 +1,21 @@
+# NOTE: Data splitting logic is disabled for this test config. Manual split in use.
 name: "rf_baseline"
 
+imputation:
+  mode: none   # options: none, drop, temporal
+  fill_constant: 0.0   # used only for temporal
+
 data:
-  dataset_path: "multi-temporal-crop-classification-subset"
-  train_subset_size: 1000 #subseting a 1000 pixels
-  test_subset_size: 1000
+  train_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/train"
+  val_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/val"
+  image_bands: null   # e.g. ["B3"], use null for default
+  time_step_selection: null
 
 model:
   type: "random_forest" # options: "gradient_boosting", "random_forest"
-
-  # Only the hyperparameters corresponding to the above model type will be used in the experiement designation
+  save_feature_importance: true  # If true, saves feature importance to CSV
+  # Only the hyperparameters corresponding to the above model type will be used in the experiment designation
   hyperparameters: # ignored if not a random_forest model
-    
     random_forest: 
       n_estimators: 100
       random_state: 42
@@ -25,21 +30,10 @@ model:
       random_state: 42
 
 visualization:
-  colors:
-    - "#0000FF"
-    - "#000088"
-    - "#00FF00"
-    - "#00FFFF"
-    - "#006600"
-    - "#A9A9A9"
-    - "#3399FF"
-    - "#FFFF00"
-    - "#FFCC00"
-    - "#FFA500"
-    - "#FF0000"
-    - "#990000"
-    - "#800000"
   num_samples: 2
 
+evaluation:
+  compute_detailed_metrics: true
+
 output:
-  base_dir: "./experiments"
+  base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

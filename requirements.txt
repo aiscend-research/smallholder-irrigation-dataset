@@ -7,8 +7,8 @@ ipykernel
 geopy>=2.4.1
 matplotlib
 seaborn
-terratorch
-tqdm
-sklearn
-joblib
+torch
+tqdm~=4.67.1
+scikit-learn~=1.7.1
+joblib~=1.5.1
 rapidfuzz>=3.13.0

@@ -51,6 +51,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Test files
+test_code.py
+
 # Translations
 *.mo
 *.pot
@@ -173,6 +176,7 @@ data/sampling/samples/*
 !data/sampling/samples/random_sample/*
 !data/targeting/
 data/targeting/features/
+data/modeling
 
 *.sh
 
@@ -200,3 +204,7 @@ secrets/earthengine-key.json
 
 .RData
 .Rhistory
+data/labels/labeled_surveys/random_sample/images_districts_ag.csv
+
+.idea/*
+*/.idea/*
