@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-This script:
-1. Builds spatially safe splits (siteNumeric grouping; optional stratification)
-   by calling prepare_and_export_splits() from data_splitting.py.
-2. Consumes the produced *.txt lists and manifest.csv (no file staging needed).
-3. Runs K-fold CV over the training pool with a held-out test list.
+Run K-fold cross-validation for irrigation classification with site-aware splits.
 
-Loads data directly into RAM - designed for systems with sufficient memory (64GB+).
+What this script does:
+1) Builds spatially safe splits (grouped by siteNumeric; optional stratification)
+   This also produces a held-out test list, which this script does not evaluate on.
+2) Reads train/val file lists and a CV manifest CSV
+   (mapping stem -> absolute image_path/label_path) — no file staging/copying.
+3) For each fold: loads scenes from disk, flattens to tabular features,
+   trains the model, and computes metrics on the fold's validation set.
+4) Computes detailed metrics over multiple factors and generates comprehensive 
+   visualization plots.
 """
 
 import os
@@ -16,10 +20,13 @@ import json
 import yaml
 import shutil
 import logging
+import glob
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
+from joblib import dump
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
@@ -28,8 +35,10 @@ ROOT = project_root
 
 from src.modeling.ml_pipeline.ml_model import train_model
 from src.modeling.ml_pipeline.evaluation import model_metrics
+from src.modeling.ml_pipeline.evaluation import metrics_over_factors, plot_metrics_over_factors
 from src.modeling.ml_pipeline.evaluation import export_feature_importances
 from src.modeling.ml_pipeline.evaluation import plot_band_time_importance
+from src.modeling.ml_pipeline.evaluation import plot_band_importance, plot_time_importance
 from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
 logging.basicConfig(
@@ -73,6 +82,7 @@ def resolve_config_path(config_path: str = "src/modeling/experiment.yaml") -> st
 
 
 def load_experiment(config_path: str = "src/modeling/experiment.yaml") -> dict:
+    """Load the YAML config and return it as a Python dict."""
     cfg_path = resolve_config_path(config_path)
     with open(cfg_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -93,8 +103,8 @@ def load_dataset_from_manifest(
     label_bands: list[int],
 ) -> list:
     """
-    Load image/label data directly from absolute paths in manifest.
-    Returns a list of (image_array, label_array) tuples.
+    Load image/label data directly from absolute paths in CV manifest.
+    Returns a list of (image_array, label_array, stem) tuples.
     """
     try:
         import rasterio
@@ -136,7 +146,8 @@ def load_dataset_from_manifest(
             with rasterio.open(lab_path) as src:
                 label = src.read(label_bands)
             
-            dataset.append((image, label))
+            # Store stem for ID extraction later
+            dataset.append((image, label, stem))
             
             if (i + 1) % 50 == 0:
                 logger.info(f"[load] Loaded {len(dataset)}/{i + 1} samples (progress: {i+1}/{len(stems)})")
@@ -167,16 +178,22 @@ def load_dataset_from_manifest(
 
 def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> tuple:
     """
-    Flatten dataset from list of (image, label) tuples with optional pixel sampling.
+    Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling.
     Converts spatial image data into feature vectors for ML.
     
     Args:
-        dataset: List of (image, label) tuples
+        dataset: List of (image, label, stem) tuples
         pixels_per_image: Number of pixels to randomly sample per image.
                          If None, uses all pixels.
+    
+    Returns:
+        X: Feature matrix (n_pixels, n_bands)
+        y: Label matrix (n_pixels, n_label_bands)
+        stems: List of stem identifiers for each sample
     """
     X_list = []
     y_list = []
+    stems_list = []
     
     sampling_msg = f"sampling {pixels_per_image} pixels per image" if pixels_per_image else "using ALL pixels"
     logger.info(f"[flatten] Flattening {len(dataset)} samples ({sampling_msg})...")
@@ -184,7 +201,7 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
     total_pixels_original = 0
     total_pixels_used = 0
     
-    for idx, (image, label) in enumerate(dataset):
+    for idx, (image, label, stem) in enumerate(dataset):
         n_bands, height, width = image.shape
         total_pixels = height * width
         total_pixels_original += total_pixels
@@ -207,6 +224,7 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
         
         X_list.append(X_sample)
         y_list.append(y_sample)
+        stems_list.append(stem)
         
         if (idx + 1) % 100 == 0:
             logger.info(f"[flatten] Processed {idx + 1}/{len(dataset)} samples")
@@ -219,7 +237,7 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
         reduction_pct = 100 * (1 - total_pixels_used / total_pixels_original)
         logger.info(f"[flatten] Total pixels: {total_pixels_used:,} / {total_pixels_original:,} ({reduction_pct:.1f}% reduction)")
     
-    return X, y
+    return X, y, stems_list
 
 
 def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
@@ -237,12 +255,12 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
             axes = axes.reshape(1, -1)
         
         for idx, sample_idx in enumerate(sample_indices):
-            image, label = dataset[sample_idx]
+            image, label, stem = dataset[sample_idx]
             
             n_bands, height, width = image.shape
             X_sample = image.reshape(n_bands, -1).T
             y_pred = model.predict(X_sample)
-            y_pred_img = y_pred.reshape(height, width, -1)
+            y_pred_img = y_pred.reshape(height, width)
             
             if image.shape[0] >= 3:
                 rgb = np.stack([image[2], image[1], image[0]], axis=-1)
@@ -253,7 +271,7 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
             axes[idx, 1].imshow(label[0], cmap='viridis')
             axes[idx, 1].set_title("Ground Truth")
             
-            axes[idx, 2].imshow(y_pred_img[:, :, 0], cmap='viridis')
+            axes[idx, 2].imshow(y_pred_img, cmap='viridis')
             axes[idx, 2].set_title("Prediction")
             
             for ax in axes[idx]:
@@ -270,12 +288,15 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
 
 
 def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_type, 
-                           hyperparams, fold_name="", pixels_per_image=None):
+                           hyperparams, fold_name="", pixels_per_image=None, 
+                           exp_cfg=None, fold_dir=None):
     """
-    Train and evaluate a single fold.
+    Train and evaluate a single fold with comprehensive metrics.
     
     Args:
         pixels_per_image: If None, uses all pixels. Otherwise samples this many per image.
+        exp_cfg: Experiment configuration for detailed metrics
+        fold_dir: Directory to save fold-specific outputs
     """
     
     logger.info(f"[{fold_name}] Loading training data...")
@@ -285,19 +306,85 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     val_ds = load_dataset_from_manifest(val_stems, manifest, label_bands)
 
     logger.info(f"[{fold_name}] Extracting features...")
-    X_train, y_train = flatten_dataset_from_tuples(train_ds, pixels_per_image=pixels_per_image)
-    X_val, y_val = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
+    X_train, y_train_full, train_stems_list = flatten_dataset_from_tuples(train_ds, pixels_per_image=pixels_per_image)
+    X_val, y_val_full, val_stems_list = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
 
-    # Use only first label band and flatten to 1D (scikit-learn expects 1D targets)
-    y_train = y_train[:, 0]  # Shape: (n_samples,)
-    y_val = y_val[:, 0]
+    # Use only first label band for training (binary classification)
+    y_train = y_train_full[:, 0]  # Shape: (n_samples,)
+    y_val_for_training = y_val_full[:, 0]
 
     logger.info(f"[{fold_name}] Training model...")
     clf = train_model(X_train, y_train, model_type, **hyperparams)
     
     logger.info(f"[{fold_name}] Evaluating...")
     y_pred = clf.predict(X_val)
-    metrics = model_metrics(y_pred, y_val)
+    
+    # Basic metrics
+    metrics = model_metrics(y_pred, y_val_for_training)
+    
+    # --- Detailed metrics computation (if configured) ---
+    if exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False):
+        try:
+            logger.info(f"[{fold_name}] Computing detailed metrics over factors...")
+            
+            # Extract unique IDs from stems (format: {uid}_{site}_{date}_image)
+            ids = np.array([int(stem.split('_')[0]) for stem in val_stems_list], dtype=int)
+            
+            # Reconstruct spatial dimensions from validation dataset
+            n_imgs = len(val_ds)
+            first_img, first_label, _ = val_ds[0]
+            H = first_img.shape[1]  # Height
+            W = first_img.shape[2]  # Width
+            
+            # Reshape predictions and ground truth back to spatial format
+            # y_pred and y_val_for_training are currently 1D pixel arrays
+            # We need to reshape them back to (n_imgs, H, W)
+            pixels_per_img = H * W
+            y_pred_spatial = y_pred.astype(int).reshape(n_imgs, H, W)
+            y_test_spatial = y_val_for_training.astype(int).reshape(n_imgs, H, W)
+            
+            # Extract label metadata from last 6 bands of y_val_full
+            # y_val_full shape: (n_pixels, n_label_bands)
+            # We need bands -6: reshaped to (n_imgs, 6, H, W)
+            if y_val_full.shape[1] >= 8:  # Need at least 8 bands (2 main + 6 metadata)
+                label_metadata = (
+                    y_val_full[:, -6:]                    # (n_pixels, 6)
+                    .reshape(n_imgs, H, W, 6)             # (n_imgs, H, W, 6)
+                    .transpose(0, 3, 1, 2)                # (n_imgs, 6, H, W)
+                    .astype(int)
+                )
+            else:
+                logger.warning(f"[{fold_name}] Not enough label bands for metadata. Skipping detailed metrics.")
+                label_metadata = None
+            
+            if label_metadata is not None and fold_dir:
+                # Create detailed metrics directory for this fold
+                detailed_dir = os.path.join(fold_dir, "detailed_metrics")
+                plots_dir = os.path.join(detailed_dir, "plots")
+                os.makedirs(plots_dir, exist_ok=True)
+                
+                # Compute metrics over factors
+                detailed_metrics = metrics_over_factors(
+                    y_pred=y_pred_spatial,
+                    y_test=y_test_spatial,
+                    multi_class=False,
+                    label_metadata=label_metadata,
+                    ids=ids,
+                    metrics_path=detailed_dir
+                )
+                logger.info(f"[{fold_name}] Saved detailed metrics JSON to: {os.path.join(detailed_dir, 'metrics.json')}")
+                
+                # Generate plots
+                try:
+                    plot_metrics_over_factors(metrics_json=detailed_metrics, save_dir=plots_dir)
+                    logger.info(f"[{fold_name}] Saved detailed metrics plots to: {plots_dir}")
+                except Exception as plot_e:
+                    logger.warning(f"[{fold_name}] Failed to plot detailed metrics: {plot_e}")
+        
+        except Exception as e:
+            import traceback
+            logger.warning(f"[{fold_name}] Failed to compute detailed metrics: {e}")
+            traceback.print_exc()
 
     return clf, metrics, val_ds, len(train_ds), len(val_ds)
 
@@ -349,7 +436,19 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     
     logger.info(f"[cv] Running {len(fold_dirs)} folds...")
     
-    for fold_dir in fold_dirs:
+    # Get band names for feature importance
+    image_bands = exp_cfg["data"].get("image_bands", None)
+    if not image_bands:
+        # Try to import default band names
+        try:
+            from src.modeling.custom_dataset import SHORT_BAND_NAMES
+            BAND_NAMES = SHORT_BAND_NAMES
+        except Exception:
+            BAND_NAMES = [f"Band{i+1}" for i in range(14)]  # Default fallback
+    else:
+        BAND_NAMES = image_bands
+    
+    for fold_idx, fold_dir in enumerate(fold_dirs, start=1):
         tr_txt = fold_dir / "train_files.txt"
         va_txt = fold_dir / "val_files.txt"
         if not tr_txt.exists() or not va_txt.exists():
@@ -360,10 +459,20 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         val_stems = load_stems(str(va_txt))
         logger.info(f"[{fold_dir.name}] train={len(train_stems)}, val={len(val_stems)}")
 
+        # Create fold-specific output directory
+        fold_output_dir = os.path.join(experiment_dir, fold_dir.name)
+        os.makedirs(fold_output_dir, exist_ok=True)
+
         clf, metrics, val_ds, train_size, val_size = train_and_evaluate_fold(
             train_stems, val_stems, manifest, label_bands, model_type, hyperparams, 
-            fold_name=fold_dir.name, pixels_per_image=pixels_per_image
+            fold_name=fold_dir.name, pixels_per_image=pixels_per_image,
+            exp_cfg=exp_cfg, fold_dir=fold_output_dir
         )
+
+        # Save fold model
+        model_path = os.path.join(fold_output_dir, "model.pkl")
+        dump(clf, model_path)
+        logger.info(f"[{fold_dir.name}] Model saved to {model_path}")
 
         results.append({
             "fold": fold_dir.name,
@@ -373,11 +482,84 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         })
         logger.info(f"[{fold_dir.name}] Metrics:\n{json.dumps(metrics, indent=2)}")
         
-        # Save visualization for first fold only
-        if len(results) == 1:
-            num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
-            vis_path = os.path.join(experiment_dir, f"visualization_{fold_dir.name}.png")
-            plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
+        # Save visualization for each fold
+        num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
+        vis_path = os.path.join(fold_output_dir, f"visualization_{fold_dir.name}.png")
+        plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
+        
+        # --- Feature importance export for this fold ---
+        save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
+        if save_feat_imp and hasattr(clf, "estimators_"):
+            try:
+                # Infer number of timesteps from first sample
+                first_img, _, _ = val_ds[0]
+                N_TIMESTEPS = first_img.shape[0] // len(BAND_NAMES)  # Assuming bands × timesteps structure
+                
+                logger.info(f"[{fold_dir.name}] Exporting feature importances...")
+                
+                # Create subfolders for CSVs and plots
+                fi_root_dir = os.path.join(fold_output_dir, "feature_importance")
+                fi_csv_dir = os.path.join(fi_root_dir, "csv")
+                fi_plot_dir = os.path.join(fi_root_dir, "plots")
+                os.makedirs(fi_csv_dir, exist_ok=True)
+                os.makedirs(fi_plot_dir, exist_ok=True)
+                
+                # Export feature importances to CSV
+                export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv_dir)
+                
+                # Move any legacy CSVs
+                legacy_csvs = glob.glob(os.path.join(fold_output_dir, "feature_importance*.csv"))
+                for src in legacy_csvs:
+                    dst = os.path.join(fi_csv_dir, os.path.basename(src))
+                    try:
+                        if os.path.abspath(src) != os.path.abspath(dst):
+                            shutil.move(src, dst)
+                    except Exception as e:
+                        logger.warning(f"[{fold_dir.name}] Could not move CSV {src}: {e}")
+                
+                # Plot feature importances
+                band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
+                time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
+                band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
+                
+                if os.path.exists(band_csv):
+                    png_path = os.path.join(fi_plot_dir, f"band_importance_{model_type}.png")
+                    try:
+                        plot_band_importance(band_csv, band_names=BAND_NAMES, save_path=png_path)
+                        logger.info(f"[{fold_dir.name}] Plotted band importance to {png_path}")
+                    except Exception as e:
+                        logger.warning(f"[{fold_dir.name}] Failed to plot band importance: {e}")
+                
+                if os.path.exists(time_csv):
+                    png_path = os.path.join(fi_plot_dir, f"time_importance_{model_type}_T{N_TIMESTEPS}.png")
+                    try:
+                        plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS, save_path=png_path)
+                        logger.info(f"[{fold_dir.name}] Plotted time importance to {png_path}")
+                    except Exception as e:
+                        logger.warning(f"[{fold_dir.name}] Failed to plot time importance: {e}")
+                
+                if os.path.exists(band_time_csv):
+                    png_path = os.path.join(fi_plot_dir, f"band_time_importance_{model_type}_T{N_TIMESTEPS}.png")
+                    try:
+                        plot_band_time_importance(
+                            importance_df=band_time_csv,
+                            band_names=BAND_NAMES,
+                            num_timesteps=N_TIMESTEPS,
+                            save_path=png_path
+                        )
+                        logger.info(f"[{fold_dir.name}] Plotted band-time heatmap to {png_path}")
+                    except Exception as e:
+                        logger.warning(f"[{fold_dir.name}] Failed to plot band-time heatmap: {e}")
+                
+                logger.info(f"[{fold_dir.name}] Feature importance CSVs saved under: {fi_csv_dir}")
+                logger.info(f"[{fold_dir.name}] Feature importance plots saved under: {fi_plot_dir}")
+                
+            except Exception as e:
+                import traceback
+                logger.warning(f"[{fold_dir.name}] Failed to export feature importances: {e}")
+                traceback.print_exc()
+        elif save_feat_imp:
+            logger.warning(f"[{fold_dir.name}] Requested feature importances, but model does not support 'estimators_'")
 
     # Aggregate CV metrics
     if results:
@@ -409,7 +591,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
 def main():
     import argparse
 
-    ap = argparse.ArgumentParser(description="Irrigation ML runner (CV with site-aware splits + direct loading).")
+    ap = argparse.ArgumentParser(description="Irrigation ML runner (CV with site-aware splits + direct loading + comprehensive metrics).")
     ap.add_argument("--config", type=str, default="src/modeling/experiment.yaml",
                     help="Path to experiment configuration YAML file")
     args = ap.parse_args()

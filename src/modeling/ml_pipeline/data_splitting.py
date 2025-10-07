@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Spatially aware data splitting (siteNumeric grouping) with optional stratification.
+K-fold cross-validation for irrigation classification with site-aware splits.
 
-This script:
-1. Do splits at the **site** level first (grouping by siteNumeric), then expand to file stems.
-2. Optional stratification by labels from CSV or from *_label.tif Band-2 (irrigation presence).
-3. Expose convenience functions that export lists (no moving files) under
-  data_root/organized/splits/{split_lists, cv_lists}.
+- Builds site-grouped splits (optional class stratification); writes a held-out test list
+  but does NOT evaluate it here.
+- Reads per-fold train/val lists plus a manifest (stem → absolute image/label paths);
+  no file copying/staging.
+- For each fold: loads scenes, flattens to tabular features, trains the model,
+  and reports metrics on that fold’s validation set.
 """
 
 import os
