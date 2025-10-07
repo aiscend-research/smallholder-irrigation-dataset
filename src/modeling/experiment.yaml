@@ -2,34 +2,34 @@
 name: "rf_baseline"
 
 imputation:
-  mode: none        # options: none, drop, temporal
+  mode: none        
   fill_constant: 0.0
 
 data:
-  # --- Cross-validation and automatic splitting ---
-  use_cross_validation: true     # true: run K-fold CV; false: single train/val
+  # Cross-validation and automatic splitting
+  use_cross_validation: true     # run K-fold CV
   n_folds: 5
   test_size: 0.2
   val_size: 0.2
   min_samples_per_class: 5
   random_state: 42
 
-  # --- Memory management (with 128GB RAM, load everything directly) ---
-  pixels_per_image: null        # null = use ALL pixels (loads into RAM)
+  # Memory management
+  pixels_per_image: null        # null = use ALL pixels 
 
-  # --- Label CSV (if provided, used for stratification; otherwise fallback to label Band-2) ---
+  # Label CSV
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
-  # --- Output root (used to write splits and experiments) ---
+  # Output root 
   data_dir: "data/modeling"
 
-  # --- GRIT cloud paths ---
+  # GRIT cloud paths
   grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features"
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
 
-  # --- Label/Image bands used downstream ---
-  label_bands: [2]
-  image_bands: ["EVI"]
+  # Label/Image bands used downstream
+  label_bands: [2]              # Band 2 for basic training (code auto-loads all 8 when detailed_metrics=true)
+  image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
   type: "random_forest" 
@@ -51,7 +51,7 @@ visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true
+  compute_detailed_metrics: true    # Enable comprehensive metrics and plots
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

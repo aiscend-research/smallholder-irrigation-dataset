@@ -310,8 +310,9 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     X_val, y_val_full, val_stems_list = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
 
     # Use only first label band for training (binary classification)
-    y_train = y_train_full[:, 0]  # Shape: (n_samples,)
-    y_val_for_training = y_val_full[:, 0]
+    # Band structure: 0=type, 1=binary, 2-7=uncertainty metadata, 7=certainty
+    y_train = y_train_full[:, 1]  # Shape: (n_samples,) - binary irrigation presence
+    y_val_for_training = y_val_full[:, 1]
 
     logger.info(f"[{fold_name}] Training model...")
     clf = train_model(X_train, y_train, model_type, **hyperparams)
@@ -323,41 +324,69 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     metrics = model_metrics(y_pred, y_val_for_training)
     
     # --- Detailed metrics computation (if configured) ---
-    if exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False):
+    compute_detailed = exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
+    
+    if compute_detailed:
         try:
             logger.info(f"[{fold_name}] Computing detailed metrics over factors...")
             
-            # Extract unique IDs from stems (format: {uid}_{site}_{date}_image)
-            ids = np.array([int(stem.split('_')[0]) for stem in val_stems_list], dtype=int)
-            
-            # Reconstruct spatial dimensions from validation dataset
+            # Get dimensions from the original dataset
             n_imgs = len(val_ds)
             first_img, first_label, _ = val_ds[0]
             H = first_img.shape[1]  # Height
             W = first_img.shape[2]  # Width
-            
-            # Reshape predictions and ground truth back to spatial format
-            # y_pred and y_val_for_training are currently 1D pixel arrays
-            # We need to reshape them back to (n_imgs, H, W)
             pixels_per_img = H * W
-            y_pred_spatial = y_pred.astype(int).reshape(n_imgs, H, W)
-            y_test_spatial = y_val_for_training.astype(int).reshape(n_imgs, H, W)
             
-            # Extract label metadata from last 6 bands of y_val_full
-            # y_val_full shape: (n_pixels, n_label_bands)
-            # We need bands -6: reshaped to (n_imgs, 6, H, W)
-            if y_val_full.shape[1] >= 8:  # Need at least 8 bands (2 main + 6 metadata)
+            # Check if we need all 8 bands for detailed metrics
+            if y_val_full.shape[1] < 8:
+                logger.warning(
+                    f"[{fold_name}] Not enough label bands ({y_val_full.shape[1]}) for detailed metrics. "
+                    f"Need 8 bands. Skipping detailed metrics."
+                )
+                return clf, metrics, val_ds, len(train_ds), len(val_ds)
+            
+            # Handle pixel sampling case
+            if pixels_per_image and pixels_per_image < pixels_per_img:
+                logger.warning(
+                    f"[{fold_name}] Pixel sampling is enabled ({pixels_per_image} < {pixels_per_img}). "
+                    f"Detailed metrics require full spatial data. Re-predicting on full images..."
+                )
+                
+                # Re-load validation data without sampling for detailed metrics
+                val_ds_full = load_dataset_from_manifest(val_stems, manifest, label_bands)
+                X_val_full, y_val_full_complete, _ = flatten_dataset_from_tuples(val_ds_full, pixels_per_image=None)
+                
+                # Re-predict on full data
+                y_pred_full = clf.predict(X_val_full)
+                
+                # Reshape to spatial format
+                y_pred_spatial = y_pred_full.astype(int).reshape(n_imgs, H, W)
+                y_test_spatial = y_val_full_complete[:, 1].astype(int).reshape(n_imgs, H, W)
+                
+                # Extract metadata bands (indices 2-7, which are bands 3-8 in the file)
                 label_metadata = (
-                    y_val_full[:, -6:]                    # (n_pixels, 6)
+                    y_val_full_complete[:, 2:8]           # Get bands 2-7 (0-indexed)
                     .reshape(n_imgs, H, W, 6)             # (n_imgs, H, W, 6)
                     .transpose(0, 3, 1, 2)                # (n_imgs, 6, H, W)
                     .astype(int)
                 )
             else:
-                logger.warning(f"[{fold_name}] Not enough label bands for metadata. Skipping detailed metrics.")
-                label_metadata = None
+                # No sampling - reshape directly
+                y_pred_spatial = y_pred.astype(int).reshape(n_imgs, H, W)
+                y_test_spatial = y_val_for_training.astype(int).reshape(n_imgs, H, W)
+                
+                # Extract metadata bands (indices 2-7 in y_val_full)
+                label_metadata = (
+                    y_val_full[:, 2:8]                    # Get bands 2-7 (0-indexed)
+                    .reshape(n_imgs, H, W, 6)             # (n_imgs, H, W, 6)
+                    .transpose(0, 3, 1, 2)                # (n_imgs, 6, H, W)
+                    .astype(int)
+                )
             
-            if label_metadata is not None and fold_dir:
+            # Extract unique IDs from stems (format: {uid}_{site}_{date}_image)
+            ids = np.array([int(stem.split('_')[0]) for stem in val_stems_list], dtype=int)
+            
+            if fold_dir:
                 # Create detailed metrics directory for this fold
                 detailed_dir = os.path.join(fold_dir, "detailed_metrics")
                 plots_dir = os.path.join(detailed_dir, "plots")
@@ -380,6 +409,8 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
                     logger.info(f"[{fold_name}] Saved detailed metrics plots to: {plots_dir}")
                 except Exception as plot_e:
                     logger.warning(f"[{fold_name}] Failed to plot detailed metrics: {plot_e}")
+                    import traceback
+                    traceback.print_exc()
         
         except Exception as e:
             import traceback
@@ -412,7 +443,15 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     )
     cv_root = Path(paths["cv_dir"])
 
-    label_bands = exp_cfg["data"]["label_bands"]
+    # IMPORTANT: Load ALL 8 label bands if detailed metrics are requested
+    compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
+    if compute_detailed:
+        label_bands = list(range(1, 9))  # Bands 1-8 (1-indexed in rasterio)
+        logger.info(f"[cv] Loading all 8 label bands for detailed metrics")
+    else:
+        label_bands = exp_cfg["data"]["label_bands"]
+        logger.info(f"[cv] Loading label bands: {label_bands}")
+    
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
     
@@ -489,7 +528,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         
         # --- Feature importance export for this fold ---
         save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-        if save_feat_imp and hasattr(clf, "estimators_"):
+        if save_feat_imp and hasattr(clf, "estimators_") or hasattr(clf, "feature_importances_"):
             try:
                 # Infer number of timesteps from first sample
                 first_img, _, _ = val_ds[0]
@@ -559,7 +598,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
                 logger.warning(f"[{fold_dir.name}] Failed to export feature importances: {e}")
                 traceback.print_exc()
         elif save_feat_imp:
-            logger.warning(f"[{fold_dir.name}] Requested feature importances, but model does not support 'estimators_'")
+            logger.warning(f"[{fold_dir.name}] Requested feature importances, but model does not support feature importance extraction")
 
     # Aggregate CV metrics
     if results:
@@ -593,7 +632,7 @@ def main():
 
     ap = argparse.ArgumentParser(description="Irrigation ML runner (CV with site-aware splits + direct loading + comprehensive metrics).")
     ap.add_argument("--config", type=str, default="src/modeling/experiment.yaml",
-                    help="Path to experiment configuration YAML file")
+                    help="Path to the experiment YAML config file")
     args = ap.parse_args()
 
     exp_cfg = load_experiment(args.config)
