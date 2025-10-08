@@ -26,7 +26,7 @@ from skimage.transform import resize
 from skimage.morphology import binary_dilation, footprint_rectangle
 import gcsfs
 import ee
-
+import requests
 
 # Remove if not needed
 #os.environ.setdefault("HTTP_PROXY",  "socks5://127.0.0.1:33210")
@@ -54,6 +54,7 @@ MAX_PARALLEL_ROWS = int(os.environ.get("MAX_PARALLEL_ROWS", "1"))
 MAX_IN_FLIGHT_EXPORTS = int(os.environ.get("MAX_IN_FLIGHT_EXPORTS", "10"))
 
 NO_DATA = -9999
+NUM_WINDOWS = 37
 
 # 10 reflectance bands to keep
 BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12']
@@ -254,45 +255,8 @@ def build_weighted_scl(raw_toa: ee.Image,
     scl = ee.Image(7).where(cloud, 9).where(cirrus, 10)
     return scl.toUint16()
 
-# Export utilities
-def _inflight_exports() -> int:
-    try:
-        tasks = ee.data.getTaskList()
-        return sum(t.get('state') in ('RUNNING', 'READY') for t in tasks)
-    except Exception:
-        return MAX_IN_FLIGHT_EXPORTS
-
-def _wait_for_export_slot():
-    while _inflight_exports() >= MAX_IN_FLIGHT_EXPORTS:
-        time.sleep(15)
-
-def wait_for_task(task, label="", poll_s=20):
-    last = None
-    while True:
-        try:
-            st = task.status()
-            state = st.get("state", "UNKNOWN")
-            if state != last:
-                logging.info(f"[EE TASK] {label} -> {state}")
-                last = state
-            if state in ("COMPLETED", "FAILED", "CANCELLED"):
-                if state != "COMPLETED":
-                    logging.error(f"[EE TASK] {label} ended as {state}; details: {st}")
-                return st
-        except Exception as e:
-            logging.warning(f"[EE TASK] {label} status error: {e}")
-        time.sleep(poll_s)
-
-def _poll_gcs_exists(gs_path: str, timeout_s=1200, interval_s=10) -> bool:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        if fs.exists(gs_path):
-            return True
-        time.sleep(interval_s)
-    return fs.exists(gs_path)
-
 # Per-window export (single best image)
-def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str, region: ee.Geometry):
+def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str, region: ee.Geometry, out_dir: str):
     start_ee, end_ee = ee.Date(s), ee.Date(e)
 
     base_col = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
@@ -340,44 +304,50 @@ def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str,
     masked_ref = dos.where(cloud_mask, NO_DATA).toInt16()
     masked_scl = scl.where(cloud_mask, NO_DATA).toInt16()
 
-    unmasked_img = dos.addBands(scl).toInt16()
-    masked_img   = masked_ref.addBands(masked_scl.rename('SCL')).toInt16()
+    unmasked_img = raw.addBands(scl).toInt16()
+    masked_img = unmasked_img
 
-    desc_un = sanitize_description(prefix_base)
-    task_un = ee.batch.Export.image.toCloudStorage(
-        image=unmasked_img,
-        description=f"export_un_{desc_un}",
-        bucket=bucket,
-        fileNamePrefix=prefix_base,
-        region=region,
-        scale=10,
-        crs=_utm_epsg_from_latlon(lat, lon),
-        maxPixels=1e13
-    )
-    task_un.start()
+    # Download best masked and unmasked image locally
+    if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
 
-    task_ms = None
-    if EXPORT_BOTH:
-        masked_prefix = f"{prefix_base}_masked"
-        desc_ms = sanitize_description(masked_prefix)
-        task_ms = ee.batch.Export.image.toCloudStorage(
-            image=masked_img,
-            description=f"export_ms_{desc_ms}",
-            bucket=bucket,
-            fileNamePrefix=masked_prefix,
-            region=region,
-            scale=10,
-            crs=_utm_epsg_from_latlon(lat, lon),
-            maxPixels=1e13
-        )
-        task_ms.start()
+    un_file = f"{out_dir}/{prefix_base.split('/')[-1]}.tif"
+    url_un = unmasked_img.getDownloadURL({
+        'region': region,
+        'scale': 10,
+        'crs': _utm_epsg_from_latlon(lat, lon),
+        'format': 'GeoTIFF'
+    })
 
-    return task_un, task_ms
+    try: 
+        resp = requests.get(url_un)
+        resp.raise_for_status()
+        with open(un_file, 'wb') as f:
+            f.write(resp.content)
+    except Exception as e:
+        logging.error(f"Failed to download masked image for {prefix_base}: {e}")
+        return None, None
+
+    ms_file = f"{out_dir}/{prefix_base.split('/')[-1]}_masked.tif"
+    url_ms = masked_img.getDownloadURL({
+        'region': region,
+        'scale': 10,
+        'crs': _utm_epsg_from_latlon(lat, lon),
+        'format': 'GeoTIFF'
+    })
+
+    try: 
+        resp = requests.get(url_ms)
+        resp.raise_for_status()
+        with open(ms_file, 'wb') as f:
+            f.write(resp.content)
+    except Exception as e:
+        logging.error(f"Failed to download masked image for {prefix_base}: {e}")
+        return None, None
 
 # Client-side helpers
 def get_dense_time_windows(center_date: datetime):
     window = timedelta(days=10)
-    total  = 37
+    total  = NUM_WINDOWS
     half   = timedelta(days=5)
     start  = center_date - (total // 2) * window - half
     return [(start + i * window, start + (i + 1) * window) for i in range(total)]
@@ -417,89 +387,34 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     if REQUIRE_VERSION_TAG and (VERSION_TAG is None or VERSION_TAG.strip() == ""):
         raise RuntimeError("VERSION_TAG must be set (bump it for each full run).")
 
-    site_root = _site_root_prefix(site_id)
-    if REPLACE_EXISTING_SITE and gcs_prefix_exists(site_root):
-        logging.info(f"[CLEAN] Removing existing site folder: gs://{bucket}/{site_root}/")
-        gcs_delete_tree(site_root)
-
     windows = get_dense_time_windows(date)
     region = get_ee_bounding_box(lat, lon)
 
-    # Submit exports (skip if both files already exist)
-    task_records = []
-    for start, end in windows:
-        s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
-        base = f"{site_root}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
+    # Download a Sentinel-2 L1c image for every time window.
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        start_time = time.time()
+        futures = []
+        for start, end in windows:
+            s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+            base = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
+            un_path = os.path.join(TMP_DIR, f"{base}.tif")
+            ms_path = os.path.join(TMP_DIR, f"{base}_masked.tif")
 
-        exist_un = fs.exists(f"{bucket}/{base}.tif")
-        exist_ms = fs.exists(f"{bucket}/{base}_masked.tif") if EXPORT_BOTH else True
+            exists_un = os.path.exists(un_path)
+            exists_ms = os.path.exists(ms_path)
+            path = os.path.join(TMP_DIR, site_id)
 
-        if exist_un and exist_ms:
-            task_records.append((None, "unmasked", base, True))
-            if EXPORT_BOTH:
-                task_records.append((None, "masked", base, True))
-            continue
-
-        _wait_for_export_slot()
-        t_un, t_ms = export_window_best(lat, lon, s, e, base, region)
-        if t_un: task_records.append((t_un, "unmasked", base, False))
-        if EXPORT_BOTH and t_ms: task_records.append((t_ms, "masked", base, False))
-
-    # Wait for submitted tasks
-    final_states = {}  # (base, kind) -> "COMPLETED"/...
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {}
-        for t, kind, base, preexist in task_records:
-            if t:
-                futures[ex.submit(wait_for_task, t, f"{kind}:{base}")] = (kind, base)
-        for fut in as_completed(futures):
-            kind, base = futures[fut]
+            if not exists_un and not exists_ms:
+                futures.append(executor.submit(export_window_best, lat, lon, s, e, base, region, path))
+        
+        for future in as_completed(futures):
             try:
-                st = fut.result()
-                final_states[(base, kind)] = st.get("state", "UNKNOWN")
+                future.result()
             except Exception as e:
-                logging.error(f"[EE WAIT] {kind}:{base} -> {e}")
-                final_states[(base, kind)] = "FAILED"
+                logging.error(f"Error during export: {e}")
 
-    def should_fetch(base, kind, preexist):
-        if preexist:
-            return True
-        return final_states.get((base, kind)) == "COMPLETED"
-
-    # Poll GCS visibility ONLY for fetchable objects
-    fetch_list = []  # (gs_path, local_path)
-    for start, end in windows:
-        s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
-        base = f"{site_root}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
-
-        if should_fetch(base, "unmasked", fs.exists(f"{bucket}/{base}.tif")):
-            if _poll_gcs_exists(f"{bucket}/{base}.tif", timeout_s=1200):
-                fetch_list.append((f"{bucket}/{base}.tif",
-                                   os.path.join(TMP_DIR, f"{base}.tif")))
-            else:
-                logging.warning(f"[GCS VISIBILITY] not visible: {base}.tif")
-
-        if EXPORT_BOTH and should_fetch(base, "masked", fs.exists(f"{bucket}/{base}_masked.tif")):
-            if _poll_gcs_exists(f"{bucket}/{base}_masked.tif", timeout_s=1200):
-                fetch_list.append((f"{bucket}/{base}_masked.tif",
-                                   os.path.join(TMP_DIR, f"{base}_masked.tif")))
-            else:
-                logging.warning(f"[GCS VISIBILITY] not visible: {base}_masked.tif")
-
-    # Download only visible ones
-    os.makedirs(TMP_DIR, exist_ok=True)
-    def _download(gs_path: str, local_path: str):
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        fs.get(gs_path, local_path)
-
-    with ThreadPoolExecutor(max_workers=16) as ex:
-        futures = [ex.submit(_download, gs, loc) for gs, loc in fetch_list]
-        for f in as_completed(futures):
-            try:
-                f.result()
-            except Exception as e:
-                logging.error(f"[DOWNLOAD] {e}")
-
+        logging.info(f"All downloads completed in {time.time() - start_time} seconds")
+    
     # Build masked stack
     stack_after, meta_list = [], []
     empty_window_count = 0
@@ -507,7 +422,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
 
     for start, end in windows:
         s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
-        base = f"{site_root}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
+        base = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
         un_path = os.path.join(TMP_DIR, f"{base}.tif")
         ms_path = os.path.join(TMP_DIR, f"{base}_masked.tif")
 
@@ -725,6 +640,10 @@ def retrieve_images():
     logging.basicConfig(level=logging.INFO)
     os.makedirs(TMP_DIR, exist_ok=True)
 
+    # Suppress photometric warning from rasterio
+    logger = logging.getLogger("rasterio._env")
+    logger.addFilter(lambda record: "Photometric type-related color channels" not in record.getMessage())
+
     if REQUIRE_VERSION_TAG and (VERSION_TAG is None or VERSION_TAG.strip() == ""):
         raise RuntimeError("VERSION_TAG must be set (bump it each full run).")
 
@@ -734,15 +653,8 @@ def retrieve_images():
     logging.info(f"Starting to process {len(data)} rows from {LABEL_CSV}")
 
     rows = list(data.iterrows())
-    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_ROWS) as executor:
-        futures = {executor.submit(process_row, row): idx for idx, row in rows}
-        for future in as_completed(futures):
-            idx = futures[future]
-            try:
-                result = future.result()
-                logging.info(result)
-            except Exception as e:
-                logging.error(f"[ERROR] Row {idx}: {e}")
+    for idx, row in rows:
+        process_row(row)
 
 if __name__ == "__main__":
     retrieve_images()
