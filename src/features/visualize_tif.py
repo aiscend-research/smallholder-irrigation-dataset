@@ -14,6 +14,9 @@ import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
 
+# Add uid as command line arg
+import sys
+
 FEATURES_DIR = "data/features"
 SAVE_DIR = os.path.join(FEATURES_DIR, "visualization")
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -78,9 +81,9 @@ def plot_ndvi_grid_from_band(stack, bands, title, save_path, nodata=NO_DATA):
     for t in range(T, len(axes)):
         axes[t].axis("off")
 
-    fig.suptitle(title, fontsize=14)
+    fig.suptitle(title, fontsize=20, y=0.99)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path)
     plt.close()
     print(f"[Saved] {save_path}")
 
@@ -153,16 +156,24 @@ def plot_rgb_grid(stack, bands, title, save_path):
     for t in range(T, len(axes)):
         axes[t].axis("off")
 
-    fig.suptitle(title, fontsize=14)
+    fig.suptitle(title, fontsize=20, y=0.99)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path)
     plt.close()
     print(f"[Saved] {save_path}")
 
 
 # Main 
 if __name__ == "__main__":
-    uid = 1 # <-- set this to the uid you want to visualize
+    uid = None
+    
+    if len(sys.argv) > 1:
+        try:
+            uid = int(sys.argv[1])
+        except ValueError:
+            raise SystemExit("Usage: python3 visualize_tif.py [uid]")
+    else:
+        uid = None
 
     im_tif, im_json, lb_tif, lb_json = find_pair_files(uid)
     if not im_tif:
@@ -172,26 +183,11 @@ if __name__ == "__main__":
     stack_bef, bands_bef, _ = read_stack(im_tif, im_json)
     plot_ndvi_grid_from_band(
         stack_bef, bands_bef,
-        "NDVI Before Masking (from *image)",
-        os.path.join(SAVE_DIR, f"uid{uid}_ndvi_before_masked.png"),
+        f"NDVI After Masking (UID {uid})",
+        os.path.join(SAVE_DIR, f"uid{uid}_ndvi_masked.png"),
     )
     plot_rgb_grid(
         stack_bef, bands_bef,
-        "RGB Before Masking (from *image)",
-        os.path.join(SAVE_DIR, f"uid{uid}_rgb_before_masked.png"),
-    )
-
-    # AFTER
-    if not lb_tif:
-        raise SystemExit(f"No *_label.tif found for uid={uid}")
-    stack_aft, bands_aft, _ = read_stack(lb_tif, lb_json)
-    plot_ndvi_grid_from_band(
-        stack_aft, bands_aft,
-        "NDVI After Masking (from *label)",
-        os.path.join(SAVE_DIR, f"uid{uid}_ndvi_after_masked.png"),
-    )
-    plot_rgb_grid(
-        stack_aft, bands_aft,
-        "RGB After Masking (from *label)",
-        os.path.join(SAVE_DIR, f"uid{uid}_rgb_after_masked.png"),
+        f"RGB After Masking (UID {uid})",
+        os.path.join(SAVE_DIR, f"uid{uid}_rgb_masked.png"),
     )
