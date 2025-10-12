@@ -304,8 +304,8 @@ def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str,
     masked_ref = dos.where(cloud_mask, NO_DATA).toInt16()
     masked_scl = scl.where(cloud_mask, NO_DATA).toInt16()
 
-    unmasked_img = raw.addBands(scl).toInt16()
-    masked_img = unmasked_img
+    unmasked_img = dos.addBands(scl).toInt16()
+    masked_img   = masked_ref.addBands(masked_scl.rename('SCL')).toInt16()
 
     # Download best masked and unmasked image locally
     if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
