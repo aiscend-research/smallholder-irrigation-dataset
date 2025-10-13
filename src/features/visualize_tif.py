@@ -27,21 +27,41 @@ RGB_P_LO, RGB_P_HI = 2, 98
 
 
 def find_pair_files(unique_id: int):
-    """Return (image_tif, image_json, label_tif, label_json) for a uid."""
-    image_tif = None
-    for p in glob.glob(os.path.join(FEATURES_DIR, f"{unique_id}_*_image.tif")):
-        image_tif = p
-        break
-    if not image_tif:
-        return None, None, None, None
-    image_json = image_tif.replace("_image.tif", "_image.json")
+    """
+    Return tuple:
+      (after_tif, after_json, before_tif, before_json)
 
-    label_tif = image_tif.replace("_image.tif", "_label.tif")
-    label_json = image_tif.replace("_image.tif", "_label.json")
-    if not os.path.exists(label_tif): 
-        label_tif = None
-        label_json = None
-    return image_tif, image_json, label_tif, label_json
+    New naming (preferred):
+      - AFTER  (masked stack):     *_image.tif / *_image.json
+      - BEFORE (unmasked stack):   *_unmasked.tif / *_unmasked.json
+
+    Legacy fallback (if unmasked not found but label exists):
+      - BEFORE from *_label.tif / *_label.json
+    """
+    # Find AFTER / masked (*_image.tif)
+    after_tif = None
+    for p in glob.glob(os.path.join(FEATURES_DIR, f"{unique_id}_*_image.tif")):
+        after_tif = p
+        break
+    if not after_tif:
+        return None, None, None, None
+    after_json = after_tif.replace("_image.tif", "_image.json")
+
+    # Preferred BEFORE / unmasked
+    before_tif = after_tif.replace("_image.tif", "_unmasked.tif")
+    before_json = after_tif.replace("_image.tif", "_unmasked.json")
+
+    if not os.path.exists(before_tif) or not os.path.exists(before_json):
+        # Legacy fallback to *_label.*
+        legacy_tif = after_tif.replace("_image.tif", "_label.tif")
+        legacy_json = after_tif.replace("_image.tif", "_label.json")
+        if os.path.exists(legacy_tif) and os.path.exists(legacy_json):
+            before_tif, before_json = legacy_tif, legacy_json
+        else:
+            before_tif = None
+            before_json = None
+
+    return after_tif, after_json, before_tif, before_json
 
 
 def read_stack(tif_path, json_path):
@@ -74,7 +94,7 @@ def plot_ndvi_grid_from_band(stack, bands, title, save_path, nodata=NO_DATA):
         ndvi_raw = stack[t, ndvi_idx]
         ndvi = ndvi_raw.astype(np.float32) / 10000.0
         ndvi[ndvi_raw == nodata] = np.nan
-        im = axes[t].imshow(ndvi, cmap="RdYlGn", vmin=-1, vmax=1)
+        axes[t].imshow(ndvi, cmap="RdYlGn", vmin=-1, vmax=1)
         axes[t].set_title(f"Step {t+1}", fontsize=8)
         axes[t].axis("off")
 
@@ -148,7 +168,7 @@ def plot_rgb_grid(stack, bands, title, save_path):
     axes = axes.ravel()
 
     for t in range(T):
-        rgb = make_rgb_image(stack[t], bands)  
+        rgb = make_rgb_image(stack[t], bands)
         axes[t].imshow(rgb)
         axes[t].set_title(f"Step {t+1}", fontsize=8)
         axes[t].axis("off")
@@ -163,10 +183,10 @@ def plot_rgb_grid(stack, bands, title, save_path):
     print(f"[Saved] {save_path}")
 
 
-# Main 
+# Main
 if __name__ == "__main__":
     uid = None
-    
+
     if len(sys.argv) > 1:
         try:
             uid = int(sys.argv[1])
@@ -175,19 +195,35 @@ if __name__ == "__main__":
     else:
         uid = None
 
-    im_tif, im_json, lb_tif, lb_json = find_pair_files(uid)
-    if not im_tif:
+    after_tif, after_json, before_tif, before_json = find_pair_files(uid)
+    if not after_tif:
         raise SystemExit(f"No *_image.tif found for uid={uid} in {FEATURES_DIR}")
 
-    # BEFORE
-    stack_bef, bands_bef, _ = read_stack(im_tif, im_json)
+    # BEFORE (unmasked) — preferred from *_unmasked.*, legacy fallback to *_label.*
+    if not before_tif or not before_json:
+        print(f"[Warn] No BEFORE stack found for uid={uid} (looked for *_unmasked.tif/json or legacy *_label.tif/json)")
+    else:
+        stack_bef, bands_bef, _ = read_stack(before_tif, before_json)
+        plot_ndvi_grid_from_band(
+            stack_bef, bands_bef,
+            f"NDVI Before Masking (UID {uid})",
+            os.path.join(SAVE_DIR, f"uid{uid}_ndvi_before.png"),
+        )
+        plot_rgb_grid(
+            stack_bef, bands_bef,
+            f"RGB Before Masking (UID {uid})",
+            os.path.join(SAVE_DIR, f"uid{uid}_rgb_before.png"),
+        )
+
+    # AFTER (masked) — from *_image.*
+    stack_aft, bands_aft, _ = read_stack(after_tif, after_json)
     plot_ndvi_grid_from_band(
-        stack_bef, bands_bef,
+        stack_aft, bands_aft,
         f"NDVI After Masking (UID {uid})",
-        os.path.join(SAVE_DIR, f"uid{uid}_ndvi_masked.png"),
+        os.path.join(SAVE_DIR, f"uid{uid}_ndvi_after.png"),
     )
     plot_rgb_grid(
-        stack_bef, bands_bef,
+        stack_aft, bands_aft,
         f"RGB After Masking (UID {uid})",
-        os.path.join(SAVE_DIR, f"uid{uid}_rgb_masked.png"),
+        os.path.join(SAVE_DIR, f"uid{uid}_rgb_after.png"),
     )
