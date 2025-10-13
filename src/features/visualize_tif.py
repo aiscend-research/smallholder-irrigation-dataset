@@ -35,8 +35,6 @@ def find_pair_files(unique_id: int):
       - AFTER  (masked stack):     *_image.tif / *_image.json
       - BEFORE (unmasked stack):   *_unmasked.tif / *_unmasked.json
 
-    Legacy fallback (if unmasked not found but label exists):
-      - BEFORE from *_label.tif / *_label.json
     """
     # Find AFTER / masked (*_image.tif)
     after_tif = None
@@ -199,9 +197,9 @@ if __name__ == "__main__":
     if not after_tif:
         raise SystemExit(f"No *_image.tif found for uid={uid} in {FEATURES_DIR}")
 
-    # BEFORE (unmasked) — preferred from *_unmasked.*, legacy fallback to *_label.*
+    # BEFORE (unmasked) — from *_unmasked.*
     if not before_tif or not before_json:
-        print(f"[Warn] No BEFORE stack found for uid={uid} (looked for *_unmasked.tif/json or legacy *_label.tif/json)")
+        print(f"[Warn] No BEFORE stack found for uid={uid} (looked for *_unmasked.tif/json")
     else:
         stack_bef, bands_bef, _ = read_stack(before_tif, before_json)
         plot_ndvi_grid_from_band(
