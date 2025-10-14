@@ -1,1013 +1,584 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-This module implements spatial-aware data splitting strategies that:
-1. Split by location to avoid spatial data leakage
-2. Maintain class balance through stratified sampling
-3. Support experimentation with different label bands
-4. Handle the 8-band irrigation label structure
+K-fold cross-validation for irrigation classification with site-aware splits.
+
+- Builds site-grouped splits (optional class stratification); writes a held-out test list
+  but does NOT evaluate it here.
+- Reads per-fold train/val lists plus a manifest (stem → absolute image/label paths);
+  no file copying/staging.
+- For each fold: loads scenes, flattens to tabular features, trains the model,
+  and reports metrics on that fold’s validation set.
 """
 
-import pandas as pd
-import numpy as np
-import json
 import os
+import re
+import json
 import logging
 from pathlib import Path
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.preprocessing import LabelEncoder
-import matplotlib.pyplot as plt
-import seaborn as sns
-from typing import Dict, List, Tuple, Optional
-import warnings
+from collections import defaultdict
+from typing import Dict, List, Optional
 
-# Helper to ensure JSON-safe serialization (convert numpy types and dict keys to str)
-def convert_numpy_types(obj):
-    if isinstance(obj, dict):
-        return {str(k): convert_numpy_types(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(v) for v in obj]
-    elif hasattr(obj, 'item'):
-        return obj.item()
-    else:
-        return obj
+import numpy as np
+import pandas as pd
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
+from sklearn.model_selection import GroupKFold, StratifiedShuffleSplit
+try:
+    from sklearn.model_selection import StratifiedGroupKFold
+    _HAS_SGF = True
+except Exception:
+    _HAS_SGF = False
+
+try:
+    import rasterio
+except Exception:
+    rasterio = None
+
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def _json_safe(obj):
+    """Convert numpy scalars and keys to Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(x) for x in obj]
+    if hasattr(obj, "item"):  # numpy scalar
+        return obj.item()
+    return obj
 
 
 class IrrigationDataSplitter:
-    """
-    Handles data splitting for irrigation classification with spatial awareness.
-    
-    Supports the 8-band irrigation label structure:
-    - Band 1: Per-pixel irrigation type classification (0-5)
-    - Band 2: Per-pixel irrigation presence (0-1)
-    - Bands 3-7: Binary uncertainty explanation masks
-    - Band 8: Irrigation certainty score (0-4)
-    """
-    
-    def __init__(self, 
-                 csv_path: str,
-                 data_dir: str,
-                 random_state: int = 42):
+    """Split by siteNumeric to avoid spatial leakage; expand sites to file stems."""
+
+    _STEM_RE = re.compile(
+        r'^(?P<uid>\d+)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<kind>image|label)$'
+    )
+
+    # Additional regexes for GRIT raw file naming (images/features and masks/labels)
+    _GRIT_IMG_RE = re.compile(
+        r"^site_[^_]+_[^_]+_\d{4}_(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        re.IGNORECASE,
+    )
+    _GRIT_MASK_RE = re.compile(
+        r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)(_metadata)?\.(?P<ext>tif|json)$",
+        re.IGNORECASE,
+    )
+
+    def __init__(self, data_root: str, csv_path: Optional[str] = None, random_state: int = 42,
+                 grit_images_dir: Optional[str] = None, grit_masks_dir: Optional[str] = None):
         """
-        Initialize the data splitter.
-        
         Args:
-            csv_path: Path to the CSV file with survey data
-            data_dir: Directory containing downloaded .tif and .json files
-            random_state: Random seed for reproducible splits
+            data_root: path to "data/modeling" (the folder that contains 'organized').
+            csv_path: optional CSV for labels; expected columns: site_id (e.g., id_5168346), irrigation (0/1).
         """
+        self.data_root = Path(data_root)
         self.csv_path = csv_path
-        self.data_dir = data_dir
         self.random_state = random_state
+
+        # Local organized structure (kept for backward compatibility)
+        self.organized = self.data_root / "organized"
+        self.images_dir = self.organized / "images"
+        self.labels_dir = self.organized / "labels"
+        self.metadata_dir = self.organized / "metadata"
+
+        # GRIT mode: if both directories are provided, we scan cloud folders instead of local organized/*
+        self._grit_images_dir = Path(grit_images_dir).resolve() if grit_images_dir else None
+        self._grit_masks_dir = Path(grit_masks_dir).resolve() if grit_masks_dir else None
+        self._grit_mode = (self._grit_images_dir is not None) and (self._grit_masks_dir is not None)
+
         self.df = None
-        self.label_encoder = LabelEncoder()
-        
-        self._load_data()
-        
-    def _load_data(self):
-        """Load and prepare the survey data."""
-        self.df = pd.read_csv(self.csv_path)
-        
-        # Create unique location identifier
-        self.df['location_id'] = self.df.apply(
-            lambda row: f"{row['y']:.2f}_{row['x']:.2f}", axis=1
-        )
-        
-        self._validate_data_files()
-    
-    def _get_date_string(self, row):
-        """Generate date string from row data in format YYYY.MM.DD."""
-        return f"{row['year']}.{row['month']:02d}.{row['day']:02d}"
-        
-    def _validate_data_files(self):
-        """Validate that downloaded files exist for each survey location."""
-        existing_files = []
-        missing_locations = []
+        if csv_path and os.path.exists(csv_path):
+            try:
+                self.df = pd.read_csv(csv_path)
+            except Exception as e:
+                logger.warning(f"Failed to read CSV ({csv_path}): {e}")
 
-        for _, row in self.df.iterrows():
-            # Extract site_id number from the CSV (e.g., "id_5168346" -> "5168346")
-            site_id_number = row['site_id'].replace('id_', '')
-            date_str = self._get_date_string(row)
+        self._sites: List[str] = []
+        self._site_to_files: Dict[str, List[str]] = {}
+        self._y_by_site: Optional[Dict[str, int]] = None
 
-            image_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.tif"
-            json_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.json"
+        # In GRIT mode we build a mapping from standardized stem -> absolute cloud paths
+        # { stem: {"image_path": Path, "label_path": Path, "json_path": Path} }
+        self._stem_to_paths: Dict[str, Dict[str, Path]] = {}
 
-            tif_path = os.path.join(self.data_dir, image_filename)
-            json_path = os.path.join(self.data_dir, json_filename)
-
-            if os.path.exists(tif_path) and os.path.exists(json_path):
-                existing_files.append(image_filename.replace('.tif', ''))
-            else:
-                missing_locations.append(image_filename)
-
-        logger.info(f"Found {len(existing_files)} complete data files")
-        logger.warning(f"Missing {len(missing_locations)} data files")
-
-        # Filter to only include locations with complete data
-        def file_exists(row):
-            site_id_number = row['site_id'].replace('id_', '')
-            date_str = self._get_date_string(row)
-            image_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.tif"
-            json_filename = f"{row['unique_id']}_{site_id_number}_{date_str}_image.json"
-            tif_path = os.path.join(self.data_dir, image_filename)
-            json_path = os.path.join(self.data_dir, json_filename)
-            return os.path.exists(tif_path) and os.path.exists(json_path)
-
-        self.df = self.df[self.df.apply(file_exists, axis=1)]
-
-        # Log number of locations and a sample of file basenames for debugging
-        remaining_file_bases = []
-        for _, row in self.df.iterrows():
-            site_id_number = row['site_id'].replace('id_', '')
-            date_str = self._get_date_string(row)
-            file_base = f"{row['unique_id']}_{site_id_number}_{date_str}_image"
-            remaining_file_bases.append(file_base)
-        logger.info(f"Final dataset size: {len(self.df)} locations after file filtering")
-        logger.debug(f"All remaining file basenames: {remaining_file_bases}")
-        logger.info(f"First {min(5, len(remaining_file_bases))} file basenames: {remaining_file_bases[:5]}")
-        
-    def get_band_info(self) -> Dict:
-        """
-        Get information about the 8-band irrigation label structure.
-        
-        Returns:
-            Dictionary with band descriptions and value ranges
-        """
-        return {
-            "band_1": {
-                "name": "Per-pixel irrigation type classification",
-                "type": "Categorical",
-                "values": {
-                    0: "No irrigation",
-                    1: "Small-scale",
-                    2: "Tree crop", 
-                    3: "Industrial",
-                    4: "Lawn",
-                    5: "Covered"
-                }
-            },
-            "band_2": {
-                "name": "Per-pixel irrigation presence",
-                "type": "Binary",
-                "values": {
-                    0: "No irrigation",
-                    1: "Irrigation"
-                }
-            },
-            "band_3": {
-                "name": "Unclear signs of agriculture",
-                "type": "Binary uncertainty mask",
-                "values": {0: "Clear", 1: "Unclear"}
-            },
-            "band_4": {
-                "name": "Only slightly green",
-                "type": "Binary uncertainty mask", 
-                "values": {0: "Green enough", 1: "Slightly green"}
-            },
-            "band_5": {
-                "name": "Uneven",
-                "type": "Binary uncertainty mask",
-                "values": {0: "Even", 1: "Uneven"}
-            },
-            "band_6": {
-                "name": "May naturally be green",
-                "type": "Binary uncertainty mask",
-                "values": {0: "Not naturally green", 1: "May be naturally green"}
-            },
-            "band_7": {
-                "name": "May be a fishpond",
-                "type": "Binary uncertainty mask",
-                "values": {0: "Not fishpond", 1: "May be fishpond"}
-            },
-            "band_8": {
-                "name": "Irrigation certainty score",
-                "type": "Categorical",
-                "values": {
-                    0: "No irrigation",
-                    1: "Probably not irrigated",
-                    2: "Probably not irrigated", 
-                    3: "May be irrigated",
-                    4: "Probably irrigated"
-                }
-            }
-        }
-    
-    def _get_location_labels_and_files(self, stratification_band: int = 2):
-        """
-        Get location-level labels and file IDs for stratification.
-        
-        Args:
-            stratification_band: Which band to use for stratification (1-8)
-            
-        Returns:
-            Tuple of (location_labels, location_files) as numpy arrays
-        """
-        unique_locations = self.df['location_id'].unique()
-        
-        location_labels = []
-        location_files = []
-        
-        for loc_id in unique_locations:
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            primary_survey = loc_data.iloc[0]
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            date_str = self._get_date_string(primary_survey)
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
-            
-            # Use irrigation presence (band 2) for stratification by default
-            if stratification_band == 2:
-                label = primary_survey['irrigation']  # Binary irrigation presence
-            else:
-                # For other bands, load the actual label files
-                label = primary_survey['irrigation']
-            
-            location_labels.append(label)
-            location_files.append(file_id)
-        
-        return np.array(location_labels), np.array(location_files)
-    
-    def spatial_stratified_split(self,
-                                test_size: float = 0.2,
-                                val_size: float = 0.2,
-                                stratification_band: int = 2,
-                                min_samples_per_class: int = 5,
-                                random_split_only: bool = False) -> Dict:
-        """
-        Perform spatial stratified split by location.
-        
-        Args:
-            test_size: Proportion of locations for test set
-            val_size: Proportion of remaining locations for validation
-            stratification_band: Which band to use for stratification (1-8)
-            min_samples_per_class: Minimum samples per class for stratification
-            random_split_only: If True, performs a basic random split (no stratification or class balance).
-            
-        Returns:
-            Dictionary with train/val/test file lists and metadata
-        """
-        # Option for fast, non-stratified random split for quick pipeline testing
-        if random_split_only:
-            logger.info("Performing basic random split (no stratification or class balance).")
-            # Get unique location files (no labels needed)
-            location_labels, location_files = self._get_location_labels_and_files(stratification_band)
-            total = len(location_files)
-            if total < 3:
-                logger.warning(f"Warning: Only {total} locations available. Using all for training. No test/val splits possible.")
-                metadata = {
-                    'total_locations': int(total),
-                    'train_locations': int(total),
-                    'val_locations': 0,
-                    'test_locations': 0,
-                    'stratification_band': int(stratification_band),
-                    'class_distribution': {
-                        'train': {},
-                        'val': {},
-                        'test': {}
-                    },
-                    'warning': 'Insufficient samples for proper train/val/test split'
-                }
-                split_info = {
-                    'train_files': location_files.tolist() if total > 0 else [],
-                    'val_files': [],
-                    'test_files': [],
-                    'metadata': convert_numpy_types(metadata)
-                }
-                return split_info
-            # Perform random split
-            train_files, test_files = train_test_split(
-                location_files, test_size=test_size, random_state=self.random_state, shuffle=True
-            )
-            if len(train_files) > 1:
-                # Split train into train/val
-                train_files, val_files = train_test_split(
-                    train_files, test_size=val_size / (1 - test_size), random_state=self.random_state, shuffle=True
-                )
-            else:
-                val_files = []
-            train_files = train_files.tolist() if len(train_files) > 0 else []
-            val_files = val_files.tolist() if len(val_files) > 0 else []
-            test_files = test_files.tolist() if len(test_files) > 0 else []
-            metadata = {
-                'total_locations': int(total),
-                'train_locations': int(len(train_files)),
-                'val_locations': int(len(val_files)),
-                'test_locations': int(len(test_files)),
-                'stratification_band': int(stratification_band),
-                'class_distribution': {
-                    'train': {},
-                    'val': {},
-                    'test': {}
-                },
-                'note': 'Random split only, no stratification or class balance'
-            }
-            split_info = {
-                'train_files': train_files,
-                'val_files': val_files,
-                'test_files': test_files,
-                'metadata': convert_numpy_types(metadata)
-            }
-            return split_info
-
-        # --- Existing logic below ---
-        # Get location-level labels and files
-        location_labels, location_files = self._get_location_labels_and_files(stratification_band)
-
-        # Check class balance
-        unique_labels, counts = np.unique(location_labels, return_counts=True)
-        logger.info(f"Class distribution in {len(location_labels)} locations:")
-        for label, count in zip(unique_labels, counts):
-            logger.info(f"  Class {label}: {count} locations")
-
-        # Special logic for small datasets
-        if len(location_labels) <= 3:
-            if min_samples_per_class > 1:
-                logger.warning(
-                    f"Very few locations ({len(location_labels)}); lowering min_samples_per_class to 1."
-                )
-                min_samples_per_class = 1
-
-        valid_classes = unique_labels[counts >= min_samples_per_class]
-        valid_mask = np.isin(location_labels, valid_classes)
-
-        if not valid_mask.all():
-            logger.warning(f"Warning: {np.sum(~valid_mask)} locations removed due to insufficient class samples (min={min_samples_per_class})")
-            location_labels = location_labels[valid_mask]
-            location_files = location_files[valid_mask]
-
-        # Fallback logic and user-friendly warning for insufficient samples
-        if len(location_files) < 3:
-            logger.warning(f"Warning: Only {len(location_files)} locations available. Using all for training. No test/val splits possible.")
-            # Prepare metadata and ensure JSON-safe types
-            metadata = {
-                'total_locations': int(len(location_files)),
-                'train_locations': int(len(location_files)),
-                'val_locations': 0,
-                'test_locations': 0,
-                'stratification_band': int(stratification_band),
-                'class_distribution': {
-                    'train': {str(k): int(v) for k, v in zip(*np.unique(location_labels, return_counts=True))}
-                },
-                'warning': 'Insufficient samples for proper train/val/test split'
-            }
-            split_info = {
-                'train_files': location_files.tolist() if len(location_files) > 0 else [],
-                'val_files': [],
-                'test_files': [],
-                'metadata': convert_numpy_types(metadata)
-            }
-            return split_info
-
-        # Try stratified split, fallback to non-stratified if needed
+    def _parse_stem(self, stem: str) -> Optional[Dict[str, str]]:
+        m = self._STEM_RE.match(stem)
+        if not m:
+            return None
+        gd = m.groupdict()
         try:
-            train_locations, test_locations, train_labels, test_labels = train_test_split(
-                location_files, location_labels,
-                test_size=test_size,
-                stratify=location_labels,
-                random_state=self.random_state
-            )
-        except ValueError as e:
-            logger.warning(f"Stratified split failed due to: {e}. Falling back to random split without stratification.")
-            train_locations, test_locations, train_labels, test_labels = train_test_split(
-                location_files, location_labels,
-                test_size=test_size,
-                stratify=None,
-                random_state=self.random_state
-            )
+            int(gd["uid"])
+        except Exception:
+            return None
+        return gd
 
-        # Split train into train/val
-        try:
-            train_locations, val_locations, train_labels, val_labels = train_test_split(
-                train_locations, train_labels,
-                test_size=val_size / (1 - test_size),
-                stratify=train_labels,
-                random_state=self.random_state
-            )
-        except ValueError as e:
-            logger.warning(f"Stratified val split failed due to: {e}. Falling back to random split without stratification.")
-            train_locations, val_locations, train_labels, val_labels = train_test_split(
-                train_locations, train_labels,
-                test_size=val_size / (1 - test_size),
-                stratify=None,
-                random_state=self.random_state
-            )
+    def _scan(self):
+        """Scan either GRIT folders or local organized/{images,labels,metadata}; index files by siteNumeric."""
+        # GRIT branch: pair feature (image) files and mask (label) files by UID; standardize stems
+        if self._grit_mode:
+            imgs_by_uid: Dict[str, Dict[str, Path]] = {}
+            masks_by_uid: Dict[str, Dict[str, Optional[Path]]] = {}
 
-        # Ensure output lists are always lists, not arrays
-        train_files = train_locations.tolist() if len(train_locations) > 0 else []
-        val_files = val_locations.tolist() if len(val_locations) > 0 else []
-        test_files = test_locations.tolist() if len(test_locations) > 0 else []
-
-        # Create metadata
-        class_distribution = {
-            'train': dict(zip(*np.unique(train_labels, return_counts=True))) if len(train_files) > 0 else {},
-            'val': dict(zip(*np.unique(val_labels, return_counts=True))) if len(val_files) > 0 else {},
-            'test': dict(zip(*np.unique(test_labels, return_counts=True))) if len(test_files) > 0 else {}
-        }
-        # Convert class_distribution keys and values to JSON-safe types
-        class_distribution = {
-            split: {str(k): int(v) for k, v in d.items()} for split, d in class_distribution.items()
-        }
-        metadata = {
-            'total_locations': int(len(location_files)),
-            'train_locations': int(len(train_files)),
-            'val_locations': int(len(val_files)),
-            'test_locations': int(len(test_files)),
-            'stratification_band': int(stratification_band),
-            'class_distribution': class_distribution
-        }
-        split_info = {
-            'train_files': train_files,
-            'val_files': val_files,
-            'test_files': test_files,
-            'metadata': convert_numpy_types(metadata)
-        }
-        # Extra safety: never return empty arrays
-        for k in ['train_files', 'val_files', 'test_files']:
-            if k in split_info and isinstance(split_info[k], np.ndarray):
-                split_info[k] = split_info[k].tolist()
-
-        return split_info
-    
-    def cross_validation_split(self,
-                              n_splits: int = 5,
-                              stratification_band: int = 2) -> List[Dict]:
-        """
-        Perform k-fold cross-validation with spatial awareness.
-        
-        Args:
-            n_splits: Number of CV folds
-            stratification_band: Which band to use for stratification
-            
-        Returns:
-            List of dictionaries, each containing train/val splits for one fold
-        """
-        # Get location-level labels and files
-        location_labels, location_files = self._get_location_labels_and_files(stratification_band)
-        
-        # Handle insufficient samples for CV
-        if len(location_files) < n_splits:
-            logger.warning(f"Insufficient samples ({len(location_files)}) for {n_splits}-fold CV. Using all samples for training.")
-            # Return a single fold with all data
-            metadata = {
-                'train_locations': int(len(location_files)),
-                'val_locations': 0,
-                'stratification_band': int(stratification_band),
-                'class_distribution': {
-                    'train': {str(k): int(v) for k, v in zip(*np.unique(location_labels, return_counts=True))},
-                    'val': {}
-                },
-                'warning': f'Insufficient samples for {n_splits}-fold CV'
-            }
-            return [{
-                'fold': 1,
-                'train_files': location_files.tolist(),
-                'val_files': [],
-                'metadata': convert_numpy_types(metadata)
-            }]
-        
-        # Perform stratified k-fold
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
-        cv_splits = []
-        for fold, (train_idx, val_idx) in enumerate(skf.split(location_files, location_labels)):
-            train_files = location_files[train_idx].tolist()
-            val_files = location_files[val_idx].tolist()
-            class_distribution = {
-                'train': dict(zip(*np.unique(location_labels[train_idx], return_counts=True))),
-                'val': dict(zip(*np.unique(location_labels[val_idx], return_counts=True)))
-            }
-            # Convert class_distribution keys and values to JSON-safe types
-            class_distribution = {
-                split: {str(k): int(v) for k, v in d.items()} for split, d in class_distribution.items()
-            }
-            metadata = {
-                'train_locations': int(len(train_files)),
-                'val_locations': int(len(val_files)),
-                'stratification_band': int(stratification_band),
-                'class_distribution': class_distribution
-            }
-            split_info = {
-                'fold': fold + 1,
-                'train_files': train_files,
-                'val_files': val_files,
-                'metadata': convert_numpy_types(metadata)
-            }
-            cv_splits.append(split_info)
-        return cv_splits
-    
-    def experiment_with_bands(self,
-                             target_bands: List[int] = [1, 2, 8],
-                             test_size: float = 0.2) -> Dict:
-        """
-        Create experimental splits for different target bands.
-        
-        Args:
-            target_bands: List of bands to experiment with
-            test_size: Test set size
-            
-        Returns:
-            Dictionary with splits for each target band
-        """
-        experiments = {}
-        for band in target_bands:
-            logger.info(f"\nCreating split for Band {band}")
-            # use irrigation presence as proxy for all bands
-            split_info = self.spatial_stratified_split(
-                test_size=test_size,
-                stratification_band=band
-            )
-            # Ensure split_info is JSON-safe
-            split_info = convert_numpy_types(split_info)
-            experiments[f'band_{band}'] = {
-                'split_info': split_info,
-                'band_description': self.get_band_info()[f'band_{band}'],
-                'recommended_use': self._get_band_recommendation(band)
-            }
-        return experiments
-    
-    def _get_band_recommendation(self, band: int) -> str:
-        """Get recommendation for how to use a specific band."""
-        recommendations = {
-            1: "Multi-class classification (6 classes: no irrigation, small-scale, tree crop, industrial, lawn, covered)",
-            2: "Binary classification (irrigated vs non-irrigated) - most common use case",
-            3: "Binary classification with uncertainty filtering",
-            4: "Binary classification with uncertainty filtering", 
-            5: "Binary classification with uncertainty filtering",
-            6: "Binary classification with uncertainty filtering",
-            7: "Binary classification with uncertainty filtering",
-            8: "Multi-class classification with confidence levels (5 classes: no irrigation to probably irrigated)"
-        }
-        return recommendations.get(band, "Unknown band")
-    
-    def visualize_splits(self, split_info: Dict, save_path: Optional[str] = None):
-        """Visualize the data splits and class distributions."""
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        
-        # Class distribution
-        metadata = split_info['metadata']
-        splits = ['train', 'val', 'test']
-        
-        for i, split in enumerate(splits):
-            if split in metadata['class_distribution']:
-                dist = metadata['class_distribution'][split]
-                axes[0, 0].bar([f"{split}_{k}" for k in dist.keys()], dist.values(), 
-                              alpha=0.7, label=split)
-        
-        axes[0, 0].set_title('Class Distribution by Split')
-        axes[0, 0].set_ylabel('Number of Locations')
-        axes[0, 0].legend()
-        
-        split_sizes = [metadata['train_locations'], metadata['val_locations'], metadata['test_locations']]
-        axes[0, 1].pie(split_sizes, labels=['Train', 'Val', 'Test'], autopct='%1.1f%%')
-        axes[0, 1].set_title('Split Proportions')
-        
-        # Spatial distribution
-        if 'spatial_info' in metadata:
-            # This would show the spatial distribution of splits
-            pass
-        
-        summary_text = f"""
-        Total Locations: {metadata['total_locations']}
-        Train: {metadata['train_locations']} ({metadata['train_locations']/metadata['total_locations']:.1%})
-        Val: {metadata['val_locations']} ({metadata['val_locations']/metadata['total_locations']:.1%})
-        Test: {metadata['test_locations']} ({metadata['test_locations']/metadata['total_locations']:.1%})
-        Stratification Band: {metadata['stratification_band']}
-        """
-        axes[1, 0].text(0.1, 0.5, summary_text, transform=axes[1, 0].transAxes, 
-                       fontsize=12, verticalalignment='center')
-        axes[1, 0].set_title('Split Summary')
-        axes[1, 0].axis('off')
-        
-        # Band information
-        band_info = self.get_band_info()
-        band_text = f"Band {metadata['stratification_band']}:\n"
-        band_text += band_info[f'band_{metadata["stratification_band"]}']['name']
-        axes[1, 1].text(0.1, 0.5, band_text, transform=axes[1, 1].transAxes,
-                       fontsize=10, verticalalignment='center')
-        axes[1, 1].set_title('Band Information')
-        axes[1, 1].axis('off')
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        
-        plt.show()
-    
-    def save_splits(self, split_info: Dict, output_dir: str, name: str = "default"):
-        """Save split information to files."""
-        os.makedirs(output_dir, exist_ok=True)
-        
-        for split_type in ['train', 'val', 'test']:
-            if f'{split_type}_files' in split_info:
-                output_path = os.path.join(output_dir, f"{name}_{split_type}_files.json")
-                with open(output_path, 'w') as f:
-                    json.dump(split_info[f'{split_type}_files'], f, indent=2)
-        
-        # Save metadata - convert numpy types to Python types for JSON serialization
-        metadata = split_info['metadata'].copy()
-        
-        # Convert numpy int64 to regular int for JSON serialization
-        def convert_numpy_types(obj):
-            if isinstance(obj, dict):
-                return {str(k): convert_numpy_types(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_numpy_types(v) for v in obj]
-            elif hasattr(obj, 'item'):  # numpy scalar
-                return obj.item()
+            # Scan features/images
+            if not self._grit_images_dir.exists():
+                logger.warning(f"GRIT images dir not found: {self._grit_images_dir}")
             else:
-                return obj
-        
-        metadata = convert_numpy_types(metadata)
-        
-        metadata_path = os.path.join(output_dir, f"{name}_metadata.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        logger.info(f"Saved splits to {output_dir}")
+                for fp in self._grit_images_dir.iterdir():
+                    if not fp.is_file():
+                        continue
+                    m = self._GRIT_IMG_RE.match(fp.name)
+                    if not m:
+                        continue
+                    uid = m.group("uid")
+                    ext = m.group("ext").lower()
+                    rec = imgs_by_uid.setdefault(uid, {"tif": None, "json": None})
+                    if ext == "tif":
+                        rec["tif"] = fp
+                    elif ext == "json":
+                        rec["json"] = fp
 
-    def create_folder_structure(self, split_info: Dict, output_dir: str, 
-                              copy_files: bool = True, create_symlinks: bool = False) -> str:
+            # Scan masks/labels
+            if not self._grit_masks_dir.exists():
+                logger.warning(f"GRIT masks dir not found: {self._grit_masks_dir}")
+            else:
+                for fp in self._grit_masks_dir.iterdir():
+                    if not fp.is_file():
+                        continue
+                    m = self._GRIT_MASK_RE.match(fp.name)
+                    if not m:
+                        continue
+                    uid = m.group("uid")
+                    site = m.group("site")
+                    date = m.group("date")
+                    ext = m.group("ext").lower()
+                    rec = masks_by_uid.setdefault(uid, {"site": site, "date": date, "tif": None, "json": None})
+                    if ext == "tif":
+                        rec["tif"] = fp
+                    elif ext == "json":
+                        rec["json"] = fp
+
+            # Pair image/mask by UID and build standardized stems: {uid}_{site}_{YYYY.MM.DD}_image
+            by_site: Dict[str, List[str]] = defaultdict(list)
+            self._stem_to_paths.clear()
+
+            for uid, img_rec in imgs_by_uid.items():
+                mrec = masks_by_uid.get(uid)
+                if not mrec:
+                    continue
+                # JSON optional; require both TIFs only
+                if not img_rec.get("tif") or not mrec.get("tif"):
+                    continue
+                json_path = img_rec.get("json") or mrec.get("json")  # may be None
+
+                site = str(mrec["site"])
+                date = str(mrec["date"])
+                stem_image = f"{uid}_{site}_{date}_image"
+
+                by_site[site].append(stem_image)
+                self._stem_to_paths[stem_image] = {
+                    "image_path": img_rec["tif"],
+                    # Use mask tif as label_path; this aligns with downstream expectations
+                    "label_path": mrec["tif"],
+                    # Choose the image JSON as metadata path if present; otherwise mask JSON; may be None
+                    "json_path": json_path,
+                }
+
+            self._site_to_files = {k: v for k, v in by_site.items()}
+            self._sites = sorted(self._site_to_files.keys())
+
+            if not self._sites:
+                logger.warning("No paired (image, mask) found under GRIT directories")
+
+            # Optional summary to help debug usable count
+            try:
+                total_pairs = sum(len(v) for v in self._site_to_files.values())
+                logger.info(f"[scan] GRIT sites={len(self._sites)} paired_files={total_pairs}")
+            except Exception:
+                pass
+
+            return  # End GRIT branch
+
+        # Local organized structure branch (unchanged)
+        imgs = list(self.images_dir.glob("*_image.tif"))
+        lbls = list(self.labels_dir.glob("*_label.tif"))
+        jsons = list(self.metadata_dir.glob("*.json"))
+
+        have_img = {p.stem: p for p in imgs}
+        have_lbl = {p.stem: p for p in lbls}
+        have_json = {p.stem: p for p in jsons}
+
+        by_site: Dict[str, List[str]] = defaultdict(list)
+        for stem in have_img.keys():
+            parts = self._parse_stem(stem)
+            if not parts:
+                continue
+            site = parts["site"]
+            by_site[site].append(stem)
+
+            # Simple consistency check
+            if stem.replace("_image", "_label") not in have_lbl:
+                logger.warning(f"Missing label tif for: {stem}")
+
+            if stem not in have_json and stem.replace("_image", "_label") not in have_json:
+                logger.warning(f"Missing json for: {stem} (image/label json)")
+
+        self._site_to_files = dict(by_site)
+        self._sites = sorted(by_site.keys())
+        if not self._sites:
+            logger.warning("No *_image.tif found under organized/images")
+
+    def _infer_site_labels(self, mode: str = "csv_then_label", csv_label_col: str = "irrigation"):
         """
-        Create train/val/test folder structure and organize files.
-        
-        Args:
-            split_info: Dictionary containing train/val/test file lists
-            output_dir: Directory to create the folder structure in
-            copy_files: If True, copy files to new structure. If False, create symlinks
-            create_symlinks: If True, create symlinks instead of copying (only if copy_files=False)
-            
-        Returns:
-            Path to the created folder structure
+        Decide each site's label for stratification.
+        mode:
+          - 'group_only': no labels (do group-only splitting)
+          - 'csv_then_label': prefer CSV's 'irrigation' col; else fallback to label band-2 any>0
+          - 'label_band2_any': only use label band-2 any>0
         """
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Create train/val/test subdirectories
-        for split_type in ['train', 'val', 'test']:
-            split_dir = os.path.join(output_dir, split_type)
-            os.makedirs(split_dir, exist_ok=True)
-            
-            if f'{split_type}_files' in split_info:
-                files = split_info[f'{split_type}_files']
-                logger.info(f"Processing {len(files)} files for {split_type} set...")
-                
-                for file_base in files:
-                    # Define source files (image, label, json)
-                    image_src = os.path.join(self.data_dir, f"{file_base}.tif")
-                    label_src = os.path.join(self.data_dir, f"{file_base.replace('_image', '_label')}.tif")
-                    json_src = os.path.join(self.data_dir, f"{file_base}.json")
-                    
-                    # Define destination files
-                    image_dst = os.path.join(split_dir, f"{file_base}.tif")
-                    label_dst = os.path.join(split_dir, f"{file_base.replace('_image', '_label')}.tif")
-                    json_dst = os.path.join(split_dir, f"{file_base}.json")
-                    
-                    # Copy or link files
-                    for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
-                        if os.path.exists(src):
-                            if copy_files:
-                                import shutil
-                                shutil.copy2(src, dst)
-                            elif create_symlinks:
-                                if os.path.exists(dst):
-                                    os.remove(dst)
-                                os.symlink(os.path.abspath(src), dst)
-                            else:
-                                with open(dst, 'w') as f:
-                                    f.write(f"# Placeholder for {os.path.basename(src)}")
+        if mode == "group_only":
+            self._y_by_site = None
+            return
+
+        y_csv = {}
+        if mode.startswith("csv") and self.df is not None and (csv_label_col in self.df.columns):
+            for _, r in self.df[["site_id", csv_label_col]].dropna().iterrows():
+                sid = str(r["site_id"]).replace("id_", "")
+                try:
+                    y_csv[sid] = int(r[csv_label_col])
+                except Exception:
+                    pass
+
+        y: Dict[str, int] = {}
+        for site in self._sites:
+            if site in y_csv:
+                y[site] = y_csv[site]
+                continue
+
+            if mode in ("csv_then_label", "label_band2_any"):
+                if rasterio is None:
+                    y[site] = 0
+                    continue
+
+                # In GRIT mode, read label_path from self._stem_to_paths.
+                # Otherwise, read from local organized/labels.
+                for stem in self._site_to_files.get(site, []):
+                    try:
+                        if self._grit_mode:
+                            rec = self._stem_to_paths.get(stem)
+                            if not rec or not rec.get("label_path") or not Path(rec["label_path"]).exists():
+                                continue
+                            with rasterio.open(rec["label_path"]) as ds:
+                                band2 = ds.read(2)
+                                if (band2 > 0).any():
+                                    y[site] = 1
+                                    break
                         else:
-                            logger.warning(f"Warning: Source file not found: {src}")
-        
-        logger.info(f"Created folder structure at: {output_dir}")
-        logger.info(f"  - train/: {len(split_info.get('train_files', []))} files")
-        logger.info(f"  - val/: {len(split_info.get('val_files', []))} files")
-        logger.info(f"  - test/: {len(split_info.get('test_files', []))} files")
-        
-        return output_dir
+                            lbl_path = (self.labels_dir / f"{stem.replace('_image', '_label')}.tif")
+                            if not lbl_path.exists():
+                                continue
+                            with rasterio.open(lbl_path) as ds:
+                                band2 = ds.read(2)
+                                if (band2 > 0).any():
+                                    y[site] = 1
+                                    break
+                    except Exception:
+                        # On any read error, continue scanning other stems of the same site
+                        continue
 
-    def save_splits_with_structure(self, split_info: Dict, output_dir: str, 
-                                  name: str = "default", copy_files: bool = True) -> str:
-        """
-        Save split information and create folder structure.
-        
-        Args:
-            split_info: Dictionary containing train/val/test file lists
-            output_dir: Directory to save splits and create structure
-            name: Name prefix for saved files
-            copy_files: If True, copy files to new structure. If False, create symlinks
-            
-        Returns:
-            Path to the created folder structure
-        """
-        self.save_splits(split_info, output_dir, name)
-        
-        structure_dir = os.path.join(output_dir, f"{name}_structure")
-        return self.create_folder_structure(split_info, structure_dir, copy_files=copy_files)
-
-    def prepare_experiment_splits(self, 
-                                 exp_cfg: Dict,
-                                 experiment_dir: str = None) -> Tuple[List[str], List[str], Dict]:
-        """
-        Prepare data splits for an experiment based on configuration.
-        
-        Args:
-            exp_cfg: Experiment configuration dictionary
-            experiment_dir: Directory to save split metadata (optional)
-            
-        Returns:
-            Tuple of (train_files, val_files, split_metadata)
-        """
-        # Get split parameters from config
-        test_size = exp_cfg["data"].get("test_size", 0.2)
-        val_size = exp_cfg["data"].get("val_size", 0.2)
-        stratification_band = exp_cfg["data"].get("stratification_band", 2)
-        min_samples_per_class = exp_cfg["data"].get("min_samples_per_class", 5)
-        
-        logger.info(f"Creating spatial stratified split:")
-        logger.info(f"  - Test size: {test_size}")
-        logger.info(f"  - Val size: {val_size}")
-        logger.info(f"  - Stratification band: {stratification_band}")
-        logger.info(f"  - Min samples per class: {min_samples_per_class}")
-        
-        split_info = self.spatial_stratified_split(
-            test_size=test_size,
-            val_size=val_size,
-            stratification_band=stratification_band,
-            min_samples_per_class=min_samples_per_class
-        )
-        split_info = convert_numpy_types(split_info)
-        
-        if exp_cfg["data"].get("create_folder_structure", True):
-            splits_dir = exp_cfg["data"].get("splits_dir", "./splits")
-            structure_name = exp_cfg["name"]
-            copy_files = exp_cfg["data"].get("copy_files", False)
-            
-            logger.info(f"Creating folder structure at: {splits_dir}")
-            structure_path = self.save_splits_with_structure(
-                split_info, 
-                splits_dir, 
-                structure_name,
-                copy_files=copy_files
-            )
-            logger.info(f"Folder structure created at: {structure_path}")
-        
-        # Prepare split metadata
-        split_metadata = {
-            "split_info": split_info,
-            "splitter_params": convert_numpy_types({
-                "test_size": test_size,
-                "val_size": val_size,
-                "stratification_band": stratification_band,
-                "min_samples_per_class": min_samples_per_class
-            })
-        }
-        
-        train_files = split_info["train_files"]
-        val_files = split_info["val_files"]
-        
-        logger.info(f"Split created:")
-        logger.info(f"  - Train files: {len(train_files)}")
-        logger.info(f"  - Val files: {len(val_files)}")
-        logger.info(f"  - Test files: {len(split_info['test_files'])}")
-        
-        return train_files, val_files, split_metadata
-
-    def create_cv_folder_structure(self, 
-                                  n_splits: int = 5,
-                                  output_dir: str = "./splits",
-                                  structure_name: str = "cv_structure",
-                                  copy_files: bool = False) -> str:
-        """
-        Create cross-validation folder structure with file lists.
-        
-        Args:
-            n_splits: Number of CV folds
-            output_dir: Directory to save the structure
-            structure_name: Name for the structure
-            copy_files: If True, copy files. If False, create symlinks or file lists
-            
-        Returns:
-            Path to the created structure
-        """
-        cv_splits = self.cross_validation_split(n_splits=n_splits)
-        
-        # Create main output directory
-        cv_dir = os.path.join(output_dir, f"{structure_name}")
-        os.makedirs(cv_dir, exist_ok=True)
-        
-        # Get all available files
-        all_files = []
-        for loc_id in self.df['location_id'].unique():
-            loc_data = self.df[self.df['location_id'] == loc_id]
-            primary_survey = loc_data.iloc[0]
-            site_id_number = primary_survey['site_id'].replace('id_', '')
-            date_str = self._get_date_string(primary_survey)
-            file_id = f"{primary_survey['unique_id']}_{site_id_number}_{date_str}_image"
-            all_files.append(file_id)
-        
-        # Handle insufficient samples for train/test split
-        if len(all_files) < 2:
-            logger.warning(f"Insufficient samples ({len(all_files)}) for train/test split. Using all data for training.")
-            train_files = all_files
-            test_files = []
-        else:
-            # Split into train and test
-            test_size = 0.2
-            train_files, test_files = train_test_split(
-                all_files, 
-                test_size=test_size, 
-                random_state=self.random_state
-            )
-        
-        # Save test files list
-        test_dir = os.path.join(cv_dir, "test")
-        os.makedirs(test_dir, exist_ok=True)
-        
-        with open(os.path.join(test_dir, "test_files.txt"), 'w') as f:
-            for file_id in test_files:
-                f.write(f"{file_id}\n")
-        
-        # Create CV folds for training data
-        train_dir = os.path.join(cv_dir, "train")
-        os.makedirs(train_dir, exist_ok=True)
-        
-        for fold_idx, split_info in enumerate(cv_splits, 1):
-            fold_dir = os.path.join(train_dir, f"fold_{fold_idx}")
-            os.makedirs(fold_dir, exist_ok=True)
-            
-            # Create inner train/val directories
-            inner_train_dir = os.path.join(fold_dir, "inner_train")
-            inner_val_dir = os.path.join(fold_dir, "inner_val")
-            os.makedirs(inner_train_dir, exist_ok=True)
-            os.makedirs(inner_val_dir, exist_ok=True)
-            
-            # Save file lists (not copy files)
-            with open(os.path.join(inner_train_dir, "train_files.txt"), 'w') as f:
-                for file_id in split_info['train_files']:
-                    f.write(f"{file_id}\n")
-            
-            with open(os.path.join(inner_val_dir, "val_files.txt"), 'w') as f:
-                for file_id in split_info['val_files']:
-                    f.write(f"{file_id}\n")
-            
-            # If copy_files is True, actually copy the files
-            if copy_files:
-                logger.info(f"Copying files for fold {fold_idx}...")
-                self._copy_files_to_fold(split_info['train_files'], inner_train_dir)
-                self._copy_files_to_fold(split_info['val_files'], inner_val_dir)
-        
-        # Save metadata
-        metadata = {
-            "n_splits": n_splits,
-            "test_size": len(test_files) / len(all_files) if all_files else 0,
-            "total_files": len(all_files),
-            "train_files": len(train_files),
-            "test_files": len(test_files),
-            "cv_splits": cv_splits
-        }
-        
-        # Convert numpy types for JSON serialization
-        def convert_numpy_types(obj):
-            if isinstance(obj, dict):
-                return {str(k): convert_numpy_types(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_numpy_types(v) for v in obj]
-            elif hasattr(obj, 'item'):  # numpy scalar
-                return obj.item()
+                # Default to 0 if nothing set
+                if site not in y:
+                    y[site] = 0
             else:
-                return obj
-        
-        metadata = convert_numpy_types(metadata)
-        
-        with open(os.path.join(cv_dir, "cv_metadata.json"), 'w') as f:
-            json.dump(metadata, f, indent=2, default=str)
-        
-        logger.info(f"Created CV structure at: {cv_dir}")
-        logger.info(f"  - {n_splits} folds created")
-        logger.info(f"  - Test set: {len(test_files)} files")
-        logger.info(f"  - Train set: {len(train_files)} files")
-        
-        return cv_dir
-    
-    def _copy_files_to_fold(self, file_list: List[str], target_dir: str):
-        """Helper method to copy files to a fold directory."""
-        for file_id in file_list:
-            image_src = os.path.join(self.data_dir, f"{file_id}.tif")
-            label_src = os.path.join(self.data_dir, f"{file_id.replace('_image', '_label')}.tif")
-            json_src = os.path.join(self.data_dir, f"{file_id}.json")
-            
-            image_dst = os.path.join(target_dir, f"{file_id}.tif")
-            label_dst = os.path.join(target_dir, f"{file_id.replace('_image', '_label')}.tif")
-            json_dst = os.path.join(target_dir, f"{file_id}.json")
-            
-            for src, dst in [(image_src, image_dst), (label_src, label_dst), (json_src, json_dst)]:
-                if os.path.exists(src):
-                    import shutil
-                    shutil.copy2(src, dst)
+                y[site] = 0
+        self._y_by_site = y
+
+    # lists-only exporters
+    def export_split_lists(self,
+                           output_dir: str,
+                           test_size: float = 0.2,
+                           val_size: float = 0.2,
+                           y_mode: str = "csv_then_label",
+                           min_samples_per_class: int = 5) -> Dict:
+        """
+        One-shot train/val/test split at the site level with optional stratification.
+        Writes text lists and a manifest.csv to output_dir. No file movement.
+        """
+        self._scan()
+        self._infer_site_labels(mode=y_mode)
+
+        sites = np.array(self._sites)
+        if len(sites) < 3:
+            all_files = [f for s in sites for f in self._site_to_files.get(s, [])]
+            meta = {
+                "total_sites": int(len(sites)),
+                "train_sites": int(len(sites)), "val_sites": 0, "test_sites": 0,
+                "total_files": int(len(all_files)), "stratified": False,
+                "warning": "Insufficient sites; using all for training"
+            }
+            return self._write_lists(output_dir, train=all_files, val=[], test=[], metadata=meta)
+
+        rng = np.random.RandomState(self.random_state)
+        if (self._y_by_site is None):
+            sites_shuf = sites.copy()
+            rng.shuffle(sites_shuf)
+            n_test = max(1, int(round(test_size * len(sites_shuf))))
+            test_sites = sites_shuf[:n_test]
+            remain = sites_shuf[n_test:]
+            n_val = max(1, int(round(val_size * len(remain)))) if len(remain) > 1 else 0
+            val_sites = remain[:n_val]
+            train_sites = remain[n_val:]
+            stratified = False
+        else:
+            y = np.array([self._y_by_site[s] for s in sites])
+            uniq, cnt = np.unique(y, return_counts=True)
+            ok = {c for c, k in zip(uniq, cnt) if k >= min_samples_per_class}
+            if len(ok) < 2:
+                sites_shuf = sites.copy()
+                rng.shuffle(sites_shuf)
+                n_test = max(1, int(round(test_size * len(sites_shuf))))
+                test_sites = sites_shuf[:n_test]
+                remain = sites_shuf[n_test:]
+                n_val = max(1, int(round(val_size * len(remain)))) if len(remain) > 1 else 0
+                val_sites = remain[:n_val]
+                train_sites = remain[n_val:]
+                stratified = False
+            else:
+                mask_ok = np.isin(y, list(ok))
+                sites_ok, y_ok = sites[mask_ok], y[mask_ok]
+                sss_outer = StratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=self.random_state)
+                tr_idx, te_idx = next(sss_outer.split(sites_ok, y_ok))
+                train_pool, test_sites = sites_ok[tr_idx], sites_ok[te_idx]
+                y_train_pool = y_ok[tr_idx]
+
+                # --- IMPORTANT: allow val_size == 0.0 (used by CV builder) ---
+                if (val_size is None) or (float(val_size) == 0.0) or (len(train_pool) <= 1):
+                    train_sites, val_sites = train_pool, np.array([], dtype=train_pool.dtype)
                 else:
-                    logger.warning(f"Source file not found: {src}")
+                    sss_inner = StratifiedShuffleSplit(
+                        n_splits=1,
+                        test_size=val_size/(1.0-test_size),
+                        random_state=self.random_state
+                    )
+                    tr2_idx, va_idx = next(sss_inner.split(train_pool, y_train_pool))
+                    train_sites, val_sites = train_pool[tr2_idx], train_pool[va_idx]
+                stratified = True
+
+        train_files = [f for s in train_sites for f in self._site_to_files.get(s, [])]
+        val_files   = [f for s in val_sites   for f in self._site_to_files.get(s, [])]
+        test_files  = [f for s in test_sites  for f in self._site_to_files.get(s, [])]
+
+        assert set(train_files).isdisjoint(val_files)
+        assert set(train_files).isdisjoint(test_files)
+        assert set(val_files).isdisjoint(test_files)
+
+        meta = {
+            "total_sites": int(len(self._sites)),
+            "train_sites": int(len(train_sites)),
+            "val_sites": int(len(val_sites)),
+            "test_sites": int(len(test_sites)),
+            "total_files": int(len(train_files) + len(val_files) + len(test_files)),
+            "stratified": stratified,
+            "y_mode": y_mode
+        }
+        if stratified and (self._y_by_site is not None):
+            def dist(sites_sel):
+                arr = np.array([self._y_by_site[s] for s in sites_sel])
+                return {str(k): int(v) for k, v in zip(*np.unique(arr, return_counts=True))}
+            meta["class_distribution"] = {
+                "train": dist(train_sites), "val": dist(val_sites), "test": dist(test_sites)
+            }
+
+        return self._write_lists(output_dir, train=train_files, val=val_files, test=test_files, metadata=meta)
+
+    def export_cv_lists_with_heldout_test(self,
+                                          output_dir: str,
+                                          n_splits: int = 5,
+                                          test_size: float = 0.2,
+                                          y_mode: str = "csv_then_label",
+                                          min_samples_per_class: int = 5) -> Dict:
+        """
+        Held-out test + K-fold CV on the training pool. Writes lists only.
+        """
+        one = self.export_split_lists(
+            output_dir=output_dir, test_size=test_size, val_size=0.0,
+            y_mode=y_mode, min_samples_per_class=min_samples_per_class
+        )
+        test_files = one["test_files"]
+        train_pool_files = one["train_files"]
+
+        # Build site list for train pool
+        def site_from_stem(stem: str) -> Optional[str]:
+            m = self._STEM_RE.match(stem)
+            return m.group("site") if m else None
+
+        file_to_site = {stem: site_from_stem(stem) for stem in train_pool_files}
+        train_pool_sites = sorted({s for s in file_to_site.values() if s is not None})
+
+        # CV at site level
+        self._scan()
+        self._infer_site_labels(mode=y_mode)
+        sites_all = np.array(self._sites)
+        sites_cv = np.array([s for s in sites_all if s in set(train_pool_sites)])
+        y = None if self._y_by_site is None else np.array([self._y_by_site[s] for s in sites_cv])
+        groups = sites_cv
+
+        if (y is None) or (len(np.unique(y)) < 2) or (not _HAS_SGF):
+            splitter = GroupKFold(n_splits=n_splits)
+            split_iter = splitter.split(X=sites_cv, y=None, groups=groups)
+            stratified = False
+        else:
+            splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
+            split_iter = splitter.split(X=sites_cv, y=y, groups=groups)
+            stratified = True
+
+        # Write fold lists
+        root = Path(output_dir)
+        train_root = root / "train"
+        train_root.mkdir(parents=True, exist_ok=True)
+
+        cv_meta = []
+        used = set(test_files)
+        for i, (tr_idx, va_idx) in enumerate(split_iter, start=1):
+            tr_sites = sites_cv[tr_idx].tolist()
+            va_sites = sites_cv[va_idx].tolist()
+            tr_files = [f for s in tr_sites for f in self._site_to_files.get(s, []) if f in train_pool_files]
+            va_files = [f for s in va_sites for f in self._site_to_files.get(s, []) if f in train_pool_files]
+
+            assert set(tr_files).isdisjoint(va_files)
+
+            fold_dir = train_root / f"fold_{i}"
+            fold_dir.mkdir(parents=True, exist_ok=True)
+            (fold_dir / "train_files.txt").write_text("\n".join(tr_files), encoding="utf-8")
+            (fold_dir / "val_files.txt").write_text("\n".join(va_files), encoding="utf-8")
+
+            used.update(tr_files); used.update(va_files)
+            meta = {
+                "fold": i, "train_sites": int(len(tr_sites)), "val_sites": int(len(va_sites)),
+                "train_files": int(len(tr_files)), "val_files": int(len(va_files)), "stratified": stratified
+            }
+            if stratified and (y is not None):
+                meta["class_distribution"] = {
+                    "train": {str(k): int(v) for k, v in zip(*np.unique(y[tr_idx], return_counts=True))},
+                    "val":   {str(k): int(v) for k, v in zip(*np.unique(y[va_idx], return_counts=True))},
+                }
+            cv_meta.append(meta)
+
+        # Save manifest.csv for all used stems (paths are cloud absolute paths in GRIT mode)
+        used_list = list(used)
+        manifest = self._make_manifest_df(used_list)
+        try:
+            manifest.to_csv(root / "manifest.csv", index=False)
+        except Exception as e:
+            logger.warning(f"Failed to write manifest.csv: {e}")
+
+        # Save test list and metadata
+        (root / "test_files.txt").write_text("\n".join(test_files), encoding="utf-8")
+        overall = {"n_splits": n_splits, "y_mode": y_mode, "heldout_test_files": int(len(test_files)), "cv_folds": cv_meta}
+        with open(root / "cv_metadata.json", "w", encoding="utf-8") as f:
+            json.dump(_json_safe(overall), f, indent=2)
+
+        return {"root": str(root), "test_files": test_files, "cv_meta": cv_meta}
+
+    # helpers
+    def _make_manifest_df(self, stems: List[str]) -> "pd.DataFrame":
+        rows = []
+        for stem in stems:
+            m = self._STEM_RE.match(stem)
+            if not m:
+                continue
+            gd = m.groupdict()
+
+            if self._grit_mode and stem in self._stem_to_paths:
+                rec = self._stem_to_paths[stem]
+                jp = rec.get("json_path")
+                jp_str = str(Path(jp).resolve()) if jp else ""
+                rows.append({
+                    "stem": stem,
+                    "image_path": str(Path(rec["image_path"]).resolve()),
+                    "label_path": str(Path(rec["label_path"]).resolve()),
+                    "json_path":  jp_str,
+                    "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
+                })
+            else:
+                rows.append({
+                    "stem": stem,
+                    "image_path": str((self.images_dir / f"{stem}.tif").resolve()),
+                    "label_path": str((self.labels_dir / f"{stem.replace('_image', '_label')}.tif").resolve()),
+                    "json_path":  str((self.metadata_dir / f"{stem}.json").resolve()),
+                    "site": gd["site"], "uid": gd["uid"], "date": gd["date"]
+                })
+        return pd.DataFrame(rows)
+
+    def _write_lists(self, output_dir: str, train: List[str], val: List[str], test: List[str], metadata: Dict) -> Dict:
+        root = Path(output_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "train_files.txt").write_text("\n".join(train), encoding="utf-8")
+        (root / "val_files.txt").write_text("\n".join(val), encoding="utf-8")
+        (root / "test_files.txt").write_text("\n".join(test), encoding="utf-8")
+
+        used = list(dict.fromkeys(train + val + test))
+        manifest = self._make_manifest_df(used)
+        try:
+            manifest.to_csv(root / "manifest.csv", index=False)
+        except Exception as e:
+            logger.warning(f"Failed to write manifest.csv: {e}")
+
+        with open(root / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(_json_safe(metadata), f, indent=2)
+
+        return {"root": str(root), "train_files": train, "val_files": val, "test_files": test, "metadata": metadata}
 
 
-# def main():
-#     """Example usage of the IrrigationDataSplitter."""
-    
-#     csv_path = "../../data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
-#     data_dir = "../../data/modeling"
-    
-#     splitter = IrrigationDataSplitter(csv_path, data_dir)
-    
-#     # Show band information
-#     logger.info("Band Information:")
-#     for band_name, info in splitter.get_band_info().items():
-#         logger.info(f"{band_name}: {info['name']} ({info['type']})")
-    
-#     # Create basic split
-#     logger.info("Creating spatial stratified split...")
-#     split_info = splitter.spatial_stratified_split(
-#         test_size=0.2,
-#         val_size=0.2,
-#         stratification_band=2  # Use irrigation presence
-#     )
-    
-#     splitter.visualize_splits(split_info)
-    
-#     # Save splits with folder structure
-#     logger.info("Creating folder structure...")
-#     structure_path = splitter.save_splits_with_structure(
-#         split_info, 
-#         "splits/", 
-#         "irrigation_binary",
-#         copy_files=True  # Set to False to create symlinks instead
-#     )
-    
-#     logger.info(f"Folder structure created at: {structure_path}")
-    
-#     # Experiment with different bands
-#     logger.info("Creating experimental splits for different bands...")
-#     experiments = splitter.experiment_with_bands(target_bands=[1, 2, 8])
-    
-#     for band, exp_info in experiments.items():
-#         logger.info(f"Band {band}: {exp_info['band_description']['name']}")
-#         logger.info(f"  Recommendation: {exp_info['recommended_use']}")
+def prepare_and_export_splits(data_root: str,
+                              csv_path: Optional[str] = None,
+                              y_mode: str = "csv_then_label",
+                              n_splits: int = 5,
+                              test_size: float = 0.2,
+                              val_size: float = 0.2,
+                              min_samples_per_class: int = 5,
+                              grit_images_dir: Optional[str] = None,
+                              grit_masks_dir: Optional[str] = None) -> Dict:
+    """
+    Export both one-shot split and CV lists under data_root/organized/splits.
+    Returns a dict with useful paths for downstream training.
+    """
+    data_root = Path(data_root).resolve()
+    splits_root = data_root / "organized" / "splits"
+    one_shot_dir = splits_root / "split_lists"
+    cv_dir = splits_root / "cv_lists"
+    one_shot_dir.mkdir(parents=True, exist_ok=True)
+    cv_dir.mkdir(parents=True, exist_ok=True)
 
+    splitter = IrrigationDataSplitter(str(data_root), csv_path=csv_path,
+                                      grit_images_dir=grit_images_dir,
+                                      grit_masks_dir=grit_masks_dir)
+    # one-shot
+    one = splitter.export_split_lists(
+        output_dir=str(one_shot_dir),
+        test_size=test_size, val_size=val_size,
+        y_mode=y_mode, min_samples_per_class=min_samples_per_class
+    )
+    # cv
+    cv = splitter.export_cv_lists_with_heldout_test(
+        output_dir=str(cv_dir),
+        n_splits=n_splits, test_size=test_size,
+        y_mode=y_mode, min_samples_per_class=min_samples_per_class
+    )
 
-
-# # --- Minimal test function for debugging the splitter logic ---
-# def test_splitter_with_minimal_csv():
-#     """
-#     Minimal test to validate the splitter logic with a dummy dataframe.
-#     - Creates a dummy DataFrame with at least 3 locations and minimal required columns.
-#     - Mocks os.path.exists to always return True.
-#     - Runs the splitter to confirm you get non-empty splits.
-#     - Prints the split results for inspection.
-#     """
-#     import pandas as pd
-#     import numpy as np
-#     import types
-
-#     # Dummy DataFrame with 3+ unique locations, minimal required columns
-#     df = pd.DataFrame({
-#         "unique_id": ["A", "B", "C"],
-#         "site_id": ["id_1", "id_2", "id_3"],
-#         "year": [2022, 2022, 2022],
-#         "month": [1, 2, 3],
-#         "day": [10, 15, 20],
-#         "x": [35.0, 36.0, 37.0],
-#         "y": [-1.0, -2.0, -3.0],
-#         "irrigation": [0, 1, 1],
-#     })
-
-#     # Save to a temporary CSV
-#     import tempfile
-#     import os
-#     tmp_dir = tempfile.mkdtemp()
-#     csv_path = os.path.join(tmp_dir, "dummy.csv")
-#     df.to_csv(csv_path, index=False)
-
-#     # Patch os.path.exists to always return True for this test
-#     import builtins
-#     orig_exists = os.path.exists
-#     os.path.exists = lambda path: True
-#     try:
-#         splitter = IrrigationDataSplitter(csv_path=csv_path, data_dir=tmp_dir, random_state=123)
-#         split_info = splitter.spatial_stratified_split(test_size=0.33, val_size=0.33, stratification_band=2)
-#         print("Split Info (minimal test):")
-#         print("Train files:", split_info["train_files"])
-#         print("Val files:", split_info["val_files"])
-#         print("Test files:", split_info["test_files"])
-#         print("Metadata:", split_info["metadata"])
-#     finally:
-#         os.path.exists = orig_exists
-#         import shutil
-#         shutil.rmtree(tmp_dir)
-
-
-# if __name__ == "__main__":
-#     # Run minimal test if run directly
-#     print("Running minimal splitter test...")
-#     test_splitter_with_minimal_csv()
+    return {
+        "one_shot_dir": str(one_shot_dir),
+        "cv_dir": str(cv_dir),
+        "train_list": str(one_shot_dir / "train_files.txt"),
+        "val_list": str(one_shot_dir / "val_files.txt"),
+        "test_list": str(one_shot_dir / "test_files.txt"),
+        "manifest_csv": str(one_shot_dir / "manifest.csv"),
+        "cv_test_list": str(cv_dir / "test_files.txt"),
+        "cv_manifest_csv": str(cv_dir / "manifest.csv"),
+    }

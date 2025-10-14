@@ -1,26 +1,44 @@
-# NOTE: Data splitting logic is disabled for this test config. Manual split in use.
+# NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
 name: "rf_baseline"
 
 imputation:
-  mode: none   # options: none, drop, temporal
-  fill_constant: 0.0   # used only for temporal
+  mode: none        
+  fill_constant: 0.0
 
 data:
-  train_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/train"
-  val_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/val"
-  image_bands: null   # e.g. ["B3"], use null for default
-  time_step_selection: null
+  # Cross-validation and automatic splitting
+  use_cross_validation: true     # run K-fold CV
+  n_folds: 5
+  test_size: 0.2
+  val_size: 0.2
+  min_samples_per_class: 5
+  random_state: 42
+
+  # Memory management
+  pixels_per_image: null        # null = use ALL pixels 
+
+  # Label CSV
+  csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+
+  # Output root 
+  data_dir: "data/modeling"
+
+  # GRIT cloud paths
+  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features"
+  grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
+
+  # Label/Image bands used downstream
+  label_bands: [2]              # Band 2 for basic training (code auto-loads all 8 when detailed_metrics=true)
+  image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "random_forest" # options: "gradient_boosting", "random_forest"
-  save_feature_importance: true  # If true, saves feature importance to CSV
-  # Only the hyperparameters corresponding to the above model type will be used in the experiment designation
-  hyperparameters: # ignored if not a random_forest model
+  type: "random_forest" 
+  save_feature_importance: true
+  hyperparameters: 
     random_forest: 
       n_estimators: 100
       random_state: 42
-    
-    gradient_boosting: # ignored if not a gradient_boosting model
+    gradient_boosting: 
       n_estimators: 200
       learning_rate: 0.05
       max_depth: 4
@@ -33,7 +51,7 @@ visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true
+  compute_detailed_metrics: true    # Enable comprehensive metrics and plots
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"
