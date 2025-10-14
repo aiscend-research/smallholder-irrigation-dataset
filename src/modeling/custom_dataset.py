@@ -196,13 +196,6 @@ class MultiTemporalCropDataset(Dataset):
             mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
             mask_tensor = torch.from_numpy(mask_array).float()
 
-            if torch.any(mask_tensor == -9999):
-                invalid_count = torch.sum(mask_tensor == -9999)
-                total_pixels = mask_tensor.numel()
-                invalid_percentage = (invalid_count / total_pixels) * 100
-                print(f"Sample {idx}: Mask has {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                mask_tensor = torch.where(mask_tensor == -9999, torch.tensor(0.0), mask_tensor)
-
             if mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor[0]
 
