@@ -74,7 +74,8 @@ class MultiTemporalCropDataset(Dataset):
                 - list of ints: averages those time steps.
                 Example: [0, [1,2,3], 4] => output will have three time slices per band:
                     1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
-            drop_cloud_images (bool, optional): True by default. If true, drops images with any invalid (cloudy) pixels.
+            drop_cloud_images (bool, optional): True by default. If true, drops images with any invalid (cloudy) pixels. If false,
+            keeps images with any valid pixels, while dropping only invalid pixels
 
         Note:
             If data_dir is provided, it overrides both image_dir and label_dir.
