@@ -26,7 +26,7 @@ if project_root not in sys.path:
 # import utils.utils
 from utils.utils import *
 from utils.geometries import bounding_box
-IMAGE_CRS = 'EPSG:32633'  # Coordinate reference system for the images
+IMAGE_CRS = 'EPSG:32735'  # Coordinate reference system for the images
 
 '''
 Small class definition to be able to pass in data object
@@ -105,8 +105,8 @@ def create_labels():
         internal_id = row.internal_id
         unique_id = row.unique_id
         survey_id = int(row.site_id)
-        lon, lat = row.x, row.y
-        image_meta = create_bounding_box(lat, lon)
+        path_to_feature_file = get_data_root() + "/features_v2/" + f"{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_image.tif"
+        image_meta = get_image_meta(path_to_feature_file)
         timestamp = date(row.year, row.month, row.day)
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
