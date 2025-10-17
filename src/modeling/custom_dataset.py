@@ -60,7 +60,7 @@ def get_band_indices(band_names):
     return indices
 
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None):
+    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None, drop_cloud_images=True):
         """
         Args:
             image_dir (str): Path to directory containing Sentinel-2 input .tif files.
@@ -74,6 +74,8 @@ class MultiTemporalCropDataset(Dataset):
                 - list of ints: averages those time steps.
                 Example: [0, [1,2,3], 4] => output will have three time slices per band:
                     1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
+            drop_cloud_images (bool, optional): True by default. If true, drops images with any invalid (cloudy) pixels. If false,
+            keeps images with any valid pixels, while dropping only invalid pixels
 
         Note:
             If data_dir is provided, it overrides both image_dir and label_dir.
@@ -101,6 +103,7 @@ class MultiTemporalCropDataset(Dataset):
         self.num_timesteps = 37
         self.image_band_count = self.num_bands * self.num_timesteps
         self.time_step_selection = time_step_selection
+        self.drop_cloud_images = drop_cloud_images
 
         # === Integrated block (strict *_image.tif + *_label.tif) ===
         # Find files according to the naming convention: *_image.tif and *_label.tif
@@ -173,7 +176,10 @@ class MultiTemporalCropDataset(Dataset):
                 total_pixels = image_tensor.numel()
                 invalid_percentage = (invalid_count / total_pixels) * 100
                 print(f"Sample {idx}: Found {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
+                if self.drop_cloud_images and torch.any(image_tensor == -9999):
+                    image_tensor = torch.zeros(image_tensor.shape)
+                else:
+                    image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
 
         # --- Time step selection/averaging ---
         if self.time_step_selection is not None:
