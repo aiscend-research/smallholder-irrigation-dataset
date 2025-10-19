@@ -42,47 +42,6 @@ class LabelTif:
     def read(self):
         return self.array
 
-def create_bounding_box(center_lat, center_lon):
-    """
-    Helper function for tests that creates a bounding box around a center point with a given size. 
-    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
-    
-    Parameters:
-        - center_lat (float): Latitude of the center point.
-        - center_lon (float): Longitude of the center point.
-    
-    Returns:
-        - image_meta (dict): Dictionary which contains:
-            - height (int): Height of the bounding box in pixels.
-            - width (int): Width of the bounding box in pixels.
-            - crs (str): Coordinate reference system.
-            - transform (Affine): Affine transformation for the bounding box.
-    """
-
-    # Get lat/lon bounds
-    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
-
-    # Image dimensions
-    width = 100
-    height = 100
-
-    pixel_size_lon = (max_lon - min_lon) / width
-    pixel_size_lat = (max_lat - min_lat) / height
-    top_left_lon = min_lon
-    top_left_lat = max_lat
-
-    transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
-
-    image_meta = {
-        'height': height,
-        'width': width,
-        'crs': IMAGE_CRS,
-        'transform': transform,
-        'dtype': 'uint8',
-    }
-
-    return image_meta
-
 def create_labels():
     """
     Creates labels the .tif images with corresponding labelled polygons.
