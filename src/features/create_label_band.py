@@ -11,7 +11,6 @@ import os
 import sys
 import rasterio
 from rasterio.features import rasterize
-from rasterio.transform import from_origin
 from rasterio.warp import transform_geom
 from rasterio.crs import CRS
 import geopandas as gpd
@@ -27,7 +26,6 @@ if project_root not in sys.path:
 
 # import utils.utils
 from utils.utils import *
-from utils.geometries import bounding_box
 IMAGE_CRS = 'EPSG:32735'  # Coordinate reference system for the images
 
 '''
