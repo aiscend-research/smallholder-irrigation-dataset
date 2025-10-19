@@ -26,7 +26,6 @@ if project_root not in sys.path:
 
 # import utils.utils
 from utils.utils import *
-IMAGE_CRS = 'EPSG:32735'  # Coordinate reference system for the images
 
 '''
 Small class definition to be able to pass in data object
@@ -87,38 +86,6 @@ def create_irrigation_table():
 
     IRRIGATION_TABLE['site_id'] = IRRIGATION_TABLE['site_id'].apply(lambda id: id[3:])
     return IRRIGATION_TABLE
-
-def get_survey_data(input_image_path):
-    """
-    Retrieves the survey date for a particular .tif image.
-    
-    PRECONDITON: 
-        Assume that the image path has format s2_{lat}_{lon}_{windowStartDate}_{windowEndDate}_off-{offset}.tif
-        Example: s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif
-
-    Parameters:
-        - input_image_path (str): The input path of the .tif image of interest.
-
-    Output:
-        - lat (str): Location latitute
-        - lon (str): Location longitude
-        - survey_date (Date): Date of corresponding survey.
-    """
-
-    # Retrieve tokens
-    tokens = input_image_path[:-4].split("_")
-    
-    # Start, end date
-    lat = tokens[1]
-    lon = tokens[2]
-    start_date = datetime.strptime(tokens[3], "%Y-%m-%d").date()
-    end_date = datetime.strptime(tokens[4], "%Y-%m-%d").date()
-
-    # Retrieve survey date
-    middle_date = start_date + (end_date - start_date) / 2
-    offset = int(tokens[-1][4:])
-    survey_date = middle_date + timedelta(days=offset)
-    return lat, lon, survey_date
 
 def get_image_meta(input_image_path):
     """
