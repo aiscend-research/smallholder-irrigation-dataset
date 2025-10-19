@@ -12,6 +12,8 @@ import sys
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
+from rasterio.warp import transform_geom
+from rasterio.crs import CRS
 import geopandas as gpd
 from shapely.geometry import mapping
 import numpy as np
@@ -105,7 +107,7 @@ def create_labels():
         internal_id = row.internal_id
         unique_id = row.unique_id
         survey_id = int(row.site_id)
-        path_to_feature_file = get_data_root() + "/features_v2/" + f"{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_image.tif"
+        path_to_feature_file = get_data_root() + "features_v2/" + f"{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_image.tif"
         image_meta = get_image_meta(path_to_feature_file)
         timestamp = date(row.year, row.month, row.day)
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
@@ -236,6 +238,12 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
 
      # Add certainty score band
     shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
+    # Transform geoms from ESPG:4326 to image_meta's crs
+    shapes = [
+        (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
+        for geom, value in shapes
+    ]
+
     certainty_array = rasterize(
         shapes=shapes,
         out_shape=(image_meta['height'], image_meta['width']),
@@ -256,6 +264,11 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
 
     for i in range(5):
         shapes = [(geom, 1) for geom, cat in zip(gdf.geometry, gdf.uncertainty_explanation) if UNCERTAINTY_TYPES[i] in cat.split(";")]
+        # Transform geoms from ESPG:4326 to image_meta's crs
+        shapes = [
+            (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
+            for geom, value in shapes
+        ]
         mask = rasterize(
             shapes=shapes,
             out_shape=(image_meta['height'], image_meta['width']),
@@ -277,6 +290,7 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
         cat = cat.split(";")[0]
         if cat not in IRRIGATION_TYPES:
             raise ValueError(f"Unknown category: '{cat}'")
+        geom = transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)) # Transform geom from ESPG:4326 to image_meta's crs
         shapes.append((geom, IRRIGATION_TYPES[cat]))
 
 
