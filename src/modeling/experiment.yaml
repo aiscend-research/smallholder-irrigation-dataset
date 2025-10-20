@@ -18,7 +18,7 @@ data:
   pixels_per_image: null        # null = use ALL pixels 
 
   # Label CSV
-  csv_path: "data/labels/labeled_surveys/random_sample/test_irrigation_table.csv"
+  csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
   # Output root 
   data_dir: "data/modeling"
