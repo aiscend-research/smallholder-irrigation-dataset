@@ -8,17 +8,17 @@ imputation:
 data:
   # Cross-validation and automatic splitting
   use_cross_validation: true     # run K-fold CV
-  n_folds: 3
+  n_folds: 5
   test_size: 0.2
   val_size: 0.2
-  min_samples_per_class: 1
+  min_samples_per_class: 5
   random_state: 42
 
   # Memory management
   pixels_per_image: null        # null = use ALL pixels 
 
   # Label CSV
-  csv_path: "data/labels/labeled_surveys/random_sample/test_irrigation_table.csv"
+  csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
   # Output root 
   data_dir: "data/modeling"
