@@ -436,7 +436,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
         n_splits=exp_cfg["data"].get("n_folds", 5),
         test_size=exp_cfg["data"].get("test_size", 0.2),
-        val_size=0.0,
+        val_size=exp_cfg["data"].get("val_size", 0.2),
         min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
         grit_images_dir=grit_images_dir,
         grit_masks_dir=grit_masks_dir,
