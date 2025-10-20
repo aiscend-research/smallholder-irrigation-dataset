@@ -8,7 +8,7 @@ imputation:
 data:
   # Cross-validation and automatic splitting
   use_cross_validation: true     # run K-fold CV
-  n_folds: 5
+  n_folds: 3
   test_size: 0.2
   val_size: 0.2
   min_samples_per_class: 5
@@ -18,13 +18,13 @@ data:
   pixels_per_image: null        # null = use ALL pixels 
 
   # Label CSV
-  csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
+  csv_path: "data/labels/labeled_surveys/random_sample/test_irrigation_table.csv"
 
   # Output root 
   data_dir: "data/modeling"
 
   # GRIT cloud paths
-  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features"
+  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features_v2"
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
 
   # Label/Image bands used downstream
@@ -36,7 +36,7 @@ model:
   save_feature_importance: true
   hyperparameters: 
     random_forest: 
-      n_estimators: 100
+      n_estimators: 50
       random_state: 42
     gradient_boosting: 
       n_estimators: 200
