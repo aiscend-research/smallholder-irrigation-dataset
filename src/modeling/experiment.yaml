@@ -38,6 +38,13 @@ model:
     random_forest: 
       n_estimators: 100
       random_state: 42
+  #Imbalanced learning settings    
+  imbalanced_learning:
+    enabled: true
+    use_smote: true           
+    sampling_strategy: "auto"
+    k_neighbors: 5
+
     gradient_boosting: 
       n_estimators: 200
       learning_rate: 0.05

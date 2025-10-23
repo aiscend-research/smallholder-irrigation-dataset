@@ -454,6 +454,26 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     
     model_type = exp_cfg["model"]["type"].lower()
     hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
+
+    # Optional imbalanced-learning settings from YAML (only applied where supported)
+    imbal_cfg = exp_cfg["model"].get("imbalanced_learning", {})
+    if imbal_cfg.get("enabled", False):
+        if model_type == "random_forest":
+            # Copy to avoid mutating shared dicts
+            hyperparams = dict(hyperparams)
+            # Only set defaults if not already provided explicitly in hyperparams
+            if "use_smote" not in hyperparams:
+                hyperparams["use_smote"] = imbal_cfg.get("use_smote", True)
+            if "sampling_strategy" not in hyperparams:
+                hyperparams["sampling_strategy"] = imbal_cfg.get("sampling_strategy", "auto")
+            if "k_neighbors" not in hyperparams:
+                hyperparams["k_neighbors"] = imbal_cfg.get("k_neighbors", 5)
+            logger.info(
+                f"[cv] Imbalanced learning enabled for RandomForest (use_smote={hyperparams['use_smote']}, "
+                f"sampling_strategy={hyperparams['sampling_strategy']}, k_neighbors={hyperparams['k_neighbors']})"
+            )
+        else:
+            logger.warning(f"[cv] Imbalanced learning requested, but not supported for model '{model_type}'. Ignoring.")
     
     # Pixel sampling configuration
     pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
