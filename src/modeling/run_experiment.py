@@ -145,7 +145,10 @@ def _calibrate_if_requested(clf, method: str):
     method = (method or "none").lower()
     if method in {"isotonic", "sigmoid"}:
         logger.info(f"[calibration] Applying probability calibration: {method}")
-        return CalibratedClassifierCV(base_estimator=clf, method=method, cv=3)
+        try:
+            return CalibratedClassifierCV(estimator=clf, method=method, cv=3)
+        except TypeError:
+            return CalibratedClassifierCV(base_estimator=clf, method=method, cv=3)
     return clf
 
 
