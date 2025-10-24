@@ -1,13 +1,13 @@
 # NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
-name: "rf_baseline"
+name: "rf_baseline_recall_tuned"
 
 imputation:
-  mode: none        
+  mode: none
   fill_constant: 0.0
 
 data:
   # Cross-validation and automatic splitting
-  use_cross_validation: true     # run K-fold CV
+  use_cross_validation: true
   n_folds: 5
   test_size: 0.2
   val_size: 0.2
@@ -15,12 +15,12 @@ data:
   random_state: 42
 
   # Memory management
-  pixels_per_image: null        # null = use ALL pixels 
+  pixels_per_image: 8000          # sample pixels per image to balance RAM + recall
 
   # Label CSV
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
-  # Output root 
+  # Output root
   data_dir: "data/modeling"
 
   # GRIT cloud paths
@@ -28,18 +28,22 @@ data:
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
 
   # Label/Image bands used downstream
-  label_bands: [2]              # Band 2 for basic training (code auto-loads all 8 when detailed_metrics=true)
+  label_bands: [2]                # Band 2 for basic training (code auto-loads all 8 when detailed_metrics=true)
   image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "random_forest" 
+  type: "random_forest"
   save_feature_importance: true
-  class_weight: "auto"
-  hyperparameters: 
-    random_forest: 
-      n_estimators: 100
+  # Stronger cost-sensitive learning to boost recall
+  class_weight: {0: 1, 1: 10}
+  hyperparameters:
+    random_forest:
+      n_estimators: 800
+      max_depth: 22
+      min_samples_leaf: 3
+      max_features: "sqrt"
       random_state: 42
-    gradient_boosting: 
+    gradient_boosting:
       n_estimators: 200
       learning_rate: 0.05
       max_depth: 4
@@ -52,11 +56,11 @@ visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true    # Enable comprehensive metrics and plots
-  calibrate: "isotonic"             # options: "none" | "isotonic" | "sigmoid"
+  compute_detailed_metrics: true
+  calibrate: "sigmoid"            # compatible with your sklearn + usually more stable
   thresholding:
-    mode: "precision_at"            # "f1" | "precision_at"
-    min_precision: 0.8
+    mode: "precision_at"          # maximize recall subject to a precision floor
+    min_precision: 0.65           # relax from 0.8 to recover positives
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"
