@@ -34,6 +34,7 @@ data:
 model:
   type: "random_forest" 
   save_feature_importance: true
+  class_weight: "auto"
   hyperparameters: 
     random_forest: 
       n_estimators: 100
@@ -52,6 +53,10 @@ visualization:
 
 evaluation:
   compute_detailed_metrics: true    # Enable comprehensive metrics and plots
+  calibrate: "isotonic"             # options: "none" | "isotonic" | "sigmoid"
+  thresholding:
+    mode: "precision_at"            # "f1" | "precision_at"
+    min_precision: 0.8
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

@@ -41,6 +41,15 @@ from src.modeling.ml_pipeline.evaluation import plot_band_time_importance
 from src.modeling.ml_pipeline.evaluation import plot_band_importance, plot_time_importance
 from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
+# --- NEW: metrics & calibration utilities (no annotation changed above) ---
+from sklearn.metrics import (
+    precision_recall_curve,
+    average_precision_score,
+    matthews_corrcoef,
+    confusion_matrix,
+)
+from sklearn.calibration import CalibratedClassifierCV
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -94,6 +103,72 @@ def load_stems(txt_path: str) -> list[str]:
     if not p.exists():
         return []
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+# --- NEW: imbalance helpers (added; no existing annotation changed) ---
+def _compute_class_weights(y: np.ndarray, strategy) -> dict:
+    """
+    Return dict with keys:
+      - 'class_weight_dict' for sklearn models
+      - 'scale_pos_weight' for XGBoost/LightGBM-style learners
+    strategy can be:
+      - "auto": compute from y
+      - dict:   explicit {0: w0, 1: w1}
+      - None:   disable
+    """
+    if strategy is None:
+        return {}
+    if strategy == "auto":
+        n_pos = int((y == 1).sum())
+        n_neg = int((y == 0).sum())
+        if n_pos == 0:
+            logger.warning("[imbalance] No positives in training fold; using neutral weights.")
+            return {}
+        w_pos = n_neg / max(n_pos, 1)
+        return {
+            "class_weight_dict": {0: 1.0, 1: float(w_pos)},
+            "scale_pos_weight": float(n_neg / max(n_pos, 1)),
+        }
+    if isinstance(strategy, dict):
+        w0 = float(strategy.get(0, 1.0))
+        w1 = float(strategy.get(1, 1.0))
+        return {
+            "class_weight_dict": {0: w0, 1: w1},
+            "scale_pos_weight": (w1 / max(w0, 1e-12)),
+        }
+    logger.warning(f"[imbalance] Unknown strategy {strategy}; ignoring.")
+    return {}
+
+
+def _calibrate_if_requested(clf, method: str):
+    """Wrap classifier for probability calibration if requested ('isotonic' or 'sigmoid')."""
+    method = (method or "none").lower()
+    if method in {"isotonic", "sigmoid"}:
+        logger.info(f"[calibration] Applying probability calibration: {method}")
+        return CalibratedClassifierCV(base_estimator=clf, method=method, cv=3)
+    return clf
+
+
+def _threshold_from_pr(y_true: np.ndarray, y_prob: np.ndarray, mode: str = "f1", min_precision: float = 0.8) -> float:
+    """
+    Select a decision threshold from the PR curve.
+      - mode="f1": maximize F1 on the validation set
+      - mode="precision_at": choose the threshold with maximum recall subject to precision >= min_precision
+    """
+    prec, rec, thr = precision_recall_curve(y_true, y_prob)
+    thr = np.r_[thr, 1.0]  # align with prec/rec length
+    mode = (mode or "f1").lower()
+
+    if mode == "precision_at":
+        mask = prec >= float(min_precision)
+        if mask.any():
+            idx = np.argmax(rec[mask])
+            return float(thr[mask][idx])
+        logger.warning("[threshold] No threshold reaches requested precision; falling back to F1.")
+
+    f1 = (2 * prec * rec) / (prec + rec + 1e-12)
+    idx = int(np.argmax(f1))
+    return float(thr[idx])
 
 
 # Direct dataset loading from manifest
@@ -314,15 +389,61 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     y_train = y_train_full[:, 1]  # Shape: (n_samples,) - binary irrigation presence
     y_val_for_training = y_val_full[:, 1]
 
+    # --- NEW: class weights / scale_pos_weight per fold ---
+    cw_strategy = (exp_cfg or {}).get("model", {}).get("class_weight", "auto")
+    imb = _compute_class_weights(y_train.astype(int), cw_strategy)
+    adjusted_hparams = dict(hyperparams) if hyperparams else {}
+    mt = (model_type or "").lower()
+    if imb and mt in {"random_forest", "rf", "logistic", "logreg", "svc"}:
+        adjusted_hparams["class_weight"] = imb.get("class_weight_dict")
+        logger.info(f"[{fold_name}] Using class_weight={imb.get('class_weight_dict')}")
+    if imb and mt in {"xgboost", "xgb", "lightgbm", "lgbm"}:
+        adjusted_hparams["scale_pos_weight"] = imb.get("scale_pos_weight")
+        logger.info(f"[{fold_name}] Using scale_pos_weight={imb.get('scale_pos_weight')}")
+
     logger.info(f"[{fold_name}] Training model...")
-    clf = train_model(X_train, y_train, model_type, **hyperparams)
-    
+    base_clf = train_model(X_train, y_train, model_type, **adjusted_hparams)
+
+    # --- NEW: calibration wrapper (fit only on training via internal CV) ---
+    calib_method = (exp_cfg or {}).get("evaluation", {}).get("calibrate", "none")
+    clf = _calibrate_if_requested(base_clf, calib_method)
+    if clf is not base_clf:
+        clf.fit(X_train, y_train)
+
     logger.info(f"[{fold_name}] Evaluating...")
-    y_pred = clf.predict(X_val)
-    
+    # --- NEW: use probabilities + threshold search ---
+    if hasattr(clf, "predict_proba"):
+        y_prob = clf.predict_proba(X_val)[:, 1]
+    elif hasattr(clf, "decision_function"):
+        scores = clf.decision_function(X_val)
+        y_prob = 1 / (1 + np.exp(-scores))
+    else:
+        y_prob = clf.predict(X_val).astype(float)
+
+    thr_cfg = (exp_cfg or {}).get("evaluation", {}).get("thresholding", {}) or {}
+    thr_mode = (thr_cfg.get("mode", "f1") or "f1").lower()
+    thr_min_prec = float(thr_cfg.get("min_precision", 0.8))
+    best_thr = _threshold_from_pr(y_val_for_training.astype(int), y_prob, mode=thr_mode, min_precision=thr_min_prec)
+
+    y_pred = (y_prob >= best_thr).astype(int)
+
     # Basic metrics
     metrics = model_metrics(y_pred, y_val_for_training)
-    
+
+    # --- NEW: add PR-AUC, MCC, confusion matrix, chosen threshold ---
+    pr_auc = float(average_precision_score(y_val_for_training, y_prob))
+    mcc = float(matthews_corrcoef(y_val_for_training, y_pred))
+    cm = confusion_matrix(y_val_for_training, y_pred, labels=[0, 1]).tolist()
+    enriched_metrics = {}
+    for task_key, vals in metrics.items():
+        enriched = dict(vals)
+        enriched["pr_auc"] = pr_auc
+        enriched["mcc"] = mcc
+        enriched["threshold"] = float(best_thr)
+        enriched["confusion_matrix"] = {"labels": [0, 1], "matrix": cm}
+        enriched_metrics[task_key] = enriched
+    metrics = enriched_metrics  # replace with enriched
+
     # --- Detailed metrics computation (if configured) ---
     compute_detailed = exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     
@@ -357,7 +478,14 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
                 X_val_full, y_val_full_complete, _ = flatten_dataset_from_tuples(val_ds_full, pixels_per_image=None)
                 
                 # Re-predict on full data
-                y_pred_full = clf.predict(X_val_full)
+                if hasattr(clf, "predict_proba"):
+                    y_prob_full = clf.predict_proba(X_val_full)[:, 1]
+                elif hasattr(clf, "decision_function"):
+                    scr_full = clf.decision_function(X_val_full)
+                    y_prob_full = 1 / (1 + np.exp(-scr_full))
+                else:
+                    y_prob_full = clf.predict(X_val_full).astype(float)
+                y_pred_full = (y_prob_full >= best_thr).astype(int)
                 
                 # Reshape to spatial format
                 y_pred_spatial = y_pred_full.astype(int).reshape(n_imgs, H, W)
@@ -528,7 +656,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         
         # --- Feature importance export for this fold ---
         save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-        if save_feat_imp and hasattr(clf, "estimators_") or hasattr(clf, "feature_importances_"):
+        if save_feat_imp and (hasattr(clf, "estimators_") or hasattr(clf, "feature_importances_")):
             try:
                 # Infer number of timesteps from first sample
                 first_img, _, _ = val_ds[0]
