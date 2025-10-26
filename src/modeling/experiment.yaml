@@ -1,5 +1,5 @@
 # NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
-name: "rf_baseline_recall_tuned"
+name: "isolation_forest_anomaly_tuned"
 
 imputation:
   mode: none
@@ -32,35 +32,20 @@ data:
   image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "random_forest"
-  save_feature_importance: true
-  # Stronger cost-sensitive learning to boost recall
-  class_weight: {0: 1, 1: 10}
-  hyperparameters:
-    random_forest:
-      n_estimators: 800
-      max_depth: 22
-      min_samples_leaf: 3
-      max_features: "sqrt"
-      random_state: 42
-    gradient_boosting:
-      n_estimators: 200
-      learning_rate: 0.05
-      max_depth: 4
-      subsample: 0.8
-      min_samples_split: 5
-      min_samples_leaf: 3
-      random_state: 42
+  type: "isolation_forest"        # Anomaly detection approach
+  save_feature_importance: false  # Not applicable for anomaly detectors
+  
+  # Anomaly detection configuration
+  anomaly_detection:
+    method: "isolation_forest"    # Options: "isolation_forest", "ensemble", "one_class_svm", "lof"
+    n_estimators: 300              # More trees for better detection
+    # contamination is auto-calculated from training data (irrigation proportion)
 
 visualization:
   num_samples: 2
 
 evaluation:
   compute_detailed_metrics: true
-  calibrate: "sigmoid"            # compatible with your sklearn + usually more stable
-  thresholding:
-    mode: "precision_at"          # maximize recall subject to a precision floor
-    min_precision: 0.65           # relax from 0.8 to recover positives
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

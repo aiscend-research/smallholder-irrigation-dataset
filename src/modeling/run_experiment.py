@@ -25,7 +25,6 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 from joblib import dump
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
@@ -41,7 +40,6 @@ from src.modeling.ml_pipeline.evaluation import plot_band_time_importance
 from src.modeling.ml_pipeline.evaluation import plot_band_importance, plot_time_importance
 from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
-# --- NEW: metrics & calibration utilities (no annotation changed above) ---
 from sklearn.metrics import (
     precision_recall_curve,
     average_precision_score,
@@ -50,17 +48,10 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     roc_auc_score,
 )
-from sklearn.calibration import CalibratedClassifierCV
-
-# --- NEW: Imbalance handling imports ---
-try:
-    from imblearn.over_sampling import SMOTE, ADASYN
-    from imblearn.under_sampling import RandomUnderSampler
-    from imblearn.combine import SMOTETomek
-    IMBLEARN_AVAILABLE = True
-except ImportError:
-    IMBLEARN_AVAILABLE = False
-    logging.warning("imbalanced-learn not available. Install with: pip install imbalanced-learn")
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.svm import OneClassSVM
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,160 +108,148 @@ def load_stems(txt_path: str) -> list[str]:
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
-# --- NEW: Enhanced imbalance handling ---
-def _apply_resampling(X: np.ndarray, y: np.ndarray, strategy: dict, fold_name: str = "") -> tuple:
-    """
-    Apply resampling strategy to handle class imbalance.
+# Anomaly Detection Models
+class AnomalyDetector:
+    """Unified interface for anomaly detection methods."""
     
-    Args:
-        X: Feature matrix
-        y: Labels
-        strategy: Dict with resampling configuration
-        fold_name: Name of fold for logging
-    
-    Returns:
-        X_resampled, y_resampled
-    """
-    if not strategy or strategy.get("method", "none").lower() == "none":
-        return X, y
-    
-    if not IMBLEARN_AVAILABLE:
-        logger.warning(f"[{fold_name}] Resampling requested but imbalanced-learn not available")
-        return X, y
-    
-    method = strategy.get("method", "smote").lower()
-    sampling_strategy = strategy.get("sampling_strategy", 0.5)
-    
-    n_pos_before = int((y == 1).sum())
-    n_neg_before = int((y == 0).sum())
-    ratio_before = n_neg_before / max(n_pos_before, 1)
-    
-    logger.info(f"[{fold_name}] Before resampling: {n_neg_before} negative, {n_pos_before} positive (ratio: {ratio_before:.1f}:1)")
-    
-    try:
-        if method == "smote":
-            resampler = SMOTE(
-                sampling_strategy=sampling_strategy,
-                random_state=strategy.get("random_state", 42),
-                k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
+    def __init__(self, method: str = "isolation_forest", contamination: float = 0.1, **kwargs):
+        self.method = method.lower()
+        self.contamination = contamination
+        self.scaler = StandardScaler()
+        self.model = None
+        self.kwargs = kwargs
+        
+    def fit(self, X, y=None):
+        """
+        Fit anomaly detector. Can be semi-supervised or unsupervised.
+        For semi-supervised: trains only on normal class (y=0).
+        For unsupervised: trains on all data.
+        """
+        logger.info(f"[anomaly] Training {self.method} detector...")
+        
+        # Scale features
+        X_scaled = self.scaler.fit_transform(X)
+        
+        if self.method == "isolation_forest":
+            # Semi-supervised: uses all data but expects contamination proportion
+            self.model = IsolationForest(
+                contamination=self.contamination,
+                n_estimators=self.kwargs.get('n_estimators', 200),
+                max_samples=self.kwargs.get('max_samples', 'auto'),
+                random_state=self.kwargs.get('random_state', 42),
+                n_jobs=-1
             )
-        elif method == "adasyn":
-            resampler = ADASYN(
-                sampling_strategy=sampling_strategy,
-                random_state=strategy.get("random_state", 42),
-                n_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
+            self.model.fit(X_scaled)
+            
+        elif self.method == "one_class_svm":
+            # Supervised: train only on normal class
+            if y is not None:
+                X_normal = X_scaled[y == 0]
+                logger.info(f"[anomaly] Training One-Class SVM on {len(X_normal)} normal samples")
+            else:
+                X_normal = X_scaled
+            
+            nu = min(self.contamination * 2, 0.5)
+            self.model = OneClassSVM(
+                nu=nu,
+                kernel=self.kwargs.get('kernel', 'rbf'),
+                gamma=self.kwargs.get('gamma', 'scale')
             )
-        elif method == "smote_tomek":
-            resampler = SMOTETomek(
-                sampling_strategy=sampling_strategy,
-                random_state=strategy.get("random_state", 42),
-                smote=SMOTE(k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1)
+            self.model.fit(X_normal)
+            
+        elif self.method == "lof":
+            # Semi-supervised with novelty detection
+            self.model = LocalOutlierFactor(
+                n_neighbors=self.kwargs.get('n_neighbors', 20),
+                contamination=self.contamination,
+                novelty=True,
+                n_jobs=-1
             )
-        elif method == "hybrid":
-            # SMOTE oversampling + undersampling
-            from imblearn.pipeline import Pipeline as ImbPipeline
-            over_ratio = strategy.get("over_ratio", 0.5)
-            under_ratio = strategy.get("under_ratio", 0.8)
-            resampler = ImbPipeline([
-                ('over', SMOTE(
-                    sampling_strategy=over_ratio,
-                    random_state=strategy.get("random_state", 42),
-                    k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
-                )),
-                ('under', RandomUnderSampler(
-                    sampling_strategy=under_ratio,
-                    random_state=strategy.get("random_state", 42)
-                ))
-            ])
+            self.model.fit(X_scaled)
+            
         else:
-            logger.warning(f"[{fold_name}] Unknown resampling method: {method}")
-            return X, y
+            raise ValueError(f"Unknown anomaly detection method: {self.method}")
         
-        X_resampled, y_resampled = resampler.fit_resample(X, y)
-        
-        n_pos_after = int((y_resampled == 1).sum())
-        n_neg_after = int((y_resampled == 0).sum())
-        ratio_after = n_neg_after / max(n_pos_after, 1)
-        
-        logger.info(f"[{fold_name}] After {method}: {n_neg_after} negative, {n_pos_after} positive (ratio: {ratio_after:.1f}:1)")
-        logger.info(f"[{fold_name}] Dataset size: {len(y)} → {len(y_resampled)} ({len(y_resampled)/len(y):.2f}x)")
-        
-        return X_resampled, y_resampled
-        
-    except Exception as e:
-        logger.warning(f"[{fold_name}] Resampling failed: {e}. Using original data.")
-        return X, y
+        return self
+    
+    def predict(self, X):
+        """Predict anomalies (1 = irrigation/anomaly, 0 = normal)."""
+        X_scaled = self.scaler.transform(X)
+        predictions = self.model.predict(X_scaled)
+        # Convert from sklearn convention (-1=anomaly, 1=normal) to (1=irrigation, 0=normal)
+        return (predictions == -1).astype(int)
+    
+    def decision_function(self, X):
+        """Get anomaly scores (higher = more anomalous)."""
+        X_scaled = self.scaler.transform(X)
+        if hasattr(self.model, 'decision_function'):
+            scores = self.model.decision_function(X_scaled)
+            # Negate so that higher scores = more anomalous
+            return -scores
+        elif hasattr(self.model, 'score_samples'):
+            scores = self.model.score_samples(X_scaled)
+            return -scores
+        else:
+            return self.predict(X).astype(float)
 
 
-def _compute_class_weights(y: np.ndarray, strategy) -> dict:
-    """
-    Return dict with keys:
-      - 'class_weight_dict' for sklearn models
-      - 'scale_pos_weight' for XGBoost/LightGBM-style learners
-    strategy can be:
-      - "auto": compute from y
-      - dict:   explicit {0: w0, 1: w1}
-      - None:   disable
-    """
-    if strategy is None:
-        return {}
-    if strategy == "auto":
-        n_pos = int((y == 1).sum())
-        n_neg = int((y == 0).sum())
-        if n_pos == 0:
-            logger.warning("[imbalance] No positives in training fold; using neutral weights.")
-            return {}
-        w_pos = n_neg / max(n_pos, 1)
-        return {
-            "class_weight_dict": {0: 1.0, 1: float(w_pos)},
-            "scale_pos_weight": float(n_neg / max(n_pos, 1)),
+class EnsembleAnomalyDetector:
+    """Ensemble of multiple anomaly detectors with voting."""
+    
+    def __init__(self, contamination: float = 0.1, voting_threshold: int = 2, **kwargs):
+        self.contamination = contamination
+        self.voting_threshold = voting_threshold
+        self.kwargs = kwargs
+        
+        # Initialize multiple detectors
+        self.detectors = {
+            'isolation_forest': AnomalyDetector('isolation_forest', contamination, **kwargs),
+            'lof': AnomalyDetector('lof', contamination, **kwargs),
+            'one_class_svm': AnomalyDetector('one_class_svm', contamination, **kwargs)
         }
-    if isinstance(strategy, dict):
-        w0 = float(strategy.get(0, 1.0))
-        w1 = float(strategy.get(1, 1.0))
-        return {
-            "class_weight_dict": {0: w0, 1: w1},
-            "scale_pos_weight": (w1 / max(w0, 1e-12)),
-        }
-    logger.warning(f"[imbalance] Unknown strategy {strategy}; ignoring.")
-    return {}
+    
+    def fit(self, X, y=None):
+        """Fit all detectors."""
+        logger.info("[anomaly] Training ensemble of 3 detectors...")
+        for name, detector in self.detectors.items():
+            try:
+                detector.fit(X, y)
+                logger.info(f"[anomaly] ✓ {name} trained")
+            except Exception as e:
+                logger.warning(f"[anomaly] ✗ {name} failed: {e}")
+        return self
+    
+    def predict(self, X):
+        """Predict using majority voting."""
+        votes = np.zeros(len(X), dtype=int)
+        
+        for name, detector in self.detectors.items():
+            try:
+                predictions = detector.predict(X)
+                votes += predictions
+            except Exception as e:
+                logger.warning(f"[anomaly] Prediction failed for {name}: {e}")
+        
+        # Majority vote: at least voting_threshold detectors must agree
+        return (votes >= self.voting_threshold).astype(int)
+    
+    def decision_function(self, X):
+        """Average anomaly scores across detectors."""
+        scores_list = []
+        
+        for detector in self.detectors.values():
+            try:
+                scores = detector.decision_function(X)
+                scores_list.append(scores)
+            except:
+                pass
+        
+        if scores_list:
+            return np.mean(scores_list, axis=0)
+        else:
+            return self.predict(X).astype(float)
 
 
-def _calibrate_if_requested(clf, method: str):
-    """Wrap classifier for probability calibration if requested ('isotonic' or 'sigmoid')."""
-    method = (method or "none").lower()
-    if method in {"isotonic", "sigmoid"}:
-        logger.info(f"[calibration] Applying probability calibration: {method}")
-        try:
-            return CalibratedClassifierCV(estimator=clf, method=method, cv=3)
-        except TypeError:
-            return CalibratedClassifierCV(base_estimator=clf, method=method, cv=3)
-    return clf
-
-
-def _threshold_from_pr(y_true: np.ndarray, y_prob: np.ndarray, mode: str = "f1", min_precision: float = 0.8) -> float:
-    """
-    Select a decision threshold from the PR curve.
-      - mode="f1": maximize F1 on the validation set
-      - mode="precision_at": choose the threshold with maximum recall subject to precision >= min_precision
-    """
-    prec, rec, thr = precision_recall_curve(y_true, y_prob)
-    thr = np.r_[thr, 1.0]  # align with prec/rec length
-    mode = (mode or "f1").lower()
-
-    if mode == "precision_at":
-        mask = prec >= float(min_precision)
-        if mask.any():
-            idx = np.argmax(rec[mask])
-            return float(thr[mask][idx])
-        logger.warning("[threshold] No threshold reaches requested precision; falling back to F1.")
-
-    f1 = (2 * prec * rec) / (prec + rec + 1e-12)
-    idx = int(np.argmax(f1))
-    return float(thr[idx])
-
-
-# Direct dataset loading from manifest
 def load_dataset_from_manifest(
     stems: list[str],
     manifest_df: pd.DataFrame,
@@ -320,11 +299,10 @@ def load_dataset_from_manifest(
             with rasterio.open(lab_path) as src:
                 label = src.read(label_bands)
             
-            # Store stem for ID extraction later
             dataset.append((image, label, stem))
             
             if (i + 1) % 50 == 0:
-                logger.info(f"[load] Loaded {len(dataset)}/{i + 1} samples (progress: {i+1}/{len(stems)})")
+                logger.info(f"[load] Loaded {len(dataset)}/{i + 1} samples")
                 
         except Exception as e:
             failed_reads += 1
@@ -380,18 +358,15 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
         total_pixels = height * width
         total_pixels_original += total_pixels
         
-        # Flatten to (n_pixels, n_bands)
         X_full = image.reshape(n_bands, -1).T
         y_full = label.reshape(label.shape[0], -1).T
         
-        # Sample random pixels if requested and image is larger than desired sample size
         if pixels_per_image and total_pixels > pixels_per_image:
             sample_indices = np.random.choice(total_pixels, pixels_per_image, replace=False)
             X_sample = X_full[sample_indices]
             y_sample = y_full[sample_indices]
             total_pixels_used += pixels_per_image
         else:
-            # Use all pixels
             X_sample = X_full
             y_sample = y_full
             total_pixels_used += total_pixels
@@ -461,8 +436,8 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
         logger.warning(f"[viz] Visualization failed: {e}")
 
 
-def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_type, 
-                           hyperparams, fold_name="", pixels_per_image=None, 
+def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model_config, 
+                           fold_name="", pixels_per_image=None, 
                            exp_cfg=None, fold_dir=None):
     """
     Train and evaluate a single fold with comprehensive metrics.
@@ -484,64 +459,73 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     X_val, y_val_full, val_stems_list = flatten_dataset_from_tuples(val_ds, pixels_per_image=pixels_per_image)
 
     # Use only first label band for training (binary classification)
-    # Band structure: 0=type, 1=binary, 2-7=uncertainty metadata, 7=certainty
-    y_train = y_train_full[:, 1]  # Shape: (n_samples,) - binary irrigation presence
+    y_train = y_train_full[:, 1]
     y_val_for_training = y_val_full[:, 1]
 
-    # --- NEW: Apply resampling strategy BEFORE training ---
-    resampling_cfg = (exp_cfg or {}).get("model", {}).get("resampling", None)
-    if resampling_cfg:
-        X_train, y_train = _apply_resampling(X_train, y_train, resampling_cfg, fold_name)
+    # Calculate contamination for anomaly detection
+    contamination = float((y_train == 1).sum() / len(y_train))
+    logger.info(f"[{fold_name}] Class distribution: {(y_train == 0).sum()} normal, {(y_train == 1).sum()} irrigation")
+    logger.info(f"[{fold_name}] Contamination (irrigation ratio): {contamination:.4f}")
 
-    # --- Class weights / scale_pos_weight per fold (applied AFTER resampling) ---
-    cw_strategy = (exp_cfg or {}).get("model", {}).get("class_weight", "auto")
-    imb = _compute_class_weights(y_train.astype(int), cw_strategy)
-    adjusted_hparams = dict(hyperparams) if hyperparams else {}
-    mt = (model_type or "").lower()
-    if imb and mt in {"random_forest", "rf", "logistic", "logreg", "svc"}:
-        adjusted_hparams["class_weight"] = imb.get("class_weight_dict")
-        logger.info(f"[{fold_name}] Using class_weight={imb.get('class_weight_dict')}")
-    if imb and mt in {"xgboost", "xgb", "lightgbm", "lgbm"}:
-        adjusted_hparams["scale_pos_weight"] = imb.get("scale_pos_weight")
-        logger.info(f"[{fold_name}] Using scale_pos_weight={imb.get('scale_pos_weight')}")
-
-    logger.info(f"[{fold_name}] Training model...")
-    base_clf = train_model(X_train, y_train, model_type, **adjusted_hparams)
-
-    # --- Calibration wrapper (fit only on training via internal CV) ---
-    calib_method = (exp_cfg or {}).get("evaluation", {}).get("calibrate", "none")
-    clf = _calibrate_if_requested(base_clf, calib_method)
-    if clf is not base_clf:
+    # Train model based on type
+    model_type = model_config.get('type', 'random_forest').lower()
+    
+    if model_type in ['anomaly', 'anomaly_detector', 'isolation_forest', 'ensemble']:
+        # Anomaly detection
+        anomaly_cfg = model_config.get('anomaly_detection', {})
+        method = anomaly_cfg.get('method', 'isolation_forest')
+        
+        if method == 'ensemble':
+            logger.info(f"[{fold_name}] Training ensemble anomaly detector...")
+            clf = EnsembleAnomalyDetector(
+                contamination=contamination,
+                voting_threshold=anomaly_cfg.get('voting_threshold', 2),
+                random_state=42
+            )
+        else:
+            logger.info(f"[{fold_name}] Training {method} anomaly detector...")
+            clf = AnomalyDetector(
+                method=method,
+                contamination=contamination,
+                n_estimators=anomaly_cfg.get('n_estimators', 200),
+                random_state=42
+            )
+        
         clf.fit(X_train, y_train)
+        
+    else:
+        # Standard supervised learning
+        logger.info(f"[{fold_name}] Training supervised {model_type} model...")
+        hyperparams = model_config.get('hyperparameters', {}).get(model_type, {})
+        clf = train_model(X_train, y_train, model_type, **hyperparams)
 
     logger.info(f"[{fold_name}] Evaluating...")
-    # --- Use probabilities + threshold search ---
-    if hasattr(clf, "predict_proba"):
-        y_prob = clf.predict_proba(X_val)[:, 1]
-    elif hasattr(clf, "decision_function"):
-        scores = clf.decision_function(X_val)
-        y_prob = 1 / (1 + np.exp(-scores))
+    
+    # Get predictions
+    y_pred = clf.predict(X_val)
+    
+    # Get anomaly scores if available
+    if hasattr(clf, 'decision_function'):
+        y_scores = clf.decision_function(X_val)
     else:
-        y_prob = clf.predict(X_val).astype(float)
+        y_scores = y_pred.astype(float)
 
-    thr_cfg = (exp_cfg or {}).get("evaluation", {}).get("thresholding", {}) or {}
-    thr_mode = (thr_cfg.get("mode", "f1") or "f1").lower()
-    thr_min_prec = float(thr_cfg.get("min_precision", 0.8))
-    best_thr = _threshold_from_pr(y_val_for_training.astype(int), y_prob, mode=thr_mode, min_precision=thr_min_prec)
-
-    y_pred = (y_prob >= best_thr).astype(int)
-
-    # Basic metrics
+    # Compute metrics
     metrics = model_metrics(y_pred, y_val_for_training)
 
-    # --- Enhanced metrics for imbalanced data ---
-    pr_auc = float(average_precision_score(y_val_for_training, y_prob))
-    mcc = float(matthews_corrcoef(y_val_for_training, y_pred))
-    balanced_acc = float(balanced_accuracy_score(y_val_for_training, y_pred))
+    # Enhanced metrics
     try:
-        roc_auc = float(roc_auc_score(y_val_for_training, y_prob))
+        pr_auc = float(average_precision_score(y_val_for_training, y_scores))
+    except:
+        pr_auc = 0.0
+    
+    try:
+        roc_auc = float(roc_auc_score(y_val_for_training, y_scores))
     except:
         roc_auc = 0.0
+    
+    mcc = float(matthews_corrcoef(y_val_for_training, y_pred))
+    balanced_acc = float(balanced_accuracy_score(y_val_for_training, y_pred))
     cm = confusion_matrix(y_val_for_training, y_pred, labels=[0, 1]).tolist()
     
     enriched_metrics = {}
@@ -551,26 +535,24 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
         enriched["roc_auc"] = roc_auc
         enriched["mcc"] = mcc
         enriched["balanced_accuracy"] = balanced_acc
-        enriched["threshold"] = float(best_thr)
+        enriched["contamination"] = float(contamination)
         enriched["confusion_matrix"] = {"labels": [0, 1], "matrix": cm}
         enriched_metrics[task_key] = enriched
     metrics = enriched_metrics
 
-    # --- Detailed metrics computation (if configured) ---
+    # Detailed metrics computation (if configured)
     compute_detailed = exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     
     if compute_detailed:
         try:
             logger.info(f"[{fold_name}] Computing detailed metrics over factors...")
             
-            # Get dimensions from the original dataset
             n_imgs = len(val_ds)
             first_img, first_label, _ = val_ds[0]
-            H = first_img.shape[1]  # Height
-            W = first_img.shape[2]  # Width
+            H = first_img.shape[1]
+            W = first_img.shape[2]
             pixels_per_img = H * W
             
-            # Check if we need all 8 bands for detailed metrics
             if y_val_full.shape[1] < 8:
                 logger.warning(
                     f"[{fold_name}] Not enough label bands ({y_val_full.shape[1]}) for detailed metrics. "
@@ -578,61 +560,42 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
                 )
                 return clf, metrics, val_ds, len(train_ds), len(val_ds)
             
-            # Handle pixel sampling case
             if pixels_per_image and pixels_per_image < pixels_per_img:
                 logger.warning(
-                    f"[{fold_name}] Pixel sampling is enabled ({pixels_per_image} < {pixels_per_img}). "
-                    f"Detailed metrics require full spatial data. Re-predicting on full images..."
+                    f"[{fold_name}] Pixel sampling enabled. Re-predicting on full images for detailed metrics..."
                 )
                 
-                # Re-load validation data without sampling for detailed metrics
                 val_ds_full = load_dataset_from_manifest(val_stems, manifest, label_bands)
                 X_val_full, y_val_full_complete, _ = flatten_dataset_from_tuples(val_ds_full, pixels_per_image=None)
                 
-                # Re-predict on full data
-                if hasattr(clf, "predict_proba"):
-                    y_prob_full = clf.predict_proba(X_val_full)[:, 1]
-                elif hasattr(clf, "decision_function"):
-                    scr_full = clf.decision_function(X_val_full)
-                    y_prob_full = 1 / (1 + np.exp(-scr_full))
-                else:
-                    y_prob_full = clf.predict(X_val_full).astype(float)
-                y_pred_full = (y_prob_full >= best_thr).astype(int)
-                
-                # Reshape to spatial format
+                y_pred_full = clf.predict(X_val_full)
                 y_pred_spatial = y_pred_full.astype(int).reshape(n_imgs, H, W)
                 y_test_spatial = y_val_full_complete[:, 1].astype(int).reshape(n_imgs, H, W)
                 
-                # Extract metadata bands (indices 2-7, which are bands 3-8 in the file)
                 label_metadata = (
-                    y_val_full_complete[:, 2:8]           # Get bands 2-7 (0-indexed)
-                    .reshape(n_imgs, H, W, 6)             # (n_imgs, H, W, 6)
-                    .transpose(0, 3, 1, 2)                # (n_imgs, 6, H, W)
+                    y_val_full_complete[:, 2:8]
+                    .reshape(n_imgs, H, W, 6)
+                    .transpose(0, 3, 1, 2)
                     .astype(int)
                 )
             else:
-                # No sampling - reshape directly
                 y_pred_spatial = y_pred.astype(int).reshape(n_imgs, H, W)
                 y_test_spatial = y_val_for_training.astype(int).reshape(n_imgs, H, W)
                 
-                # Extract metadata bands (indices 2-7 in y_val_full)
                 label_metadata = (
-                    y_val_full[:, 2:8]                    # Get bands 2-7 (0-indexed)
-                    .reshape(n_imgs, H, W, 6)             # (n_imgs, H, W, 6)
-                    .transpose(0, 3, 1, 2)                # (n_imgs, 6, H, W)
+                    y_val_full[:, 2:8]
+                    .reshape(n_imgs, H, W, 6)
+                    .transpose(0, 3, 1, 2)
                     .astype(int)
                 )
             
-            # Extract unique IDs from stems (format: {uid}_{site}_{date}_image)
             ids = np.array([int(stem.split('_')[0]) for stem in val_stems_list], dtype=int)
             
             if fold_dir:
-                # Create detailed metrics directory for this fold
                 detailed_dir = os.path.join(fold_dir, "detailed_metrics")
                 plots_dir = os.path.join(detailed_dir, "plots")
                 os.makedirs(plots_dir, exist_ok=True)
                 
-                # Compute metrics over factors
                 detailed_metrics = metrics_over_factors(
                     y_pred=y_pred_spatial,
                     y_test=y_test_spatial,
@@ -641,16 +604,13 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
                     ids=ids,
                     metrics_path=detailed_dir
                 )
-                logger.info(f"[{fold_name}] Saved detailed metrics JSON to: {os.path.join(detailed_dir, 'metrics.json')}")
+                logger.info(f"[{fold_name}] Saved detailed metrics to: {os.path.join(detailed_dir, 'metrics.json')}")
                 
-                # Generate plots
                 try:
                     plot_metrics_over_factors(metrics_json=detailed_metrics, save_dir=plots_dir)
-                    logger.info(f"[{fold_name}] Saved detailed metrics plots to: {plots_dir}")
+                    logger.info(f"[{fold_name}] Saved detailed plots to: {plots_dir}")
                 except Exception as plot_e:
                     logger.warning(f"[{fold_name}] Failed to plot detailed metrics: {plot_e}")
-                    import traceback
-                    traceback.print_exc()
         
         except Exception as e:
             import traceback
@@ -683,25 +643,21 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     )
     cv_root = Path(paths["cv_dir"])
 
-    # IMPORTANT: Load ALL 8 label bands if detailed metrics are requested
     compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     if compute_detailed:
-        label_bands = list(range(1, 9))  # Bands 1-8 (1-indexed in rasterio)
+        label_bands = list(range(1, 9))
         logger.info(f"[cv] Loading all 8 label bands for detailed metrics")
     else:
         label_bands = exp_cfg["data"]["label_bands"]
         logger.info(f"[cv] Loading label bands: {label_bands}")
     
-    model_type = exp_cfg["model"]["type"].lower()
-    hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
-    
-    # Pixel sampling configuration
+    model_config = exp_cfg["model"]
     pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
     
     if pixels_per_image:
         logger.info(f"[cv] Using pixel sampling: {pixels_per_image} pixels per image")
     else:
-        logger.info(f"[cv] Using ALL pixels (loading directly into RAM)")
+        logger.info(f"[cv] Using ALL pixels")
 
     cv_manifest_path = Path(paths["cv_manifest_csv"])
     if not cv_manifest_path.exists():
@@ -715,15 +671,13 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     
     logger.info(f"[cv] Running {len(fold_dirs)} folds...")
     
-    # Get band names for feature importance
     image_bands = exp_cfg["data"].get("image_bands", None)
     if not image_bands:
-        # Try to import default band names
         try:
             from src.modeling.custom_dataset import SHORT_BAND_NAMES
             BAND_NAMES = SHORT_BAND_NAMES
         except Exception:
-            BAND_NAMES = [f"Band{i+1}" for i in range(14)]  # Default fallback
+            BAND_NAMES = [f"Band{i+1}" for i in range(14)]
     else:
         BAND_NAMES = image_bands
     
@@ -738,17 +692,15 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         val_stems = load_stems(str(va_txt))
         logger.info(f"[{fold_dir.name}] train={len(train_stems)}, val={len(val_stems)}")
 
-        # Create fold-specific output directory
         fold_output_dir = os.path.join(experiment_dir, fold_dir.name)
         os.makedirs(fold_output_dir, exist_ok=True)
 
         clf, metrics, val_ds, train_size, val_size = train_and_evaluate_fold(
-            train_stems, val_stems, manifest, label_bands, model_type, hyperparams, 
+            train_stems, val_stems, manifest, label_bands, model_config, 
             fold_name=fold_dir.name, pixels_per_image=pixels_per_image,
             exp_cfg=exp_cfg, fold_dir=fold_output_dir
         )
 
-        # Save fold model
         model_path = os.path.join(fold_output_dir, "model.pkl")
         dump(clf, model_path)
         logger.info(f"[{fold_dir.name}] Model saved to {model_path}")
@@ -761,32 +713,27 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         })
         logger.info(f"[{fold_dir.name}] Metrics:\n{json.dumps(metrics, indent=2)}")
         
-        # Save visualization for each fold
         num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
         vis_path = os.path.join(fold_output_dir, f"visualization_{fold_dir.name}.png")
         plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
         
-        # --- Feature importance export for this fold ---
+        # Feature importance export (only for tree-based models)
         save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-        if save_feat_imp and (hasattr(clf, "estimators_") or hasattr(clf, "feature_importances_")):
+        if save_feat_imp and hasattr(clf, "feature_importances_"):
             try:
-                # Infer number of timesteps from first sample
                 first_img, _, _ = val_ds[0]
-                N_TIMESTEPS = first_img.shape[0] // len(BAND_NAMES)  # Assuming bands × timesteps structure
+                N_TIMESTEPS = first_img.shape[0] // len(BAND_NAMES)
                 
                 logger.info(f"[{fold_dir.name}] Exporting feature importances...")
                 
-                # Create subfolders for CSVs and plots
                 fi_root_dir = os.path.join(fold_output_dir, "feature_importance")
                 fi_csv_dir = os.path.join(fi_root_dir, "csv")
                 fi_plot_dir = os.path.join(fi_root_dir, "plots")
                 os.makedirs(fi_csv_dir, exist_ok=True)
                 os.makedirs(fi_plot_dir, exist_ok=True)
                 
-                # Export feature importances to CSV
                 export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv_dir)
                 
-                # Move any legacy CSVs
                 legacy_csvs = glob.glob(os.path.join(fold_output_dir, "feature_importance*.csv"))
                 for src in legacy_csvs:
                     dst = os.path.join(fi_csv_dir, os.path.basename(src))
@@ -796,29 +743,28 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
                     except Exception as e:
                         logger.warning(f"[{fold_dir.name}] Could not move CSV {src}: {e}")
                 
-                # Plot feature importances
                 band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
                 time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
                 band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
                 
                 if os.path.exists(band_csv):
-                    png_path = os.path.join(fi_plot_dir, f"band_importance_{model_type}.png")
+                    png_path = os.path.join(fi_plot_dir, f"band_importance.png")
                     try:
                         plot_band_importance(band_csv, band_names=BAND_NAMES, save_path=png_path)
-                        logger.info(f"[{fold_dir.name}] Plotted band importance to {png_path}")
+                        logger.info(f"[{fold_dir.name}] Plotted band importance")
                     except Exception as e:
                         logger.warning(f"[{fold_dir.name}] Failed to plot band importance: {e}")
                 
                 if os.path.exists(time_csv):
-                    png_path = os.path.join(fi_plot_dir, f"time_importance_{model_type}_T{N_TIMESTEPS}.png")
+                    png_path = os.path.join(fi_plot_dir, f"time_importance_T{N_TIMESTEPS}.png")
                     try:
                         plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS, save_path=png_path)
-                        logger.info(f"[{fold_dir.name}] Plotted time importance to {png_path}")
+                        logger.info(f"[{fold_dir.name}] Plotted time importance")
                     except Exception as e:
                         logger.warning(f"[{fold_dir.name}] Failed to plot time importance: {e}")
                 
                 if os.path.exists(band_time_csv):
-                    png_path = os.path.join(fi_plot_dir, f"band_time_importance_{model_type}_T{N_TIMESTEPS}.png")
+                    png_path = os.path.join(fi_plot_dir, f"band_time_heatmap_T{N_TIMESTEPS}.png")
                     try:
                         plot_band_time_importance(
                             importance_df=band_time_csv,
@@ -826,19 +772,18 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
                             num_timesteps=N_TIMESTEPS,
                             save_path=png_path
                         )
-                        logger.info(f"[{fold_dir.name}] Plotted band-time heatmap to {png_path}")
+                        logger.info(f"[{fold_dir.name}] Plotted band-time heatmap")
                     except Exception as e:
-                        logger.warning(f"[{fold_dir.name}] Failed to plot band-time heatmap: {e}")
+                        logger.warning(f"[{fold_dir.name}] Failed to plot heatmap: {e}")
                 
-                logger.info(f"[{fold_dir.name}] Feature importance CSVs saved under: {fi_csv_dir}")
-                logger.info(f"[{fold_dir.name}] Feature importance plots saved under: {fi_plot_dir}")
+                logger.info(f"[{fold_dir.name}] Feature importance saved to: {fi_root_dir}")
                 
             except Exception as e:
                 import traceback
                 logger.warning(f"[{fold_dir.name}] Failed to export feature importances: {e}")
                 traceback.print_exc()
         elif save_feat_imp:
-            logger.warning(f"[{fold_dir.name}] Requested feature importances, but model does not support feature importance extraction")
+            logger.info(f"[{fold_dir.name}] Feature importance not available for anomaly detectors")
 
     # Aggregate CV metrics
     if results:
@@ -850,7 +795,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             means, stds = {}, {}
             for mname in metric_structure[mtype]:
                 vals = [r["metrics"][mtype][mname] for r in results if not isinstance(r["metrics"][mtype][mname], dict)]
-                if vals:  # Only compute if we have numeric values
+                if vals:
                     means[mname] = float(np.mean(vals))
                     stds[mname] = float(np.std(vals))
             summary[f"{mtype}_mean"] = means
@@ -871,7 +816,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
 def main():
     import argparse
 
-    ap = argparse.ArgumentParser(description="Irrigation ML runner (CV with site-aware splits + direct loading + comprehensive metrics).")
+    ap = argparse.ArgumentParser(description="Irrigation ML runner with anomaly detection support.")
     ap.add_argument("--config", type=str, default="src/modeling/experiment.yaml",
                     help="Path to the experiment YAML config file")
     args = ap.parse_args()
