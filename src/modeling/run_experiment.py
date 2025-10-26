@@ -47,8 +47,20 @@ from sklearn.metrics import (
     average_precision_score,
     matthews_corrcoef,
     confusion_matrix,
+    balanced_accuracy_score,
+    roc_auc_score,
 )
 from sklearn.calibration import CalibratedClassifierCV
+
+# --- NEW: Imbalance handling imports ---
+try:
+    from imblearn.over_sampling import SMOTE, ADASYN
+    from imblearn.under_sampling import RandomUnderSampler
+    from imblearn.combine import SMOTETomek
+    IMBLEARN_AVAILABLE = True
+except ImportError:
+    IMBLEARN_AVAILABLE = False
+    logging.warning("imbalanced-learn not available. Install with: pip install imbalanced-learn")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,7 +117,91 @@ def load_stems(txt_path: str) -> list[str]:
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
-# --- NEW: imbalance helpers (added; no existing annotation changed) ---
+# --- NEW: Enhanced imbalance handling ---
+def _apply_resampling(X: np.ndarray, y: np.ndarray, strategy: dict, fold_name: str = "") -> tuple:
+    """
+    Apply resampling strategy to handle class imbalance.
+    
+    Args:
+        X: Feature matrix
+        y: Labels
+        strategy: Dict with resampling configuration
+        fold_name: Name of fold for logging
+    
+    Returns:
+        X_resampled, y_resampled
+    """
+    if not strategy or strategy.get("method", "none").lower() == "none":
+        return X, y
+    
+    if not IMBLEARN_AVAILABLE:
+        logger.warning(f"[{fold_name}] Resampling requested but imbalanced-learn not available")
+        return X, y
+    
+    method = strategy.get("method", "smote").lower()
+    sampling_strategy = strategy.get("sampling_strategy", 0.5)
+    
+    n_pos_before = int((y == 1).sum())
+    n_neg_before = int((y == 0).sum())
+    ratio_before = n_neg_before / max(n_pos_before, 1)
+    
+    logger.info(f"[{fold_name}] Before resampling: {n_neg_before} negative, {n_pos_before} positive (ratio: {ratio_before:.1f}:1)")
+    
+    try:
+        if method == "smote":
+            resampler = SMOTE(
+                sampling_strategy=sampling_strategy,
+                random_state=strategy.get("random_state", 42),
+                k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
+            )
+        elif method == "adasyn":
+            resampler = ADASYN(
+                sampling_strategy=sampling_strategy,
+                random_state=strategy.get("random_state", 42),
+                n_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
+            )
+        elif method == "smote_tomek":
+            resampler = SMOTETomek(
+                sampling_strategy=sampling_strategy,
+                random_state=strategy.get("random_state", 42),
+                smote=SMOTE(k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1)
+            )
+        elif method == "hybrid":
+            # SMOTE oversampling + undersampling
+            from imblearn.pipeline import Pipeline as ImbPipeline
+            over_ratio = strategy.get("over_ratio", 0.5)
+            under_ratio = strategy.get("under_ratio", 0.8)
+            resampler = ImbPipeline([
+                ('over', SMOTE(
+                    sampling_strategy=over_ratio,
+                    random_state=strategy.get("random_state", 42),
+                    k_neighbors=min(5, n_pos_before - 1) if n_pos_before > 1 else 1
+                )),
+                ('under', RandomUnderSampler(
+                    sampling_strategy=under_ratio,
+                    random_state=strategy.get("random_state", 42)
+                ))
+            ])
+        else:
+            logger.warning(f"[{fold_name}] Unknown resampling method: {method}")
+            return X, y
+        
+        X_resampled, y_resampled = resampler.fit_resample(X, y)
+        
+        n_pos_after = int((y_resampled == 1).sum())
+        n_neg_after = int((y_resampled == 0).sum())
+        ratio_after = n_neg_after / max(n_pos_after, 1)
+        
+        logger.info(f"[{fold_name}] After {method}: {n_neg_after} negative, {n_pos_after} positive (ratio: {ratio_after:.1f}:1)")
+        logger.info(f"[{fold_name}] Dataset size: {len(y)} → {len(y_resampled)} ({len(y_resampled)/len(y):.2f}x)")
+        
+        return X_resampled, y_resampled
+        
+    except Exception as e:
+        logger.warning(f"[{fold_name}] Resampling failed: {e}. Using original data.")
+        return X, y
+
+
 def _compute_class_weights(y: np.ndarray, strategy) -> dict:
     """
     Return dict with keys:
@@ -392,7 +488,12 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     y_train = y_train_full[:, 1]  # Shape: (n_samples,) - binary irrigation presence
     y_val_for_training = y_val_full[:, 1]
 
-    # --- NEW: class weights / scale_pos_weight per fold ---
+    # --- NEW: Apply resampling strategy BEFORE training ---
+    resampling_cfg = (exp_cfg or {}).get("model", {}).get("resampling", None)
+    if resampling_cfg:
+        X_train, y_train = _apply_resampling(X_train, y_train, resampling_cfg, fold_name)
+
+    # --- Class weights / scale_pos_weight per fold (applied AFTER resampling) ---
     cw_strategy = (exp_cfg or {}).get("model", {}).get("class_weight", "auto")
     imb = _compute_class_weights(y_train.astype(int), cw_strategy)
     adjusted_hparams = dict(hyperparams) if hyperparams else {}
@@ -407,14 +508,14 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     logger.info(f"[{fold_name}] Training model...")
     base_clf = train_model(X_train, y_train, model_type, **adjusted_hparams)
 
-    # --- NEW: calibration wrapper (fit only on training via internal CV) ---
+    # --- Calibration wrapper (fit only on training via internal CV) ---
     calib_method = (exp_cfg or {}).get("evaluation", {}).get("calibrate", "none")
     clf = _calibrate_if_requested(base_clf, calib_method)
     if clf is not base_clf:
         clf.fit(X_train, y_train)
 
     logger.info(f"[{fold_name}] Evaluating...")
-    # --- NEW: use probabilities + threshold search ---
+    # --- Use probabilities + threshold search ---
     if hasattr(clf, "predict_proba"):
         y_prob = clf.predict_proba(X_val)[:, 1]
     elif hasattr(clf, "decision_function"):
@@ -433,19 +534,27 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     # Basic metrics
     metrics = model_metrics(y_pred, y_val_for_training)
 
-    # --- NEW: add PR-AUC, MCC, confusion matrix, chosen threshold ---
+    # --- Enhanced metrics for imbalanced data ---
     pr_auc = float(average_precision_score(y_val_for_training, y_prob))
     mcc = float(matthews_corrcoef(y_val_for_training, y_pred))
+    balanced_acc = float(balanced_accuracy_score(y_val_for_training, y_pred))
+    try:
+        roc_auc = float(roc_auc_score(y_val_for_training, y_prob))
+    except:
+        roc_auc = 0.0
     cm = confusion_matrix(y_val_for_training, y_pred, labels=[0, 1]).tolist()
+    
     enriched_metrics = {}
     for task_key, vals in metrics.items():
         enriched = dict(vals)
         enriched["pr_auc"] = pr_auc
+        enriched["roc_auc"] = roc_auc
         enriched["mcc"] = mcc
+        enriched["balanced_accuracy"] = balanced_acc
         enriched["threshold"] = float(best_thr)
         enriched["confusion_matrix"] = {"labels": [0, 1], "matrix": cm}
         enriched_metrics[task_key] = enriched
-    metrics = enriched_metrics  # replace with enriched
+    metrics = enriched_metrics
 
     # --- Detailed metrics computation (if configured) ---
     compute_detailed = exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
@@ -740,9 +849,10 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         for mtype in metric_structure:
             means, stds = {}, {}
             for mname in metric_structure[mtype]:
-                vals = [r["metrics"][mtype][mname] for r in results]
-                means[mname] = float(np.mean(vals))
-                stds[mname] = float(np.std(vals))
+                vals = [r["metrics"][mtype][mname] for r in results if not isinstance(r["metrics"][mtype][mname], dict)]
+                if vals:  # Only compute if we have numeric values
+                    means[mname] = float(np.mean(vals))
+                    stds[mname] = float(np.std(vals))
             summary[f"{mtype}_mean"] = means
             summary[f"{mtype}_std"] = stds
 
