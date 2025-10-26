@@ -1,5 +1,5 @@
 # NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
-name: "isolation_forest_anomaly_tuned"
+name: "rf_smote_baseline"
 
 imputation:
   mode: none
@@ -32,20 +32,24 @@ data:
   image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "isolation_forest"        # Anomaly detection approach
-  save_feature_importance: false  # Not applicable for anomaly detectors
-  
-  # Anomaly detection configuration
-  anomaly_detection:
-    method: "isolation_forest"    # Options: "isolation_forest", "ensemble", "one_class_svm", "lof"
-    n_estimators: 300              # More trees for better detection
-    # contamination is auto-calculated from training data (irrigation proportion)
+  type: "random_forest"           # Supervised baseline with SMOTE + class_weight
+  save_feature_importance: true   # Enable feature importance export for tree-based models
+
+  # Supervised Random Forest hyperparameters
+  hyperparameters:
+    random_forest:
+      n_estimators: 300           # Number of trees
+      max_depth: 25               # Cap tree depth for generalization
+      class_weight: "balanced_subsample"  # Adjust for residual imbalance after SMOTE
+
+  # SMOTE balancing configuration
+  imbalance_strategy: "smote"     # Use SMOTE to oversample irrigation class (~0.1 ratio)
 
 visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true
+  compute_detailed_metrics: true  # Enable detailed metric computation
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"

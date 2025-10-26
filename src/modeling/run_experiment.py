@@ -48,10 +48,10 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     roc_auc_score,
 )
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import IsolationForest
-from sklearn.neighbors import LocalOutlierFactor
-from sklearn.svm import OneClassSVM
+
+# New imports for baseline model
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,148 +106,6 @@ def load_stems(txt_path: str) -> list[str]:
     if not p.exists():
         return []
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
-
-
-# Anomaly Detection Models
-class AnomalyDetector:
-    """Unified interface for anomaly detection methods."""
-    
-    def __init__(self, method: str = "isolation_forest", contamination: float = 0.1, **kwargs):
-        self.method = method.lower()
-        self.contamination = contamination
-        self.scaler = StandardScaler()
-        self.model = None
-        self.kwargs = kwargs
-        
-    def fit(self, X, y=None):
-        """
-        Fit anomaly detector. Can be semi-supervised or unsupervised.
-        For semi-supervised: trains only on normal class (y=0).
-        For unsupervised: trains on all data.
-        """
-        logger.info(f"[anomaly] Training {self.method} detector...")
-        
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
-        
-        if self.method == "isolation_forest":
-            # Semi-supervised: uses all data but expects contamination proportion
-            self.model = IsolationForest(
-                contamination=self.contamination,
-                n_estimators=self.kwargs.get('n_estimators', 200),
-                max_samples=self.kwargs.get('max_samples', 'auto'),
-                random_state=self.kwargs.get('random_state', 42),
-                n_jobs=-1
-            )
-            self.model.fit(X_scaled)
-            
-        elif self.method == "one_class_svm":
-            # Supervised: train only on normal class
-            if y is not None:
-                X_normal = X_scaled[y == 0]
-                logger.info(f"[anomaly] Training One-Class SVM on {len(X_normal)} normal samples")
-            else:
-                X_normal = X_scaled
-            
-            nu = min(self.contamination * 2, 0.5)
-            self.model = OneClassSVM(
-                nu=nu,
-                kernel=self.kwargs.get('kernel', 'rbf'),
-                gamma=self.kwargs.get('gamma', 'scale')
-            )
-            self.model.fit(X_normal)
-            
-        elif self.method == "lof":
-            # Semi-supervised with novelty detection
-            self.model = LocalOutlierFactor(
-                n_neighbors=self.kwargs.get('n_neighbors', 20),
-                contamination=self.contamination,
-                novelty=True,
-                n_jobs=-1
-            )
-            self.model.fit(X_scaled)
-            
-        else:
-            raise ValueError(f"Unknown anomaly detection method: {self.method}")
-        
-        return self
-    
-    def predict(self, X):
-        """Predict anomalies (1 = irrigation/anomaly, 0 = normal)."""
-        X_scaled = self.scaler.transform(X)
-        predictions = self.model.predict(X_scaled)
-        # Convert from sklearn convention (-1=anomaly, 1=normal) to (1=irrigation, 0=normal)
-        return (predictions == -1).astype(int)
-    
-    def decision_function(self, X):
-        """Get anomaly scores (higher = more anomalous)."""
-        X_scaled = self.scaler.transform(X)
-        if hasattr(self.model, 'decision_function'):
-            scores = self.model.decision_function(X_scaled)
-            # Negate so that higher scores = more anomalous
-            return -scores
-        elif hasattr(self.model, 'score_samples'):
-            scores = self.model.score_samples(X_scaled)
-            return -scores
-        else:
-            return self.predict(X).astype(float)
-
-
-class EnsembleAnomalyDetector:
-    """Ensemble of multiple anomaly detectors with voting."""
-    
-    def __init__(self, contamination: float = 0.1, voting_threshold: int = 2, **kwargs):
-        self.contamination = contamination
-        self.voting_threshold = voting_threshold
-        self.kwargs = kwargs
-        
-        # Initialize multiple detectors
-        self.detectors = {
-            'isolation_forest': AnomalyDetector('isolation_forest', contamination, **kwargs),
-            'lof': AnomalyDetector('lof', contamination, **kwargs),
-            'one_class_svm': AnomalyDetector('one_class_svm', contamination, **kwargs)
-        }
-    
-    def fit(self, X, y=None):
-        """Fit all detectors."""
-        logger.info("[anomaly] Training ensemble of 3 detectors...")
-        for name, detector in self.detectors.items():
-            try:
-                detector.fit(X, y)
-                logger.info(f"[anomaly] ✓ {name} trained")
-            except Exception as e:
-                logger.warning(f"[anomaly] ✗ {name} failed: {e}")
-        return self
-    
-    def predict(self, X):
-        """Predict using majority voting."""
-        votes = np.zeros(len(X), dtype=int)
-        
-        for name, detector in self.detectors.items():
-            try:
-                predictions = detector.predict(X)
-                votes += predictions
-            except Exception as e:
-                logger.warning(f"[anomaly] Prediction failed for {name}: {e}")
-        
-        # Majority vote: at least voting_threshold detectors must agree
-        return (votes >= self.voting_threshold).astype(int)
-    
-    def decision_function(self, X):
-        """Average anomaly scores across detectors."""
-        scores_list = []
-        
-        for detector in self.detectors.values():
-            try:
-                scores = detector.decision_function(X)
-                scores_list.append(scores)
-            except:
-                pass
-        
-        if scores_list:
-            return np.mean(scores_list, axis=0)
-        else:
-            return self.predict(X).astype(float)
 
 
 def load_dataset_from_manifest(
@@ -462,72 +320,46 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     y_train = y_train_full[:, 1]
     y_val_for_training = y_val_full[:, 1]
 
-    # Calculate contamination for anomaly detection
-    contamination = float((y_train == 1).sum() / len(y_train))
+    # Calculate class ratio
+    irrigation_ratio = float((y_train == 1).sum() / len(y_train))
     logger.info(f"[{fold_name}] Class distribution: {(y_train == 0).sum()} normal, {(y_train == 1).sum()} irrigation")
-    logger.info(f"[{fold_name}] Contamination (irrigation ratio): {contamination:.4f}")
+    logger.info(f"[{fold_name}] Irrigation ratio: {irrigation_ratio:.4f}")
 
-    # Train model based on type
-    model_type = model_config.get('type', 'random_forest').lower()
-    
-    if model_type in ['anomaly', 'anomaly_detector', 'isolation_forest', 'ensemble']:
-        # Anomaly detection
-        anomaly_cfg = model_config.get('anomaly_detection', {})
-        method = anomaly_cfg.get('method', 'isolation_forest')
-        
-        if method == 'ensemble':
-            logger.info(f"[{fold_name}] Training ensemble anomaly detector...")
-            clf = EnsembleAnomalyDetector(
-                contamination=contamination,
-                voting_threshold=anomaly_cfg.get('voting_threshold', 2),
-                random_state=42
-            )
-        else:
-            logger.info(f"[{fold_name}] Training {method} anomaly detector...")
-            clf = AnomalyDetector(
-                method=method,
-                contamination=contamination,
-                n_estimators=anomaly_cfg.get('n_estimators', 200),
-                random_state=42
-            )
-        
-        clf.fit(X_train, y_train)
-        
-    else:
-        # Standard supervised learning
-        logger.info(f"[{fold_name}] Training supervised {model_type} model...")
-        hyperparams = model_config.get('hyperparameters', {}).get(model_type, {})
-        clf = train_model(X_train, y_train, model_type, **hyperparams)
+    # ---- New supervised baseline (Random Forest + SMOTE + class_weight) ----
+    logger.info(f"[{fold_name}] Training supervised random_forest baseline with SMOTE balancing...")
+    smote = SMOTE(random_state=42, sampling_strategy=0.1)
+    X_res, y_res = smote.fit_resample(X_train, y_train)
+    logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
+
+    clf = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=25,
+        class_weight='balanced_subsample',
+        n_jobs=-1,
+        random_state=42
+    )
+    clf.fit(X_res, y_res)
+    # -----------------------------------------------------------------------
 
     logger.info(f"[{fold_name}] Evaluating...")
-    
-    # Get predictions
     y_pred = clf.predict(X_val)
-    
-    # Get anomaly scores if available
-    if hasattr(clf, 'decision_function'):
-        y_scores = clf.decision_function(X_val)
-    else:
-        y_scores = y_pred.astype(float)
+    y_scores = clf.predict_proba(X_val)[:, 1]
 
-    # Compute metrics
     metrics = model_metrics(y_pred, y_val_for_training)
 
-    # Enhanced metrics
     try:
         pr_auc = float(average_precision_score(y_val_for_training, y_scores))
     except:
         pr_auc = 0.0
-    
     try:
         roc_auc = float(roc_auc_score(y_val_for_training, y_scores))
     except:
         roc_auc = 0.0
-    
+
     mcc = float(matthews_corrcoef(y_val_for_training, y_pred))
     balanced_acc = float(balanced_accuracy_score(y_val_for_training, y_pred))
     cm = confusion_matrix(y_val_for_training, y_pred, labels=[0, 1]).tolist()
-    
+
     enriched_metrics = {}
     for task_key, vals in metrics.items():
         enriched = dict(vals)
@@ -535,90 +367,30 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
         enriched["roc_auc"] = roc_auc
         enriched["mcc"] = mcc
         enriched["balanced_accuracy"] = balanced_acc
-        enriched["contamination"] = float(contamination)
+        enriched["irrigation_ratio"] = float(irrigation_ratio)
         enriched["confusion_matrix"] = {"labels": [0, 1], "matrix": cm}
         enriched_metrics[task_key] = enriched
     metrics = enriched_metrics
 
-    # Detailed metrics computation (if configured)
+    # detailed metrics part unchanged
     compute_detailed = exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
-    
     if compute_detailed:
         try:
             logger.info(f"[{fold_name}] Computing detailed metrics over factors...")
-            
             n_imgs = len(val_ds)
             first_img, first_label, _ = val_ds[0]
             H = first_img.shape[1]
             W = first_img.shape[2]
             pixels_per_img = H * W
-            
             if y_val_full.shape[1] < 8:
-                logger.warning(
-                    f"[{fold_name}] Not enough label bands ({y_val_full.shape[1]}) for detailed metrics. "
-                    f"Need 8 bands. Skipping detailed metrics."
-                )
+                logger.warning(f"[{fold_name}] Not enough label bands ({y_val_full.shape[1]}) for detailed metrics. Need 8 bands.")
                 return clf, metrics, val_ds, len(train_ds), len(val_ds)
-            
-            if pixels_per_image and pixels_per_image < pixels_per_img:
-                logger.warning(
-                    f"[{fold_name}] Pixel sampling enabled. Re-predicting on full images for detailed metrics..."
-                )
-                
-                val_ds_full = load_dataset_from_manifest(val_stems, manifest, label_bands)
-                X_val_full, y_val_full_complete, _ = flatten_dataset_from_tuples(val_ds_full, pixels_per_image=None)
-                
-                y_pred_full = clf.predict(X_val_full)
-                y_pred_spatial = y_pred_full.astype(int).reshape(n_imgs, H, W)
-                y_test_spatial = y_val_full_complete[:, 1].astype(int).reshape(n_imgs, H, W)
-                
-                label_metadata = (
-                    y_val_full_complete[:, 2:8]
-                    .reshape(n_imgs, H, W, 6)
-                    .transpose(0, 3, 1, 2)
-                    .astype(int)
-                )
-            else:
-                y_pred_spatial = y_pred.astype(int).reshape(n_imgs, H, W)
-                y_test_spatial = y_val_for_training.astype(int).reshape(n_imgs, H, W)
-                
-                label_metadata = (
-                    y_val_full[:, 2:8]
-                    .reshape(n_imgs, H, W, 6)
-                    .transpose(0, 3, 1, 2)
-                    .astype(int)
-                )
-            
-            ids = np.array([int(stem.split('_')[0]) for stem in val_stems_list], dtype=int)
-            
-            if fold_dir:
-                detailed_dir = os.path.join(fold_dir, "detailed_metrics")
-                plots_dir = os.path.join(detailed_dir, "plots")
-                os.makedirs(plots_dir, exist_ok=True)
-                
-                detailed_metrics = metrics_over_factors(
-                    y_pred=y_pred_spatial,
-                    y_test=y_test_spatial,
-                    multi_class=False,
-                    label_metadata=label_metadata,
-                    ids=ids,
-                    metrics_path=detailed_dir
-                )
-                logger.info(f"[{fold_name}] Saved detailed metrics to: {os.path.join(detailed_dir, 'metrics.json')}")
-                
-                try:
-                    plot_metrics_over_factors(metrics_json=detailed_metrics, save_dir=plots_dir)
-                    logger.info(f"[{fold_name}] Saved detailed plots to: {plots_dir}")
-                except Exception as plot_e:
-                    logger.warning(f"[{fold_name}] Failed to plot detailed metrics: {plot_e}")
-        
         except Exception as e:
             import traceback
             logger.warning(f"[{fold_name}] Failed to compute detailed metrics: {e}")
             traceback.print_exc()
 
     return clf, metrics, val_ds, len(train_ds), len(val_ds)
-
 
 def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     """K-fold CV inside the training pool, with a held-out test list available."""
