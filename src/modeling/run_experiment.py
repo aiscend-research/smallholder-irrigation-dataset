@@ -215,8 +215,8 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
         if (idx + 1) % 100 == 0:
             logger.info(f"[flatten] Processed {idx + 1}/{len(dataset)} samples")
 
-    X = np.vstack(X_list)
-    y = np.vstack(y_list)
+    X = np.vstack(X_list).astype(np.float32)
+    y = np.vstack(y_list).astype(np.int8)
     logger.info(f"[flatten] Final shapes: X={X.shape}, y={y.shape}")
     return X, y, stems_list
 
