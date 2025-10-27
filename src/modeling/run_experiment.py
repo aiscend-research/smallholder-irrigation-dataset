@@ -290,7 +290,7 @@ def train_and_evaluate_fold(
     logger.info(f"[{fold_name}] Irrigation ratio: {irrigation_ratio:.4f}")
 
     # Recall-optimized baseline (RandomForest + SMOTE v2)
-    smote = SMOTE(random_state=42, sampling_strategy=1.0, k_neighbors=7)
+    smote = SMOTE(random_state=42, sampling_strategy=0.6, k_neighbors=7)
     X_res, y_res = smote.fit_resample(X_train, y_train)
     logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
 
