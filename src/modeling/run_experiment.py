@@ -52,6 +52,7 @@ from sklearn.metrics import (
 # New imports for baseline model
 from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.utils import resample  # <-- added for downsampling majority class
 
 logging.basicConfig(
     level=logging.INFO,
@@ -327,8 +328,25 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
 
     # ---- New supervised baseline (Random Forest + SMOTE + class_weight) ----
     logger.info(f"[{fold_name}] Training supervised random_forest baseline with SMOTE balancing...")
+
+    # Optional: downsample majority class to reduce memory
+    X_majority = X_train[y_train == 0]
+    y_majority = y_train[y_train == 0]
+    X_minority = X_train[y_train == 1]
+    y_minority = y_train[y_train == 1]
+
+    X_majority_down, y_majority_down = resample(
+        X_majority, y_majority,
+        replace=False,
+        n_samples=len(y_minority) * 50,  # 50× minority size
+        random_state=42
+    )
+
+    X_balanced = np.vstack((X_majority_down, X_minority))
+    y_balanced = np.hstack((y_majority_down, y_minority))
+
     smote = SMOTE(random_state=42, sampling_strategy=0.3)
-    X_res, y_res = smote.fit_resample(X_train, y_train)
+    X_res, y_res = smote.fit_resample(X_balanced, y_balanced)
     logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
 
     clf = RandomForestClassifier(
