@@ -47,7 +47,7 @@ model:
   # SMOTE balancing configuration
   imbalance_strategy: "smote"      # Use SMOTE to oversample irrigation class (~0.1 ratio)
   smote:
-    sampling_strategy: 0.4
+    sampling_strategy: 0.3
     k_neighbors: 7
     random_state: 42
 
