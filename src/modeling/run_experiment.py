@@ -327,14 +327,14 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
 
     # ---- New supervised baseline (Random Forest + SMOTE + class_weight) ----
     logger.info(f"[{fold_name}] Training supervised random_forest baseline with SMOTE balancing...")
-    smote = SMOTE(random_state=42, sampling_strategy=0.1)
+    smote = SMOTE(random_state=42, sampling_strategy=0.3)
     X_res, y_res = smote.fit_resample(X_train, y_train)
     logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
 
     clf = RandomForestClassifier(
         n_estimators=300,
         max_depth=25,
-        class_weight='balanced_subsample',
+        class_weight='balanced',
         n_jobs=-1,
         random_state=42
     )
@@ -342,8 +342,8 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     # -----------------------------------------------------------------------
 
     logger.info(f"[{fold_name}] Evaluating...")
-    y_pred = clf.predict(X_val)
     y_scores = clf.predict_proba(X_val)[:, 1]
+    y_pred = (y_scores > 0.3).astype(int)
 
     metrics = model_metrics(y_pred, y_val_for_training)
 
