@@ -15,7 +15,7 @@ data:
   random_state: 42
 
   # Memory management
-  pixels_per_image: 8000          # sample pixels per image to balance RAM + recall
+  pixels_per_image: 10000          # sample pixels per image to balance RAM + recall
 
   # Label CSV
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
@@ -47,7 +47,7 @@ model:
   # SMOTE balancing configuration
   imbalance_strategy: "smote"      # Use SMOTE to oversample irrigation class (~0.1 ratio)
   smote:
-    sampling_strategy: 0.6
+    sampling_strategy: 0.4
     k_neighbors: 7
     random_state: 42
 
