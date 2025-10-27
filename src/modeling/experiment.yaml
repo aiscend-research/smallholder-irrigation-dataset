@@ -51,6 +51,11 @@ model:
     k_neighbors: 7
     random_state: 42
 
+  # Downsampling + SMOTE controller
+  sampling:
+    use_smote: true     # if true, apply SMOTE after downsampling
+    target_ratio: 3.0   # downsample majority to ~3:1 (majority:minority) before SMOTE
+
 visualization:
   num_samples: 2
 

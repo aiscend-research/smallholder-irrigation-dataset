@@ -53,6 +53,7 @@ from sklearn.metrics import (
 )
 
 from imblearn.over_sampling import SMOTE
+from src.modeling.ml_pipeline.sampling import downsample_majority_class
 from sklearn.ensemble import RandomForestClassifier
 
 logging.basicConfig(
@@ -289,10 +290,29 @@ def train_and_evaluate_fold(
     logger.info(f"[{fold_name}] Class distribution: {(y_train == 0).sum()} normal, {(y_train == 1).sum()} irrigation")
     logger.info(f"[{fold_name}] Irrigation ratio: {irrigation_ratio:.4f}")
 
-    # Recall-optimized baseline (RandomForest + SMOTE v2)
-    smote = SMOTE(random_state=42, sampling_strategy=0.3, k_neighbors=7)
-    X_res, y_res = smote.fit_resample(X_train, y_train)
-    logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
+    # Recall-optimized baseline (Downsample majority; optionally apply SMOTE here)
+    sampling_cfg = model_config.get("sampling", {})
+    smote_cfg = model_config.get("smote", {})
+
+    # 1) Downsample majority class only (no SMOTE inside sampling utils)
+    X_down, y_down = downsample_majority_class(
+        X_train, y_train,
+        target_ratio=sampling_cfg.get("target_ratio", 3.0),
+        random_state=smote_cfg.get("random_state", 42),
+    )
+
+    # 2) Optionally apply SMOTE here using YAML config
+    if sampling_cfg.get("use_smote", True):
+        smote = SMOTE(
+            sampling_strategy=smote_cfg.get("sampling_strategy", "auto"),
+            k_neighbors=smote_cfg.get("k_neighbors", 5),
+            random_state=smote_cfg.get("random_state", 42),
+        )
+        X_res, y_res = smote.fit_resample(X_down, y_down)
+    else:
+        X_res, y_res = X_down, y_down
+
+    logger.info(f"[{fold_name}] After sampling: {np.bincount(y_res.astype(int))}")
 
     clf = RandomForestClassifier(
         n_estimators=300,
