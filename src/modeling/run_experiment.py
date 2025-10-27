@@ -345,7 +345,7 @@ def train_and_evaluate_fold(train_stems, val_stems, manifest, label_bands, model
     X_balanced = np.vstack((X_majority_down, X_minority))
     y_balanced = np.hstack((y_majority_down, y_minority))
 
-    smote = SMOTE(random_state=42, sampling_strategy=0.3)
+    smote = SMOTE(random_state=42, sampling_strategy=0.8, k_neighbors=7)
     X_res, y_res = smote.fit_resample(X_balanced, y_balanced)
     logger.info(f"[{fold_name}] After SMOTE: {np.bincount(y_res.astype(int))}")
 
