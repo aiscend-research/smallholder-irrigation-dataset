@@ -15,7 +15,7 @@ data:
   random_state: 42
 
   # Memory management
-  pixels_per_image: 8000          # sample pixels per image to balance RAM + recall
+  pixels_per_image: 10000          # sample pixels per image to balance RAM + recall
 
   # Label CSV
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
@@ -28,28 +28,34 @@ data:
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/dataset/labels"
 
   # Label/Image bands used downstream
-  label_bands: [2]                # Band 2 for basic training (code auto-loads all 8 when detailed_metrics=true)
+  label_bands: [2]                 # Band 2 for binary irrigation mask
   image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "random_forest"           # Supervised baseline with SMOTE + class_weight
-  save_feature_importance: true   # Enable feature importance export for tree-based models
+  type: "random_forest"            # Supervised baseline with SMOTE + class_weight
+  save_feature_importance: true    # Enable feature importance export for tree-based models
 
   # Supervised Random Forest hyperparameters
   hyperparameters:
     random_forest:
-      n_estimators: 300           # Number of trees
-      max_depth: 25               # Cap tree depth for generalization
-      class_weight: "balanced_subsample"  # Adjust for residual imbalance after SMOTE
+      n_estimators: 300            # Number of trees
+      max_depth: 25                # Cap tree depth for generalization
+      class_weight: "balanced"     # Match the Python script exactly
+      n_jobs: -1
+      random_state: 42
 
   # SMOTE balancing configuration
-  imbalance_strategy: "smote"     # Use SMOTE to oversample irrigation class (~0.1 ratio)
+  imbalance_strategy: "smote"      # Use SMOTE to oversample irrigation class (~0.1 ratio)
+  smote:
+    sampling_strategy: 1.0
+    k_neighbors: 7
+    random_state: 42
 
 visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true  # Enable detailed metric computation
+  compute_detailed_metrics: true   # Enable detailed metric computation
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"
