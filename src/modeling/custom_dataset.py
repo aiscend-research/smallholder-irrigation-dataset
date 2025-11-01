@@ -1,20 +1,42 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Custom dataset and data utilities for Sentinel-2 multi-temporal crop classification.
+Includes:
+- Torch Dataset for multi-temporal Sentinel-2 cubes
+- Helper functions for loading and flattening raster data from manifest
+- Visualization utilities for predictions and masks
+"""
+
 import os
 import json
 import re
-import torch
 import glob
+import torch
 import numpy as np
 import logging
+import pandas as pd
+from pathlib import Path
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap
 import rasterio
 
-# Configure logging
+# ----------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
-# Sentinel-2 and derived band names for 14-band cubes
+# ----------------------------------------------------------------------
+# Sentinel-2 Band Info
+# ----------------------------------------------------------------------
 S2_BAND_NAMES = [
     "B2 (Blue)",
     "B3 (Green)",
@@ -29,23 +51,22 @@ S2_BAND_NAMES = [
     "NDVI (Normalized Difference Vegetation Index)",
     "EVI (Enhanced Vegetation Index)",
     "NDWI (Normalized Difference Water Index)",
-    "SCL (Scene Classification Layer)"
+    "SCL (Scene Classification Layer)",
+]
+SHORT_BAND_NAMES = [
+    "B2", "B3", "B4", "B5", "B6", "B7", "B8",
+    "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"
 ]
 
-# Short band names
-SHORT_BAND_NAMES = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
-
-# Band name to index mapping (both short code and full name)
 S2_BAND_NAME_TO_INDEX = {}
 for i, name in enumerate(S2_BAND_NAMES):
     short = name.split(" ")[0].split("(")[0].strip()
     S2_BAND_NAME_TO_INDEX[short] = i
     S2_BAND_NAME_TO_INDEX[name] = i
 
+
 def get_band_indices(band_names):
-    """
-    Converts a list of band names or indices to index list for slicing tensors.
-    """
+    """Convert a list of band names or indices to a list of integer indices."""
     indices = []
     for b in band_names:
         if isinstance(b, int):
@@ -59,92 +80,159 @@ def get_band_indices(band_names):
             raise ValueError(f"Band identifier must be str or int, got {type(b)}")
     return indices
 
+
+# ----------------------------------------------------------------------
+# Dataset + Helper Functions
+# ----------------------------------------------------------------------
+def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, label_bands: list[int]) -> list:
+    """
+    Load image/label data directly from absolute paths in CV manifest.
+    Returns list of (image_array, label_array, stem) tuples.
+    """
+    manifest_index = manifest_df.set_index("stem")
+    dataset = []
+    logger.info(f"[load] Loading {len(stems)} samples directly from manifest paths...")
+
+    for i, stem in enumerate(stems):
+        if stem not in manifest_index.index:
+            logger.warning(f"[load] Stem '{stem}' not found in manifest, skipping")
+            continue
+
+        row = manifest_index.loc[stem]
+        img_path = Path(row["image_path"])
+        lab_path = Path(row["label_path"])
+
+        if not img_path.exists() or not lab_path.exists():
+            logger.warning(f"[load] Missing image or label for {stem}")
+            continue
+
+        try:
+            with rasterio.open(img_path) as src:
+                image = src.read()
+            with rasterio.open(lab_path) as src:
+                label = src.read(label_bands)
+            dataset.append((image, label, stem))
+        except Exception as e:
+            logger.warning(f"[load] Failed to read {stem}: {e}")
+
+    if not dataset:
+        raise RuntimeError("No valid samples were loaded from manifest.")
+    logger.info(f"[load] Loaded {len(dataset)} samples successfully.")
+    return dataset
+
+
+def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> tuple:
+    """
+    Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling.
+    Converts spatial image data into feature vectors for ML.
+    """
+    X_list, y_list, stems_list = [], [], []
+    logger.info(f"[flatten] Flattening {len(dataset)} samples...")
+
+    for idx, (image, label, stem) in enumerate(dataset):
+        n_bands, height, width = image.shape
+        X_full = image.reshape(n_bands, -1).T
+        y_full = label.reshape(label.shape[0], -1).T
+
+        if pixels_per_image and X_full.shape[0] > pixels_per_image:
+            sel = np.random.choice(X_full.shape[0], pixels_per_image, replace=False)
+            X_full, y_full = X_full[sel], y_full[sel]
+
+        X_list.append(X_full)
+        y_list.append(y_full)
+        stems_list.append(stem)
+
+    X = np.vstack(X_list).astype(np.float32)
+    y = np.vstack(y_list).astype(np.int8)
+    logger.info(f"[flatten] Final shapes: X={X.shape}, y={y.shape}")
+    return X, y, stems_list
+
+
+def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
+    """
+    Visualize predictions vs ground truth for randomly chosen samples.
+    """
+    import matplotlib.pyplot as plt
+
+    sample_indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
+    fig, axes = plt.subplots(num_samples, 3, figsize=(15, 5 * num_samples))
+    if num_samples == 1:
+        axes = axes.reshape(1, -1)
+
+    for idx, sample_idx in enumerate(sample_indices):
+        image, label, stem = dataset[sample_idx]
+        n_bands, height, width = image.shape
+        X_sample = image.reshape(n_bands, -1).T
+        y_pred = model.predict(X_sample)
+        y_pred_img = y_pred.reshape(height, width)
+
+        if n_bands >= 3:
+            rgb = np.stack([image[2], image[1], image[0]], axis=-1)
+            rgb = np.clip(rgb / np.nanmax(rgb) * 255, 0, 255).astype(np.uint8)
+            axes[idx, 0].imshow(rgb)
+            axes[idx, 0].set_title(f"{stem}: RGB")
+        else:
+            axes[idx, 0].imshow(image[0], cmap="gray")
+
+        axes[idx, 1].imshow(label[0], cmap="viridis")
+        axes[idx, 1].set_title("Ground Truth")
+        axes[idx, 2].imshow(y_pred_img, cmap="viridis")
+        axes[idx, 2].set_title("Prediction")
+
+        for ax in axes[idx]:
+            ax.axis("off")
+
+    plt.tight_layout()
+    if save_path:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        logger.info(f"[viz] Saved visualization to {save_path}")
+        plt.close()
+    else:
+        plt.show()
+
+
+# ----------------------------------------------------------------------
+# Torch Dataset Definition
+# ----------------------------------------------------------------------
 class MultiTemporalCropDataset(Dataset):
-    def __init__(self, image_dir=None, label_dir=None, data_dir=None, label_bands=None, image_band_names=None, time_step_selection=None, drop_cloud_images=True):
-        """
-        Args:
-            image_dir (str): Path to directory containing Sentinel-2 input .tif files.
-            label_dir (str): Path to directory containing label .tif files.
-            data_dir (str, optional): If provided, overrides both image_dir and label_dir.
-            label_bands (list of int): List of band indices (1-based) from the label .tif to use as target(s).
-            image_band_names (list of str or int, optional): List of band names or indices to select from the image tensor.
-                If None, all bands are returned. Band names can be short codes like 'B2' or full names like 'B2 (Blue)'.
-            time_step_selection (list, optional): If set, a list where each element is either
-                - int: selects that time step (0-based)
-                - list of ints: averages those time steps.
-                Example: [0, [1,2,3], 4] => output will have three time slices per band:
-                    1st: time 0; 2nd: average of times 1,2,3; 3rd: time 4
-            drop_cloud_images (bool, optional): True by default. If true, drops images with any invalid (cloudy) pixels. If false,
-            keeps images with any valid pixels, while dropping only invalid pixels
+    """Dataset loader for multi-temporal Sentinel-2 crop data."""
 
-        Note:
-            If data_dir is provided, it overrides both image_dir and label_dir.
-
-        Naming expected:
-            {unique_id}_image.tif
-            {unique_id}_label.tif
-        """
-        # Override image_dir and label_dir if data_dir is provided
+    def __init__(
+        self,
+        image_dir=None,
+        label_dir=None,
+        data_dir=None,
+        label_bands=None,
+        image_band_names=None,
+        time_step_selection=None,
+        drop_cloud_images=True,
+    ):
         if data_dir is not None:
-            image_dir = data_dir
-            label_dir = data_dir
+            image_dir = label_dir = data_dir
 
         self.image_dir = image_dir
         self.label_dir = label_dir
-        if not image_band_names:
-            self.image_band_names = S2_BAND_NAMES
-        else:
-            self.image_band_names = image_band_names
-        if not label_bands:
-            self.label_bands = list(range(1, 9))
-        else:
-            self.label_bands = label_bands
+        self.image_band_names = image_band_names or S2_BAND_NAMES
+        self.label_bands = label_bands or list(range(1, 9))
         self.num_bands = 14
         self.num_timesteps = 37
-        self.image_band_count = self.num_bands * self.num_timesteps
-        self.time_step_selection = time_step_selection
         self.drop_cloud_images = drop_cloud_images
+        self.time_step_selection = time_step_selection
 
-        # === Integrated block (strict *_image.tif + *_label.tif) ===
-        # Find files according to the naming convention: *_image.tif and *_label.tif
+        # Match *_image.tif and *_label.tif pairs
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
-        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))  # only label.tif
+        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
 
-        # Extract unique IDs for images: handle new standardized naming {base}_image.tif
-        image_id_to_file = {}
-        for f in image_files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            if base.endswith('_image'):
-                unique_id = base[:-6]  # strip '_image'
-            else:
-                unique_id = base
-            image_id_to_file[unique_id] = f
+        image_ids = {Path(f).stem[:-6] for f in image_files if f.endswith("_image.tif")}
+        label_ids = {Path(f).stem[:-6] for f in label_files if f.endswith("_label.tif")}
+        paired_ids = sorted(image_ids & label_ids)
 
-        # Extract unique IDs for labels: only *_label.tif supported
-        mask_id_to_file = {}
-        for f in label_files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            if base.endswith('_label'):
-                unique_id = base[:-6]  # strip '_label'
-            else:
-                unique_id = base
-            mask_id_to_file[unique_id] = f
+        logger.info(f"Matched {len(paired_ids)} paired samples")
 
-        # Intersect IDs so we only keep samples that have both image and label
-        paired_ids = sorted(set(image_id_to_file.keys()) & set(mask_id_to_file.keys()))
-
-        logger.info(f"Found {len(image_files)} image files, {len(label_files)} label files")
-        logger.info(f"Extracted {len(image_id_to_file)} image IDs, {len(mask_id_to_file)} label IDs")
-        logger.info(f"Matched {len(paired_ids)} paired IDs")
-
-        self.paired_image_files = []
-        self.paired_mask_files = []
-        self.paired_unique_ids = []
-        for i, uid in enumerate(paired_ids):
-            self.paired_image_files.append(image_id_to_file[uid])
-            self.paired_mask_files.append(mask_id_to_file[uid])
-            self.paired_unique_ids.append(int(uid) if uid.isdigit() else i)
-        # === End integrated block ===
+        self.paired_image_files = [os.path.join(self.image_dir, f"{uid}_image.tif") for uid in paired_ids]
+        self.paired_mask_files = [os.path.join(self.label_dir, f"{uid}_label.tif") for uid in paired_ids]
+        self.paired_unique_ids = [int(uid) if uid.isdigit() else i for i, uid in enumerate(paired_ids)]
 
     def __len__(self):
         return len(self.paired_image_files)
@@ -154,191 +242,33 @@ class MultiTemporalCropDataset(Dataset):
         mask_path = self.paired_mask_files[idx]
         unique_id = self.paired_unique_ids[idx]
 
-        # Load metadata (assume .json with same basename as image)
-        sample_name = os.path.splitext(os.path.basename(image_path))[0]
-        json_path = os.path.join(self.image_dir, f"{sample_name}.json")
-        if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
-
-        # Load Sentinel-2 time series stack
+        # Load image
         with rasterio.open(image_path) as src:
-            full_array = src.read()  # shape: (518, H, W)
-            image_tensor = torch.from_numpy(full_array).float()
+            arr = src.read()
+            image_tensor = torch.from_numpy(arr).float()
             H, W = image_tensor.shape[1:]
-            image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)  # (14, 37, H, W)
+            image_tensor = image_tensor.reshape(self.num_timesteps, self.num_bands, H, W).permute(1, 0, 2, 3)
+            image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
 
-            # Replace -9999 (no-data)
-            if torch.any(image_tensor == -9999):
-                invalid_count = torch.sum(image_tensor == -9999)
-                total_pixels = image_tensor.numel()
-                invalid_percentage = (invalid_count / total_pixels) * 100
-                print(f"Sample {idx}: Found {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                if self.drop_cloud_images and torch.any(image_tensor == -9999):
-                    image_tensor = torch.zeros(image_tensor.shape)
-                else:
-                    image_tensor = torch.where(image_tensor == -9999, torch.tensor(0.0), image_tensor)
-
-        # --- Time step selection/averaging ---
+        # Optional time averaging
         if self.time_step_selection is not None:
             selected = []
             for sel in self.time_step_selection:
                 if isinstance(sel, int):
-                    selected.append(image_tensor[:, sel:sel+1, :, :])  # (C, 1, H, W)
+                    selected.append(image_tensor[:, sel:sel + 1, :, :])
                 elif isinstance(sel, list):
-                    selected.append(image_tensor[:, sel, :, :].mean(dim=1, keepdim=True))  # (C, 1, H, W)
-                else:
-                    raise ValueError(f"time_step_selection element must be int or list, got {type(sel)}")
-            image_tensor = torch.cat(selected, dim=1)  # (C, S, H, W)
+                    selected.append(image_tensor[:, sel, :, :].mean(dim=1, keepdim=True))
+            image_tensor = torch.cat(selected, dim=1)
 
-        if self.image_band_names is not None:
-            band_indices = get_band_indices(self.image_band_names)
-            image_tensor = image_tensor[band_indices, ...]
+        band_indices = get_band_indices(self.image_band_names)
+        image_tensor = image_tensor[band_indices, ...]
 
-        # Load mask/label
-        with rasterio.open(mask_path) as label_src:
-            mask_array = label_src.read(self.label_bands)  # shape: (B, H, W)
+        # Load label
+        with rasterio.open(mask_path) as src:
+            mask_array = src.read(self.label_bands)
             mask_tensor = torch.from_numpy(mask_array).float()
-
-            if torch.any(mask_tensor == -9999):
-                invalid_count = torch.sum(mask_tensor == -9999)
-                total_pixels = mask_tensor.numel()
-                invalid_percentage = (invalid_count / total_pixels) * 100
-                print(f"Sample {idx}: Mask has {invalid_count} -9999 values ({invalid_percentage:.2f}% of pixels)")
-                mask_tensor = torch.where(mask_tensor == -9999, torch.tensor(0.0), mask_tensor)
-
+            mask_tensor = torch.where(mask_tensor == -9999, torch.tensor(0.0), mask_tensor)
             if mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor[0]
 
-        return {
-            "image": image_tensor,
-            "mask": mask_tensor,
-            "metadata": metadata,
-            "id": unique_id
-        }
-
-    @staticmethod
-    def plot_mask_tensor(mask_tensor):
-        band_titles = [
-            "Band 1: Irrigation Type",
-            "Band 2: Irrigation Presence",
-            "Band 3: Unclear signs of agriculture",
-            "Band 4: Only slightly green",
-            "Band 5: Uneven",
-            "Band 6: May naturally be green",
-            "Band 7: May be a fishpond",
-            "Band 8: Certainty Score"
-        ]
-
-        # Color/label settings
-        band1_colors = ['#e0e0e0', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#d62728']
-        band1_labels = [
-            '0: No irrigation', '1: Small-scale', '2: Tree crop',
-            '3: Industrial', '4: Lawn', '5: Covered'
-        ]
-        band8_colors = ['#e0e0e0', '#1f77b4', '#2ca02c', '#9467bd', '#ff7f0e', '#d62728']
-        band8_labels = [
-            '0: No irrigation', '1: Probably not irrigated', '2: Probably not irrigated',
-            '3: May be irrigated', '4: Probably irrigated', '5: Irrigated'
-        ]
-        binary_colors = ['#e0e0e0', '#1f77b4']
-        binary_labels = ['0: No', '1: Yes']
-
-        fig, axes = plt.subplots(2, 4, figsize=(24, 12))
-        axes = axes.flatten()
-
-        for i in range(8):
-            ax = axes[i]
-            band = mask_tensor[i].numpy()
-            if i == 0:
-                im = ax.imshow(band, cmap=ListedColormap(band1_colors), vmin=0, vmax=5)
-                legend_handles = [Patch(facecolor=c, edgecolor='k', label=l) for c, l in zip(band1_colors, band1_labels)]
-            elif i == 7:
-                im = ax.imshow(band, cmap=ListedColormap(band8_colors), vmin=0, vmax=5)
-                legend_handles = [Patch(facecolor=c, edgecolor='k', label=l) for c, l in zip(band8_colors, band8_labels)]
-            else:
-                im = ax.imshow(band, cmap=ListedColormap(binary_colors), vmin=0, vmax=1)
-                legend_handles = [Patch(facecolor=c, edgecolor='k', label=l) for c, l in zip(binary_colors, binary_labels)]
-
-            ax.set_title(band_titles[i], fontsize=14)
-            ax.axis('off')
-
-            ax.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(1.02, 0.5),
-                      borderaxespad=0., fontsize=10, frameon=False)
-
-        plt.tight_layout()
-        plt.subplots_adjust(wspace=0.4)
-        plt.show()
-
-    @staticmethod
-    def plot_all_bands_at_time(image_tensor, time_idx=0, band_names=None, band_cmaps=None):
-        """
-        Plot all 14 bands for a specific time index, each with a distinct colormap.
-        Args:
-            image_tensor: Tensor (14, 37, H, W)
-            time_idx: Index of the timepoint to plot (0-based)
-            band_names: List of 14 band names for titles
-            band_cmaps: List of 14 colormap names
-        """
-        n_bands = image_tensor.shape[0]
-        n_cols = 4
-        n_rows = 4
-        default_cmaps = [
-            'Blues', 'Greens', 'Reds', 'Oranges', 'Purples', 'Greys', 'cividis',
-            'YlGn', 'YlOrBr', 'PuRd', 'viridis', 'plasma', 'magma', 'cubehelix'
-        ]
-        band_names = S2_BAND_NAMES
-        if band_cmaps is None:
-            band_cmaps = default_cmaps
-        if band_names is None:
-            band_names = [f"Band {i+1}" for i in range(n_bands)]
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 14))
-        axes = axes.flatten()
-        for b in range(n_bands):
-            band_img = image_tensor[b, time_idx].numpy()
-            band_img = np.where(band_img == -9999, np.nan, band_img)
-            ax = axes[b]
-            im = ax.imshow(band_img, cmap=band_cmaps[b])
-            ax.set_title(f"{band_names[b]} (t={time_idx})")
-            ax.axis('off')
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        for ax in axes[n_bands:]:
-            ax.axis('off')
-        plt.tight_layout()
-        plt.show()
-
-    @staticmethod
-    def plot_band_over_time(image_tensor, band_idx=0, band_name=None, time_indices=None, band_names=S2_BAND_NAMES):
-        """
-        Plot one band (e.g. NDVI) for all 37 timepoints.
-        Args:
-            image_tensor: Tensor of shape (14, 37, H, W)
-            band_idx: Which band to plot (0–13)
-            band_name: Optional string for title
-            time_indices: Optional list of timepoints to plot (default: all 37)
-        """
-        n_time = image_tensor.shape[1]
-        if time_indices is None:
-            time_indices = range(n_time)
-        n_cols = 7
-        n_rows = int(np.ceil(len(time_indices) / n_cols))
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(3*n_cols, 3*n_rows))
-        axes = axes.flatten()
-        band_data = image_tensor[band_idx]  # shape: (37, H, W)
-        for i, t in enumerate(time_indices):
-            img = band_data[t].numpy()
-            img = np.where(img == -9999, np.nan, img)
-            ax = axes[i]
-            im = ax.imshow(img, cmap='viridis')
-            ax.set_title(f"Time {t}")
-            ax.axis('off')
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        for ax in axes[len(time_indices):]:
-            ax.axis('off')
-        plt.suptitle(f"{band_name or band_names[band_idx]} Over Time", fontsize=16)
-        plt.tight_layout()
-        plt.show()
+        return {"image": image_tensor, "mask": mask_tensor, "id": unique_id}

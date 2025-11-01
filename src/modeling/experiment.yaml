@@ -54,7 +54,7 @@ model:
   # Downsampling + SMOTE controller
   sampling:
     use_smote: true     # if true, apply SMOTE after downsampling
-    target_ratio: 3.0   # downsample majority to ~3:1 (majority:minority) before SMOTE
+    target_ratio: 5.0   # downsample majority to ~3:1 (majority:minority) before SMOTE
 
 visualization:
   num_samples: 2
