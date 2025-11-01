@@ -172,7 +172,7 @@ def train_and_evaluate_fold(
     # Evaluate
     logger.info(f"[{fold_name}] Evaluating...")
     y_scores = clf.predict_proba(X_val)[:, 1]
-    y_pred = (y_scores > 0.1).astype(int)
+    y_pred = (y_scores > 0.3).astype(int)
 
     metrics = model_metrics(y_pred, y_val_for_training)
     pr_auc = float(average_precision_score(y_val_for_training, y_scores))
