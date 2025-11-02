@@ -19,9 +19,9 @@ import pandas as pd
 from pathlib import Path
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
+import rasterio
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap
-import rasterio
 
 # ----------------------------------------------------------------------
 # Logging
@@ -85,10 +85,7 @@ def get_band_indices(band_names):
 # Dataset + Helper Functions
 # ----------------------------------------------------------------------
 def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, label_bands: list[int]) -> list:
-    """
-    Load image/label data directly from absolute paths in CV manifest.
-    Returns list of (image_array, label_array, stem) tuples.
-    """
+    """Load image/label data directly from absolute paths in CV manifest."""
     manifest_index = manifest_df.set_index("stem")
     dataset = []
     logger.info(f"[load] Loading {len(stems)} samples directly from manifest paths...")
@@ -122,10 +119,7 @@ def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, labe
 
 
 def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> tuple:
-    """
-    Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling.
-    Converts spatial image data into feature vectors for ML.
-    """
+    """Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling."""
     X_list, y_list, stems_list = [], [], []
     logger.info(f"[flatten] Flattening {len(dataset)} samples...")
 
@@ -149,11 +143,7 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
 
 
 def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
-    """
-    Visualize predictions vs ground truth for randomly chosen samples.
-    """
-    import matplotlib.pyplot as plt
-
+    """Visualize predictions vs ground truth for randomly chosen samples."""
     sample_indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
     fig, axes = plt.subplots(num_samples, 3, figsize=(15, 5 * num_samples))
     if num_samples == 1:
@@ -220,21 +210,39 @@ class MultiTemporalCropDataset(Dataset):
         self.drop_cloud_images = drop_cloud_images
         self.time_step_selection = time_step_selection
 
-        # Match *_image.tif and *_label.tif pairs
+        # -----------------------------
+        # Flexible matching logic
+        # -----------------------------
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
-        label_files = []
-        for f in glob.glob(os.path.join(self.label_dir, "*.tif")):
-            if re.search(r"_\w+_label\.tif$", f) or f.endswith("_label.tif"):
-                label_files.append(f)
+        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*.tif")))
 
-        image_ids = {Path(f).stem[:-6] for f in image_files if f.endswith("_image.tif")}
-        label_ids = {Path(f).stem[:-6] for f in label_files if f.endswith("_label.tif")}
+        def normalize_id(filename):
+            stem = Path(filename).stem
+            # remove _KL_label, _JL_label, etc.
+            stem = re.sub(r'_[A-Za-z]+_label$', '', stem)
+            stem = re.sub(r'_label$', '', stem)
+            stem = re.sub(r'_image$', '', stem)
+            return stem
+
+        image_ids = {normalize_id(f) for f in image_files}
+        label_ids = {normalize_id(f) for f in label_files}
         paired_ids = sorted(image_ids & label_ids)
-
-        logger.info(f"Matched {len(paired_ids)} paired samples")
+        logger.info(f"[dataset] Matched {len(paired_ids)} paired samples")
 
         self.paired_image_files = [os.path.join(self.image_dir, f"{uid}_image.tif") for uid in paired_ids]
-        self.paired_mask_files = [os.path.join(self.label_dir, f"{uid}_label.tif") for uid in paired_ids]
+        # Find correct label variant (handles _KL_label, _JL_label)
+        self.paired_mask_files = []
+        for uid in paired_ids:
+            pattern = os.path.join(self.label_dir, f"{uid}_*_label.tif")
+            matches = glob.glob(pattern)
+            if not matches:
+                matches = glob.glob(os.path.join(self.label_dir, f"{uid}_label.tif"))
+            if matches:
+                self.paired_mask_files.append(matches[0])
+            else:
+                logger.warning(f"[dataset] No label found for {uid}")
+                self.paired_mask_files.append(None)
+
         self.paired_unique_ids = [int(uid) if uid.isdigit() else i for i, uid in enumerate(paired_ids)]
 
     def __len__(self):
@@ -244,6 +252,9 @@ class MultiTemporalCropDataset(Dataset):
         image_path = self.paired_image_files[idx]
         mask_path = self.paired_mask_files[idx]
         unique_id = self.paired_unique_ids[idx]
+
+        if mask_path is None:
+            raise RuntimeError(f"No mask found for {image_path}")
 
         # Load image
         with rasterio.open(image_path) as src:
