@@ -67,8 +67,8 @@ class IrrigationDataSplitter:
         re.IGNORECASE,
     )
     _GRIT_MASK_RE = re.compile(
-        r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)(_metadata)?\.(?P<ext>tif|json)$",
-        re.IGNORECASE,
+    r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})(?:_[A-Za-z]+)?_label(?:_metadata)?\.(?P<ext>tif|json)$",
+    re.IGNORECASE,
     )
 
     def __init__(self, data_root: str, csv_path: Optional[str] = None, random_state: int = 42,
