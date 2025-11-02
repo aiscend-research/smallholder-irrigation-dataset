@@ -20,7 +20,6 @@ import json
 import yaml
 import shutil
 import logging
-import glob
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -34,7 +33,6 @@ ROOT = project_root
 
 from src.modeling.custom_dataset import load_dataset_from_manifest, flatten_dataset_from_tuples, plot_predictions
 from src.modeling.ml_pipeline.ml_model import train_and_evaluate_fold
-from src.modeling.ml_pipeline.ml_model import train_model
 from src.modeling.ml_pipeline.evaluation import (
     model_metrics,
     metrics_over_factors,
@@ -46,17 +44,6 @@ from src.modeling.ml_pipeline.evaluation import (
 )
 from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
-from sklearn.metrics import (
-    average_precision_score,
-    matthews_corrcoef,
-    confusion_matrix,
-    balanced_accuracy_score,
-    roc_auc_score,
-)
-
-from imblearn.over_sampling import SMOTE
-from sklearn.ensemble import RandomForestClassifier
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -64,7 +51,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Utility functions
+
+# -------------------------------------------------------------------------
+# Utility helpers
+# -------------------------------------------------------------------------
 def resolve_path(path_str: str, base_dir: str | None = None) -> str:
     """Resolve a path relative to the project root if not absolute."""
     if path_str is None:
@@ -110,7 +100,10 @@ def load_stems(txt_path: str) -> list[str]:
         return []
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
-# CV 
+
+# -------------------------------------------------------------------------
+# Main cross-validation experiment
+# -------------------------------------------------------------------------
 def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     data_root = resolve_path(exp_cfg["data"]["data_dir"])
     csv_path = resolve_path(exp_cfg["data"].get("csv_path"))
@@ -132,8 +125,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     cv_root = Path(paths["cv_dir"])
 
     compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
-    label_bands = list(range(1, 9)) if compute_detailed else exp_cfg["data"]["label_bands"]
-
+    label_bands = exp_cfg["data"]["label_bands"]
     pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
     manifest = pd.read_csv(Path(paths["cv_manifest_csv"]))
 
@@ -215,6 +207,34 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             except Exception as e:
                 logger.warning(f"[{fold_dir.name}] Failed feature importance export: {e}")
 
+        # ---- Detailed metrics (restored block) ----
+        if compute_detailed:
+            try:
+                detailed_dir = os.path.join(fold_output_dir, "detailed_metrics")
+                os.makedirs(detailed_dir, exist_ok=True)
+
+                # Assume val_ds exposes arrays or lists compatible with metrics_over_factors()
+                y_pred = np.array([pred for _, pred, _ in val_ds.predictions])
+                y_test = np.array([truth for _, _, truth in val_ds.labels])
+                label_metadata = np.array([meta for meta in val_ds.metadata])
+                ids = np.array([stem for _, _, stem in val_ds.samples])
+
+                metrics_json = metrics_over_factors(
+                    y_pred=y_pred,
+                    y_test=y_test,
+                    multi_class=exp_cfg["model"].get("multi_class", False),
+                    label_metadata=label_metadata,
+                    ids=ids,
+                    metrics_path=detailed_dir,
+                )
+
+                plots_dir = os.path.join(detailed_dir, "plots")
+                plot_metrics_over_factors(metrics_json, save_dir=plots_dir)
+                logger.info(f"[{fold_dir.name}] Detailed metrics and plots saved to {plots_dir}")
+            except Exception as e:
+                logger.warning(f"[{fold_dir.name}] Failed detailed metrics: {e}")
+
+    # ---- Aggregate results across folds ----
     if results:
         metric_structure = results[0]["metrics"]
         summary = {"n_folds_completed": len(results), "fold_details": results}
@@ -239,7 +259,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         logger.error("[cv] No folds completed successfully.")
 
 
-# Main entry
+# -------------------------------------------------------------------------
+# Entry point
+# -------------------------------------------------------------------------
 def main():
     import argparse
 
