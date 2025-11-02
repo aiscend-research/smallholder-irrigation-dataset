@@ -222,7 +222,10 @@ class MultiTemporalCropDataset(Dataset):
 
         # Match *_image.tif and *_label.tif pairs
         image_files = sorted(glob.glob(os.path.join(self.image_dir, "*_image.tif")))
-        label_files = sorted(glob.glob(os.path.join(self.label_dir, "*_label.tif")))
+        label_files = []
+        for f in glob.glob(os.path.join(self.label_dir, "*.tif")):
+            if re.search(r"_\w+_label\.tif$", f) or f.endswith("_label.tif"):
+                label_files.append(f)
 
         image_ids = {Path(f).stem[:-6] for f in image_files if f.endswith("_image.tif")}
         label_ids = {Path(f).stem[:-6] for f in label_files if f.endswith("_label.tif")}
