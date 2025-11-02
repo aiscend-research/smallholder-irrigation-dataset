@@ -144,6 +144,10 @@ def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> 
 
 def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str = None):
     """Visualize predictions vs ground truth for randomly chosen samples."""
+    import matplotlib
+    matplotlib.use("Agg")  # Use non-interactive backend to prevent Tkinter errors
+    import matplotlib.pyplot as plt
+
     sample_indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
     fig, axes = plt.subplots(num_samples, 3, figsize=(15, 5 * num_samples))
     if num_samples == 1:
@@ -156,6 +160,7 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
         y_pred = model.predict(X_sample)
         y_pred_img = y_pred.reshape(height, width)
 
+        # RGB visualization if 3+ bands
         if n_bands >= 3:
             rgb = np.stack([image[2], image[1], image[0]], axis=-1)
             rgb = np.clip(rgb / np.nanmax(rgb) * 255, 0, 255).astype(np.uint8)
@@ -173,13 +178,19 @@ def plot_predictions(dataset: list, model, num_samples: int = 2, save_path: str 
             ax.axis("off")
 
     plt.tight_layout()
+
+    # Always save instead of showing
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         logger.info(f"[viz] Saved visualization to {save_path}")
-        plt.close()
     else:
-        plt.show()
+        # Default saving behavior if no path provided
+        default_path = "default_visualization.png"
+        plt.savefig(default_path, dpi=150, bbox_inches="tight")
+        logger.info(f"[viz] Saved visualization to {default_path}")
+
+    plt.close(fig)
 
 
 # ----------------------------------------------------------------------
