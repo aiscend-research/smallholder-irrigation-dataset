@@ -1,5 +1,5 @@
 # NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
-name: "rf_smote_baseline_autotuning"
+name: "rf_smote_baseline_manual_tuning"
 
 imputation:
   mode: none
@@ -7,7 +7,7 @@ imputation:
 
 data:
   # Cross-validation and automatic splitting
-  use_cross_validation: false
+  use_cross_validation: true        # keep CV to average across folds
   n_folds: 5
   test_size: 0.2
   val_size: 0.2
@@ -15,7 +15,7 @@ data:
   random_state: 42
 
   # Memory management
-  pixels_per_image: 10000          # sample pixels per image to balance RAM + recall
+  pixels_per_image: 10000           # sample pixels per image to balance RAM + recall
 
   # Label CSV
   csv_path: "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
@@ -28,39 +28,26 @@ data:
   grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/dataset/labels"
 
   # Label/Image bands used downstream
-  label_bands: [2]                 # Band 2 for binary irrigation mask
+  label_bands: [2]                  # Band 2 for binary irrigation mask
   image_bands: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12", "NDVI", "EVI", "NDWI", "SCL"]
 
 model:
-  type: "random_forest"            # Supervised baseline with SMOTE + class_weight
-  save_feature_importance: true    # Enable feature importance export for tree-based models
+  type: "random_forest"             # Supervised baseline with SMOTE + class_weight
+  save_feature_importance: true     # Enable feature importance export for tree-based models
 
-  # Supervised Random Forest hyperparameters
   hyperparameters:
     random_forest:
-      n_estimators: 500            # Number of trees
-      max_depth: 30
-      min_samples_split: 2         # controls node splitting
-      min_samples_leaf: 1          # adds regularization
-      max_features: "sqrt"                
-      class_weight: "balanced"     # Match the Python script exactly
+      n_estimators: 500             
+      max_depth: 30                 
+      min_samples_split: 2          
+      min_samples_leaf: 1           
+      max_features: "log2"          
+      class_weight: "balanced"
       n_jobs: -1
       random_state: 42
 
-  # Hyperparameter tuning configuration (Phase 1 tuning mode)
-  tuning:
-    metric: "f1"
-    search: "grid"                 # or "random"
-    n_iter: 10                     # only used if search == "random"
-    param_grid:
-      n_estimators: [300, 500, 800]
-      max_depth: [20, 30, 40]
-      min_samples_split: [2, 4, 6]
-      min_samples_leaf: [1, 2, 3]
-      max_features: ["sqrt", "log2"]
-
   # SMOTE balancing configuration
-  imbalance_strategy: "smote"      # Use SMOTE to oversample irrigation class (~0.1 ratio)
+  imbalance_strategy: "smote"
   smote:
     sampling_strategy: 0.3
     k_neighbors: 5
@@ -68,14 +55,14 @@ model:
 
   # Downsampling + SMOTE controller
   sampling:
-    use_smote: true     # if true, apply SMOTE after downsampling
-    target_ratio: 5.0   # downsample majority to ~3:1 (majority:minority) before SMOTE
+    use_smote: true
+    target_ratio: 5.0
 
 visualization:
   num_samples: 2
 
 evaluation:
-  compute_detailed_metrics: true   # Enable detailed metric computation
+  compute_detailed_metrics: true
 
 output:
   base_dir: "/home/waves/data/smallholder-irrigation-dataset/data/modeling/experiments"
