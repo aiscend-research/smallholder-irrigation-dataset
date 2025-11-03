@@ -12,7 +12,7 @@ data:
   test_size: 0.2
   val_size: 0.2
   min_samples_per_class: 5
-  random_state: 42
+  random_state: null
 
   # Memory management
   pixels_per_image: 10000           # sample pixels per image to balance RAM + recall
@@ -44,14 +44,14 @@ model:
       max_features: "sqrt"          
       class_weight: "balanced"
       n_jobs: -1
-      random_state: 42
+      random_state: null
 
   # SMOTE balancing configuration
   imbalance_strategy: "smote"
   smote:
     sampling_strategy: 0.5
     k_neighbors: 7
-    random_state: 42
+    random_state: null
 
   # Downsampling + SMOTE controller
   sampling:
