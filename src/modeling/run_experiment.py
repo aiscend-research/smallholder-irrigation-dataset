@@ -158,8 +158,8 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         (split_dir / "train").mkdir(parents=True, exist_ok=True)
         (split_dir / "val").mkdir(parents=True, exist_ok=True)
 
-        train_files = df.iloc[train_idx]["stem"].tolist()
-        val_files = df.iloc[val_idx]["stem"].tolist()
+        train_files = df.iloc[train_idx]["unique_id"].tolist()
+        val_files = df.iloc[val_idx]["unique_id"].tolist()
 
         (split_dir / "train_files.txt").write_text("\n".join(train_files))
         (split_dir / "val_files.txt").write_text("\n".join(val_files))
