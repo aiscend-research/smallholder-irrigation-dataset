@@ -169,8 +169,15 @@ def train_and_evaluate_fold(
     X_val = scaler.transform(X_val)
 
     # --- Train model ---
+    hyperparams = model_config.get("hyperparameters", {}).get(
+        model_config.get("type", "random_forest"), {}
+    )
+    logger.info(f"[{fold_name}] Using model hyperparameters: {hyperparams}")
     clf = train_model(
-        X_res, y_res, model_type=model_config.get("type", "random_forest")
+        X_res,
+        y_res,
+        model_type=model_config.get("type", "random_forest"),
+        **hyperparams,
     )
 
     # --- Evaluate ---
