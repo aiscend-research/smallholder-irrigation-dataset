@@ -96,7 +96,11 @@ def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, labe
 
     # --- Handle label_bands argument ---
     if isinstance(label_bands, int):
-        label_bands = list(range(1, label_bands + 1))
+        if label_bands == 1:
+            logger.warning("[load] Detected label_bands=1; expanding to default 8 bands (1–8).")
+            label_bands = list(range(1, 9))
+        else:
+            label_bands = list(range(1, label_bands + 1))
     elif isinstance(label_bands, list) and len(label_bands) == 1 and label_bands[0] == 1:
         logger.warning("[load] Detected single label band [1]; expanding to 8 default label bands.")
         label_bands = list(range(1, 9))
