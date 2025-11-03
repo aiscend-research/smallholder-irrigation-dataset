@@ -12,17 +12,15 @@ from pathlib import Path
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.multioutput import MultiOutputClassifier
 from sklearn.metrics import (
     average_precision_score,
     matthews_corrcoef,
     balanced_accuracy_score,
     confusion_matrix,
     roc_auc_score,
-    precision_recall_curve, f1_score
+    precision_recall_curve,
 )
 from imblearn.over_sampling import SMOTE
-from imblearn.pipeline import Pipeline
 
 from src.modeling.ml_pipeline.evaluation import (
     model_metrics,
@@ -43,16 +41,16 @@ if not logger.handlers:
         datefmt="%H:%M:%S",
     )
 
-# Basic training wrappers
+# ----------------------------------------------------------------------
+# Model wrappers
+# ----------------------------------------------------------------------
 def _filter_params(estimator_cls, params: dict) -> dict:
     """Keep only kwargs that the estimator actually supports."""
     valid = estimator_cls().get_params().keys()
     return {k: v for k, v in params.items() if k in valid}
 
 
-def train_random_forest(
-    X_train, y_train, n_estimators=100, random_state=42, **kwargs
-):
+def train_random_forest(X_train, y_train, n_estimators=100, random_state=42, **kwargs):
     defaults = dict(
         n_estimators=n_estimators,
         random_state=random_state,
@@ -61,9 +59,7 @@ def train_random_forest(
     )
     rf_params = {**defaults, **kwargs}
     rf_params = _filter_params(RandomForestClassifier, rf_params)
-    base_model = RandomForestClassifier(**rf_params)
-
-    clf = base_model
+    clf = RandomForestClassifier(**rf_params)
     clf.fit(X_train, y_train)
     return clf
 
@@ -87,9 +83,7 @@ def train_gradient_boosting(
     )
     gb_params = {**defaults, **kwargs}
     gb_params = _filter_params(GradientBoostingClassifier, gb_params)
-    base_model = GradientBoostingClassifier(**gb_params)
-
-    clf = base_model
+    clf = GradientBoostingClassifier(**gb_params)
     clf.fit(X_train, y_train)
     return clf
 
@@ -136,12 +130,14 @@ def train_and_evaluate_fold(
         val_ds, pixels_per_image=pixels_per_image
     )
 
+    # Assume irrigation mask in 2nd band
     y_train = y_train_full[:, 1]
     y_val_for_training = y_val_full[:, 1]
     irrigation_ratio = float((y_train == 1).sum() / len(y_train))
     logger.info(
         f"[{fold_name}] Class distribution: {(y_train == 0).sum()} normal, {(y_train == 1).sum()} irrigation"
     )
+    logger.info(f"[{fold_name}] Irrigation ratio: {irrigation_ratio:.4f}")
 
     # Handle imbalance: Downsample + SMOTE
     sampling_cfg = model_config.get("sampling", {})
@@ -154,10 +150,6 @@ def train_and_evaluate_fold(
         random_state=smote_cfg.get("random_state", 42),
     )
 
-    logger.info(f"[{fold_name}] Applying StandardScaler normalization...")
-    scaler = StandardScaler()
-    X_res = scaler.fit_transform(X_res)
-    X_val = scaler.transform(X_val)
     if sampling_cfg.get("use_smote", True):
         smote = SMOTE(
             sampling_strategy=smote_cfg.get("sampling_strategy", "auto"),
@@ -170,14 +162,22 @@ def train_and_evaluate_fold(
 
     logger.info(f"[{fold_name}] After sampling: {np.bincount(y_res.astype(int))}")
 
-    # Train model
+    # --- StandardScaler normalization ---
+    logger.info(f"[{fold_name}] Applying StandardScaler normalization...")
+    scaler = StandardScaler()
+    X_res = scaler.fit_transform(X_res)
+    X_val = scaler.transform(X_val)
+
+    # --- Train model ---
     clf = train_model(
         X_res, y_res, model_type=model_config.get("type", "random_forest")
     )
 
-    # Evaluate
+    # --- Evaluate ---
     logger.info(f"[{fold_name}] Evaluating...")
     y_scores = clf.predict_proba(X_val)[:, 1]
+
+    # Find best threshold by F1
     prec, rec, thr = precision_recall_curve(y_val_for_training, y_scores)
     f1 = 2 * (prec * rec) / (prec + rec + 1e-8)
     best_idx = np.argmax(f1)
@@ -186,6 +186,7 @@ def train_and_evaluate_fold(
 
     y_pred = (y_scores > best_thr).astype(int)
 
+    # --- Compute metrics ---
     metrics = model_metrics(y_pred, y_val_for_training)
     pr_auc = float(average_precision_score(y_val_for_training, y_scores))
     roc_auc = float(roc_auc_score(y_val_for_training, y_scores))
@@ -193,7 +194,6 @@ def train_and_evaluate_fold(
     balanced_acc = float(balanced_accuracy_score(y_val_for_training, y_pred))
     cm = confusion_matrix(y_val_for_training, y_pred, labels=[0, 1]).tolist()
 
-    # Merge metrics
     for task_key, vals in metrics.items():
         vals.update(
             {
@@ -206,7 +206,7 @@ def train_and_evaluate_fold(
             }
         )
 
-    # Compute detailed metrics (optional)
+    # --- Detailed metrics (optional) ---
     compute_detailed = (
         exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     )
