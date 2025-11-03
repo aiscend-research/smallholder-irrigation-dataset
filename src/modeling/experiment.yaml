@@ -39,9 +39,9 @@ model:
   hyperparameters:
     random_forest:
       n_estimators: 500            # Number of trees
-      max_depth: 25
-      min_samples_split: 4         # controls node splitting
-      min_samples_leaf: 2          # adds regularization
+      max_depth: 30
+      min_samples_split: 2         # controls node splitting
+      min_samples_leaf: 1          # adds regularization
       max_features: "sqrt"                
       class_weight: "balanced"     # Match the Python script exactly
       n_jobs: -1

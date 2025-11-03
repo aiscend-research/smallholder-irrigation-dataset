@@ -344,7 +344,7 @@ def metrics_over_factors(y_pred, y_test, multi_class, label_metadata, ids, metri
     true_frac = [np.mean(t > 0) for t in y_test]
     image_metrics['image_level_fraction_irrigated'] = {
         'mae': mean_absolute_error(true_frac, pred_frac),
-        'rmse': mean_squared_error(true_frac, pred_frac, squared=False),
+        'rmse': mean_squared_error(true_frac, pred_frac),
         'mse': mean_squared_error(true_frac, pred_frac),
     }
 

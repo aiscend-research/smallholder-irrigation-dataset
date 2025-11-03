@@ -10,6 +10,7 @@ import numpy as np
 import logging
 from pathlib import Path
 
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.metrics import (
@@ -18,6 +19,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
     confusion_matrix,
     roc_auc_score,
+    precision_recall_curve, f1_score
 )
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -152,6 +154,10 @@ def train_and_evaluate_fold(
         random_state=smote_cfg.get("random_state", 42),
     )
 
+    logger.info(f"[{fold_name}] Applying StandardScaler normalization...")
+    scaler = StandardScaler()
+    X_res = scaler.fit_transform(X_res)
+    X_val = scaler.transform(X_val)
     if sampling_cfg.get("use_smote", True):
         smote = SMOTE(
             sampling_strategy=smote_cfg.get("sampling_strategy", "auto"),
@@ -172,7 +178,13 @@ def train_and_evaluate_fold(
     # Evaluate
     logger.info(f"[{fold_name}] Evaluating...")
     y_scores = clf.predict_proba(X_val)[:, 1]
-    y_pred = (y_scores > 0.3).astype(int)
+    prec, rec, thr = precision_recall_curve(y_val_for_training, y_scores)
+    f1 = 2 * (prec * rec) / (prec + rec + 1e-8)
+    best_idx = np.argmax(f1)
+    best_thr = thr[best_idx]
+    logger.info(f"[{fold_name}] Best F1 threshold: {best_thr:.3f}")
+
+    y_pred = (y_scores > best_thr).astype(int)
 
     metrics = model_metrics(y_pred, y_val_for_training)
     pr_auc = float(average_precision_score(y_val_for_training, y_scores))
