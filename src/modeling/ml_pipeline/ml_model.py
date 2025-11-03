@@ -10,6 +10,7 @@ import numpy as np
 import logging
 from pathlib import Path
 
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import (
@@ -98,6 +99,34 @@ def train_model(X_train, y_train, model_type="random_forest", **hyperparams):
         raise ValueError(f"Unsupported model type: {model_type}")
     return clf
 
+def tune_random_forest(X_train, y_train, param_grid, metric="f1", search="grid", n_iter=10, random_state=42):
+    base_model = RandomForestClassifier(
+        class_weight="balanced", n_jobs=-1, random_state=random_state
+    )
+    if search == "grid":
+        searcher = GridSearchCV(
+            base_model,
+            param_grid=param_grid,
+            scoring=metric,
+            cv=3,
+            verbose=2,
+            n_jobs=-1,
+        )
+    else:
+        searcher = RandomizedSearchCV(
+            base_model,
+            param_distributions=param_grid,
+            scoring=metric,
+            cv=3,
+            n_iter=n_iter,
+            verbose=2,
+            n_jobs=-1,
+            random_state=random_state,
+        )
+    searcher.fit(X_train, y_train)
+    best_model = searcher.best_estimator_
+    logger.info(f"Best RF params ({metric}): {searcher.best_params_}")
+    return best_model
 
 # ----------------------------------------------------------------------
 # Fold Training + Evaluation
@@ -139,7 +168,9 @@ def train_and_evaluate_fold(
     )
     logger.info(f"[{fold_name}] Irrigation ratio: {irrigation_ratio:.4f}")
 
+    # ----------------------------------------------------------------------
     # Handle imbalance: Downsample + SMOTE
+    # ----------------------------------------------------------------------
     sampling_cfg = model_config.get("sampling", {})
     smote_cfg = model_config.get("smote", {})
 
@@ -162,18 +193,37 @@ def train_and_evaluate_fold(
 
     logger.info(f"[{fold_name}] After sampling: {np.bincount(y_res.astype(int))}")
 
-    # --- StandardScaler normalization ---
+    # ----------------------------------------------------------------------
+    # StandardScaler normalization
+    # ----------------------------------------------------------------------
     logger.info(f"[{fold_name}] Applying StandardScaler normalization...")
     scaler = StandardScaler()
     X_res = scaler.fit_transform(X_res)
     X_val = scaler.transform(X_val)
 
-    # --- Train model ---
-    clf = train_model(
-        X_res, y_res, model_type=model_config.get("type", "random_forest")
-    )
+    # ----------------------------------------------------------------------
+    # Hyperparameter tuning or standard training
+    # ----------------------------------------------------------------------
+    tuning_cfg = model_config.get("tuning", {})
+    if tuning_cfg:
+        logger.info(
+            f"[{fold_name}] Running hyperparameter tuning for best {tuning_cfg.get('metric', 'f1')}..."
+        )
+        clf = tune_random_forest(
+            X_res, y_res,
+            param_grid=tuning_cfg.get("param_grid", {}),
+            metric=tuning_cfg.get("metric", "f1"),
+            search=tuning_cfg.get("search", "grid"),
+            n_iter=tuning_cfg.get("n_iter", 10),
+        )
+    else:
+        clf = train_model(
+            X_res, y_res, model_type=model_config.get("type", "random_forest")
+        )
 
-    # --- Evaluate ---
+    # ----------------------------------------------------------------------
+    # Evaluation
+    # ----------------------------------------------------------------------
     logger.info(f"[{fold_name}] Evaluating...")
     y_scores = clf.predict_proba(X_val)[:, 1]
 
@@ -186,7 +236,9 @@ def train_and_evaluate_fold(
 
     y_pred = (y_scores > best_thr).astype(int)
 
-    # --- Compute metrics ---
+    # ----------------------------------------------------------------------
+    # Compute metrics
+    # ----------------------------------------------------------------------
     metrics = model_metrics(y_pred, y_val_for_training)
     pr_auc = float(average_precision_score(y_val_for_training, y_scores))
     roc_auc = float(roc_auc_score(y_val_for_training, y_scores))
@@ -206,7 +258,9 @@ def train_and_evaluate_fold(
             }
         )
 
-    # --- Detailed metrics (optional) ---
+    # ----------------------------------------------------------------------
+    # Detailed metrics (optional)
+    # ----------------------------------------------------------------------
     compute_detailed = (
         exp_cfg and exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     )

@@ -1,5 +1,5 @@
 # NOTE: Data splitting logic is enabled; the runner will auto-build splits from GRIT.
-name: "rf_smote_baseline"
+name: "rf_smote_baseline_autotuning"
 
 imputation:
   mode: none
@@ -7,7 +7,7 @@ imputation:
 
 data:
   # Cross-validation and automatic splitting
-  use_cross_validation: true
+  use_cross_validation: false
   n_folds: 5
   test_size: 0.2
   val_size: 0.2
@@ -46,6 +46,18 @@ model:
       class_weight: "balanced"     # Match the Python script exactly
       n_jobs: -1
       random_state: 42
+
+  # Hyperparameter tuning configuration (Phase 1 tuning mode)
+  tuning:
+    metric: "f1"
+    search: "grid"                 # or "random"
+    n_iter: 10                     # only used if search == "random"
+    param_grid:
+      n_estimators: [300, 500, 800]
+      max_depth: [20, 30, 40]
+      min_samples_split: [2, 4, 6]
+      min_samples_leaf: [1, 2, 3]
+      max_features: ["sqrt", "log2"]
 
   # SMOTE balancing configuration
   imbalance_strategy: "smote"      # Use SMOTE to oversample irrigation class (~0.1 ratio)

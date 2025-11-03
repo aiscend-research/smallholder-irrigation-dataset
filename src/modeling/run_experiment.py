@@ -105,33 +105,61 @@ def load_stems(txt_path: str) -> list[str]:
 # Main cross-validation experiment
 # -------------------------------------------------------------------------
 def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
+    """
+    Run full cross-validation or single train/validation split depending on YAML.
+    """
+
     data_root = resolve_path(exp_cfg["data"]["data_dir"])
     csv_path = resolve_path(exp_cfg["data"].get("csv_path"))
     grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir"))
     grit_masks_dir = resolve_path(exp_cfg["data"].get("grit_masks_dir"))
 
-    logger.info("[splits] Building CV splits...")
-    paths = prepare_and_export_splits(
-        data_root=data_root,
-        csv_path=csv_path,
-        y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
-        n_splits=exp_cfg["data"].get("n_folds", 5),
-        test_size=exp_cfg["data"].get("test_size", 0.2),
-        val_size=exp_cfg["data"].get("val_size", 0.2),
-        min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
-        grit_images_dir=grit_images_dir,
-        grit_masks_dir=grit_masks_dir,
-    )
-    cv_root = Path(paths["cv_dir"])
+    # ----------------------------------------------------------------------
+    # Cross-validation or single-split logic
+    # ----------------------------------------------------------------------
+    use_cv = exp_cfg["data"].get("use_cross_validation", True)
+    if use_cv:
+        logger.info("[splits] Building CV splits...")
+        paths = prepare_and_export_splits(
+            data_root=data_root,
+            csv_path=csv_path,
+            y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
+            n_splits=exp_cfg["data"].get("n_folds", 5),
+            test_size=exp_cfg["data"].get("test_size", 0.2),
+            val_size=exp_cfg["data"].get("val_size", 0.2),
+            min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
+            grit_images_dir=grit_images_dir,
+            grit_masks_dir=grit_masks_dir,
+        )
+    else:
+        logger.info("[split] Building single train/validation split...")
+        paths = prepare_and_export_splits(
+            data_root=data_root,
+            csv_path=csv_path,
+            y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
+            n_splits=1,
+            test_size=exp_cfg["data"].get("test_size", 0.2),
+            val_size=exp_cfg["data"].get("val_size", 0.2),
+            min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
+            grit_images_dir=grit_images_dir,
+            grit_masks_dir=grit_masks_dir,
+        )
 
+    # ----------------------------------------------------------------------
+    # Load manifest and other experiment configuration
+    # ----------------------------------------------------------------------
+    cv_root = Path(paths["cv_dir"])
     compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
     label_bands = list(range(1, 9)) if compute_detailed else exp_cfg["data"]["label_bands"]
     pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
     manifest = pd.read_csv(Path(paths["cv_manifest_csv"]))
 
+    # If only one split, normalize fold handling
     fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
-    results = []
+    if not use_cv:
+        fold_dirs = fold_dirs[:1]  # only one train/val pair for tuning
 
+    results = []
     image_bands = exp_cfg["data"].get("image_bands", None)
     try:
         from src.modeling.custom_dataset import SHORT_BAND_NAMES
@@ -139,6 +167,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     except Exception:
         BAND_NAMES = image_bands or [f"Band{i+1}" for i in range(14)]
 
+    # ----------------------------------------------------------------------
+    # Fold Loop
+    # ----------------------------------------------------------------------
     for fold_dir in fold_dirs:
         tr_txt = fold_dir / "train_files.txt"
         va_txt = fold_dir / "val_files.txt"
@@ -163,6 +194,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             fold_dir=fold_output_dir,
         )
 
+        # Save model
         model_path = os.path.join(fold_output_dir, "model.pkl")
         dump(clf, model_path)
         logger.info(f"[{fold_dir.name}] Model saved to {model_path}")
@@ -170,11 +202,15 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         results.append(
             {"fold": fold_dir.name, "metrics": metrics, "train_size": train_size, "val_size": val_size}
         )
+
+        # Visualization
         num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
         vis_path = os.path.join(fold_output_dir, f"visualization_{fold_dir.name}.png")
         plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
 
-        # ---- Feature importance export ----
+        # ------------------------------------------------------------------
+        # Feature importance export
+        # ------------------------------------------------------------------
         save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
         if save_feat_imp and hasattr(clf, "feature_importances_"):
             try:
@@ -192,11 +228,15 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
                 band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
 
                 if os.path.exists(band_csv):
-                    plot_band_importance(band_csv, band_names=BAND_NAMES,
-                                         save_path=os.path.join(fi_plot_dir, "band_importance.png"))
+                    plot_band_importance(
+                        band_csv, band_names=BAND_NAMES,
+                        save_path=os.path.join(fi_plot_dir, "band_importance.png")
+                    )
                 if os.path.exists(time_csv):
-                    plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS,
-                                         save_path=os.path.join(fi_plot_dir, "time_importance.png"))
+                    plot_time_importance(
+                        time_csv, num_timesteps=N_TIMESTEPS,
+                        save_path=os.path.join(fi_plot_dir, "time_importance.png")
+                    )
                 if os.path.exists(band_time_csv):
                     plot_band_time_importance(
                         importance_df=band_time_csv,
@@ -207,13 +247,14 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             except Exception as e:
                 logger.warning(f"[{fold_dir.name}] Failed feature importance export: {e}")
 
-        # ---- Detailed metrics (restored block) ----
+        # ------------------------------------------------------------------
+        # Detailed metrics (optional)
+        # ------------------------------------------------------------------
         if compute_detailed:
             try:
                 detailed_dir = os.path.join(fold_output_dir, "detailed_metrics")
                 os.makedirs(detailed_dir, exist_ok=True)
 
-                # Assume val_ds exposes arrays or lists compatible with metrics_over_factors()
                 y_pred = np.array([pred for _, pred, _ in val_ds.predictions])
                 y_test = np.array([truth for _, _, truth in val_ds.labels])
                 label_metadata = np.array([meta for meta in val_ds.metadata])
@@ -234,7 +275,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             except Exception as e:
                 logger.warning(f"[{fold_dir.name}] Failed detailed metrics: {e}")
 
-    # ---- Aggregate results across folds ----
+    # ----------------------------------------------------------------------
+    # Aggregate results across folds
+    # ----------------------------------------------------------------------
     if results:
         metric_structure = results[0]["metrics"]
         summary = {"n_folds_completed": len(results), "fold_details": results}
