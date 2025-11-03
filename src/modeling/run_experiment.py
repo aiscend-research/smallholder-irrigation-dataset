@@ -138,14 +138,16 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         import pandas as pd
 
         df = pd.read_csv(csv_path)
-        if "label" not in df.columns:
+        label_col = "irrigation"
+        if "label_col" not in df.columns:
             raise ValueError("Expected 'label' column in CSV for train/val split")
 
         # Use stratified split for irrigation vs non-irrigation
+        logger.info(f"[split] Using '{label_col}' as label column for stratified split")
         train_idx, val_idx = train_test_split(
             df.index,
             test_size=exp_cfg["data"].get("val_size", 0.2),
-            stratify=df["label"],
+            stratify=df[label_col],
             random_state=exp_cfg["data"].get("random_state", 42),
         )
 
@@ -321,7 +323,6 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         logger.info(f"[cv] Results saved to {out_json}")
     else:
         logger.error("[cv] No folds completed successfully.")
-
 
 # -------------------------------------------------------------------------
 # Entry point
