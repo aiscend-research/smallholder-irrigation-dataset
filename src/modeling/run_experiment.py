@@ -132,18 +132,38 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             grit_masks_dir=grit_masks_dir,
         )
     else:
-        logger.info("[split] Building single train/validation split...")
-        paths = prepare_and_export_splits(
-            data_root=data_root,
-            csv_path=csv_path,
-            y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
-            n_splits=1,
-            test_size=exp_cfg["data"].get("test_size", 0.2),
-            val_size=exp_cfg["data"].get("val_size", 0.2),
-            min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
-            grit_images_dir=grit_images_dir,
-            grit_masks_dir=grit_masks_dir,
+        # Manual single-split fallback (avoid sklearn StratifiedGroupKFold error)
+        logger.info("[split] Building single train/validation split (no CV)...")
+        from sklearn.model_selection import train_test_split
+        import pandas as pd
+
+        df = pd.read_csv(csv_path)
+        if "label" not in df.columns:
+            raise ValueError("Expected 'label' column in CSV for train/val split")
+
+        # Use stratified split for irrigation vs non-irrigation
+        train_idx, val_idx = train_test_split(
+            df.index,
+            test_size=exp_cfg["data"].get("val_size", 0.2),
+            stratify=df["label"],
+            random_state=exp_cfg["data"].get("random_state", 42),
         )
+
+        # Create temporary split directories
+        split_dir = Path(experiment_dir) / "single_split"
+        (split_dir / "train").mkdir(parents=True, exist_ok=True)
+        (split_dir / "val").mkdir(parents=True, exist_ok=True)
+
+        train_files = df.iloc[train_idx]["stem"].tolist()
+        val_files = df.iloc[val_idx]["stem"].tolist()
+        (split_dir / "train_files.txt").write_text("\n".join(train_files))
+        (split_dir / "val_files.txt").write_text("\n".join(val_files))
+
+        # Build pseudo paths object (mimicking prepare_and_export_splits return)
+        paths = {
+            "cv_dir": str(split_dir),
+            "cv_manifest_csv": csv_path,
+        }
 
     # ----------------------------------------------------------------------
     # Load manifest and other experiment configuration
@@ -157,7 +177,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     # If only one split, normalize fold handling
     fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
     if not use_cv:
-        fold_dirs = fold_dirs[:1]  # only one train/val pair for tuning
+        fold_dirs = [cv_root]  # directly use single split directory
 
     results = []
     image_bands = exp_cfg["data"].get("image_bands", None)
@@ -171,6 +191,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     # Fold Loop
     # ----------------------------------------------------------------------
     for fold_dir in fold_dirs:
+        # Adjust filenames depending on single or multi split
         tr_txt = fold_dir / "train_files.txt"
         va_txt = fold_dir / "val_files.txt"
         if not tr_txt.exists() or not va_txt.exists():
