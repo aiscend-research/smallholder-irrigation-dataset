@@ -134,8 +134,8 @@ def train_and_evaluate_fold(
         val_ds, pixels_per_image=pixels_per_image
     )
 
-    y_train = y_train_full.ravel()
-    y_val_for_training = y_val_full.ravel()
+    y_train = y_train_full[:, 1]
+    y_val_for_training = y_val_full[:, 1]
     irrigation_ratio = float((y_train == 1).sum() / len(y_train))
     logger.info(
         f"[{fold_name}] Class distribution: {(y_train == 0).sum()} normal, {(y_train == 1).sum()} irrigation"

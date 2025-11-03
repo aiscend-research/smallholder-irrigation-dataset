@@ -84,23 +84,44 @@ def get_band_indices(band_names):
 # ----------------------------------------------------------------------
 # Dataset + Helper Functions
 # ----------------------------------------------------------------------
-def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, label_bands: list[int]) -> list:
-    """Load image/label data directly from absolute paths in CV manifest."""
+def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, label_bands) -> list:
+    """
+    Load image/label data directly from absolute paths in CV manifest.
+    Handles single or multiple label bands automatically.
+    Returns a list of (image_array, label_array, stem) tuples.
+    """
     manifest_index = manifest_df.set_index("stem")
     dataset = []
     logger.info(f"[load] Loading {len(stems)} samples directly from manifest paths...")
 
+    # --- Handle label_bands argument ---
+    if isinstance(label_bands, int):
+        label_bands = list(range(1, label_bands + 1))
+    elif isinstance(label_bands, list) and len(label_bands) == 1 and label_bands[0] == 1:
+        logger.warning("[load] Detected single label band [1]; expanding to 8 default label bands.")
+        label_bands = list(range(1, 9))
+
+    missing_in_manifest = 0
+    missing_files = 0
+    failed_reads = 0
+
     for i, stem in enumerate(stems):
         if stem not in manifest_index.index:
+            missing_in_manifest += 1
             logger.warning(f"[load] Stem '{stem}' not found in manifest, skipping")
             continue
 
         row = manifest_index.loc[stem]
-        img_path = Path(row["image_path"])
-        lab_path = Path(row["label_path"])
+        img_path = Path(str(row["image_path"]))
+        lab_path = Path(str(row["label_path"]))
 
-        if not img_path.exists() or not lab_path.exists():
-            logger.warning(f"[load] Missing image or label for {stem}")
+        if not img_path.exists():
+            missing_files += 1
+            logger.warning(f"[load] Image missing: {img_path}")
+            continue
+        if not lab_path.exists():
+            missing_files += 1
+            logger.warning(f"[load] Label missing: {lab_path}")
             continue
 
         try:
@@ -109,36 +130,88 @@ def load_dataset_from_manifest(stems: list[str], manifest_df: pd.DataFrame, labe
             with rasterio.open(lab_path) as src:
                 label = src.read(label_bands)
             dataset.append((image, label, stem))
-        except Exception as e:
-            logger.warning(f"[load] Failed to read {stem}: {e}")
 
-    if not dataset:
+            if (i + 1) % 50 == 0 or (i + 1) == len(stems):
+                logger.info(f"[load] Loaded {len(dataset)}/{i + 1} samples")
+
+        except Exception as e:
+            failed_reads += 1
+            logger.warning(f"[load] Failed to read {stem}: {e}")
+            continue
+
+    logger.info(f"[load] Successfully loaded {len(dataset)}/{len(stems)} samples")
+    if missing_in_manifest > 0:
+        logger.warning(f"[load] {missing_in_manifest} stems not found in manifest")
+    if missing_files > 0:
+        logger.warning(f"[load] {missing_files} files missing on disk")
+    if failed_reads > 0:
+        logger.warning(f"[load] {failed_reads} files failed to read")
+
+    if len(dataset) == 0:
         raise RuntimeError("No valid samples were loaded from manifest.")
-    logger.info(f"[load] Loaded {len(dataset)} samples successfully.")
+
+    # Final shape summary
+    try:
+        sample_image, sample_label, _ = dataset[0]
+        logger.info(f"[load] Example image shape: {sample_image.shape}, label shape: {sample_label.shape}")
+    except Exception:
+        pass
+
     return dataset
 
-
 def flatten_dataset_from_tuples(dataset: list, pixels_per_image: int = None) -> tuple:
-    """Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling."""
+    """
+    Flatten dataset from list of (image, label, stem) tuples with optional pixel sampling.
+    Logs dataset progress, sampling strategy, and final flattened shapes.
+    """
     X_list, y_list, stems_list = [], [], []
-    logger.info(f"[flatten] Flattening {len(dataset)} samples...")
 
+    total_pixels_original = 0
+    total_pixels_used = 0
+
+    # Log start
+    sampling_msg = (
+        f"{pixels_per_image} pixels per image" if pixels_per_image else "using ALL pixels"
+    )
+    logger.info(f"[flatten] Flattening {len(dataset)} samples ({sampling_msg})...")
+
+    # Iterate over dataset
     for idx, (image, label, stem) in enumerate(dataset):
         n_bands, height, width = image.shape
+        total_pixels = height * width
+        total_pixels_original += total_pixels
+
         X_full = image.reshape(n_bands, -1).T
         y_full = label.reshape(label.shape[0], -1).T
 
-        if pixels_per_image and X_full.shape[0] > pixels_per_image:
-            sel = np.random.choice(X_full.shape[0], pixels_per_image, replace=False)
-            X_full, y_full = X_full[sel], y_full[sel]
+        # Optional sampling
+        if pixels_per_image and total_pixels > pixels_per_image:
+            sel = np.random.choice(total_pixels, pixels_per_image, replace=False)
+            X_full = X_full[sel]
+            y_full = y_full[sel]
+            total_pixels_used += pixels_per_image
+        else:
+            total_pixels_used += total_pixels
 
         X_list.append(X_full)
         y_list.append(y_full)
         stems_list.append(stem)
 
+        # Log progress every 100 images
+        if (idx + 1) % 100 == 0 or (idx + 1) == len(dataset):
+            logger.info(
+                f"[flatten] Processed {idx + 1}/{len(dataset)} samples "
+                f"({total_pixels_used:,} / {total_pixels_original:,} pixels used)"
+            )
+
+    # Stack arrays
     X = np.vstack(X_list).astype(np.float32)
     y = np.vstack(y_list).astype(np.int8)
+
+    # Final summary
     logger.info(f"[flatten] Final shapes: X={X.shape}, y={y.shape}")
+    logger.info(f"[flatten] Total pixels used: {total_pixels_used:,} / {total_pixels_original:,}")
+
     return X, y, stems_list
 
 
