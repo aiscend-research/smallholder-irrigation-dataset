@@ -125,7 +125,7 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
     cv_root = Path(paths["cv_dir"])
 
     compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
-    label_bands = exp_cfg["data"]["label_bands"]
+    label_bands = list(range(1, 9)) if compute_detailed else exp_cfg["data"]["label_bands"]
     pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
     manifest = pd.read_csv(Path(paths["cv_manifest_csv"]))
 
