@@ -37,11 +37,11 @@ model:
 
   hyperparameters:
     random_forest:
-      n_estimators: 500             
+      n_estimators: 800             
       max_depth: 30                 
       min_samples_split: 2          
       min_samples_leaf: 1           
-      max_features: "log2"          
+      max_features: "sqrt"          
       class_weight: "balanced"
       n_jobs: -1
       random_state: 42
