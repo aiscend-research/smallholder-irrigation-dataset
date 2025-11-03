@@ -13,7 +13,6 @@ What this script does:
 4) Computes detailed metrics over multiple factors and generates comprehensive
    visualization plots.
 """
-
 import os
 import sys
 import json
@@ -32,9 +31,8 @@ if project_root not in sys.path:
 ROOT = project_root
 
 from src.modeling.custom_dataset import load_dataset_from_manifest, flatten_dataset_from_tuples, plot_predictions
-from src.modeling.ml_pipeline.ml_model import train_and_evaluate_fold
+from src.modeling.ml_pipeline.ml_model import train_and_evaluate_fold, plot_final_learning_curve, train_model
 from src.modeling.ml_pipeline.evaluation import (
-    model_metrics,
     metrics_over_factors,
     plot_metrics_over_factors,
     export_feature_importances,
@@ -56,7 +54,6 @@ logger = logging.getLogger(__name__)
 # Utility helpers
 # -------------------------------------------------------------------------
 def resolve_path(path_str: str, base_dir: str | None = None) -> str:
-    """Resolve a path relative to the project root if not absolute."""
     if path_str is None:
         return None
     if os.path.isabs(path_str):
@@ -66,35 +63,32 @@ def resolve_path(path_str: str, base_dir: str | None = None) -> str:
 
 
 def resolve_config_path(config_path: str = "src/modeling/experiment.yaml") -> str:
-    """Return an absolute path to the experiment YAML by trying a few likely locations."""
     p = Path(config_path)
     candidates = []
     if p.is_absolute():
         candidates.append(p)
     else:
-        candidates.append(Path.cwd() / config_path)
-        candidates.append(Path(ROOT) / config_path)
-        candidates.append(Path(ROOT) / "experiment.yaml")
-        candidates.append(Path.cwd() / "experiment.yaml")
-        candidates.append(Path(ROOT) / "src/modeling/ml_pipeline/experiment.yaml")
-
+        candidates += [
+            Path.cwd() / config_path,
+            Path(ROOT) / config_path,
+            Path(ROOT) / "experiment.yaml",
+            Path.cwd() / "experiment.yaml",
+            Path(ROOT) / "src/modeling/ml_pipeline/experiment.yaml",
+        ]
     for c in candidates:
         if c.exists():
             return str(c.resolve())
-
     tried = "\n  - " + "\n  - ".join(str(c) for c in candidates)
     raise FileNotFoundError(f"experiment.yaml not found. Tried:{tried}")
 
 
 def load_experiment(config_path: str = "src/modeling/experiment.yaml") -> dict:
-    """Load the YAML config and return it as a Python dict."""
     cfg_path = resolve_config_path(config_path)
     with open(cfg_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def load_stems(txt_path: str) -> list[str]:
-    """Read file stems from a text file (one per line)."""
     p = Path(txt_path)
     if not p.exists():
         return []
@@ -170,9 +164,13 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         results.append(
             {"fold": fold_dir.name, "metrics": metrics, "train_size": train_size, "val_size": val_size}
         )
+
         num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
         vis_path = os.path.join(fold_output_dir, f"visualization_{fold_dir.name}.png")
-        plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
+        try:
+            plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
+        except Exception as e:
+            logger.warning(f"[{fold_dir.name}] Visualization failed: {e}")
 
         # ---- Feature importance export ----
         save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
@@ -207,34 +205,9 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
             except Exception as e:
                 logger.warning(f"[{fold_dir.name}] Failed feature importance export: {e}")
 
-        # ---- Detailed metrics (restored block) ----
-        if compute_detailed:
-            try:
-                detailed_dir = os.path.join(fold_output_dir, "detailed_metrics")
-                os.makedirs(detailed_dir, exist_ok=True)
-
-                # Assume val_ds exposes arrays or lists compatible with metrics_over_factors()
-                y_pred = np.array([pred for _, pred, _ in val_ds.predictions])
-                y_test = np.array([truth for _, _, truth in val_ds.labels])
-                label_metadata = np.array([meta for meta in val_ds.metadata])
-                ids = np.array([stem for _, _, stem in val_ds.samples])
-
-                metrics_json = metrics_over_factors(
-                    y_pred=y_pred,
-                    y_test=y_test,
-                    multi_class=exp_cfg["model"].get("multi_class", False),
-                    label_metadata=label_metadata,
-                    ids=ids,
-                    metrics_path=detailed_dir,
-                )
-
-                plots_dir = os.path.join(detailed_dir, "plots")
-                plot_metrics_over_factors(metrics_json, save_dir=plots_dir)
-                logger.info(f"[{fold_dir.name}] Detailed metrics and plots saved to {plots_dir}")
-            except Exception as e:
-                logger.warning(f"[{fold_dir.name}] Failed detailed metrics: {e}")
-
-    # ---- Aggregate results across folds ----
+    # ----------------------------------------------------------------------
+    # Aggregate results and create one global learning curve
+    # ----------------------------------------------------------------------
     if results:
         metric_structure = results[0]["metrics"]
         summary = {"n_folds_completed": len(results), "fold_details": results}
@@ -255,6 +228,27 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
         out_json = Path(experiment_dir) / "cv_results.json"
         out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         logger.info(f"[cv] Results saved to {out_json}")
+
+        # ---- Final Learning Curve ----
+        try:
+            logger.info("[cv] Running global learning curve on full dataset...")
+            full_ds = load_dataset_from_manifest(
+                manifest["stem"].tolist(), manifest, exp_cfg["data"]["label_bands"]
+            )
+            X_full, y_full, _ = flatten_dataset_from_tuples(
+                full_ds, pixels_per_image=exp_cfg["data"]["pixels_per_image"]
+            )
+            y_full = y_full[:, 1]  # irrigation label
+            best_model = train_model(
+                X_full,
+                y_full,
+                model_type=exp_cfg["model"]["type"],
+                **exp_cfg["model"]["hyperparameters"]["random_forest"],
+            )
+            plot_final_learning_curve(X_full, y_full, best_model, experiment_dir)
+        except Exception as e:
+            logger.warning(f"[cv] Failed to generate final learning curve: {e}")
+
     else:
         logger.error("[cv] No folds completed successfully.")
 
@@ -264,7 +258,6 @@ def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
 # -------------------------------------------------------------------------
 def main():
     import argparse
-
     ap = argparse.ArgumentParser(description="Irrigation ML runner with SMOTE+RF baseline and full metrics.")
     ap.add_argument(
         "--config",
