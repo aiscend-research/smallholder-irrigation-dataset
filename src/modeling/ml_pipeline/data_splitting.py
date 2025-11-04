@@ -63,12 +63,12 @@ class IrrigationDataSplitter:
 
     # Additional regexes for GRIT raw file naming (images/features and masks/labels)
     _GRIT_IMG_RE = re.compile(
-        r"^site_[^_]+_[^_]+_\d{4}_(?P<uid>\d+)\.(?P<ext>tif|json)$",
+        r"^(?:site_[^_]+_[^_]+_\d{4}_(?P<uid_a>\d+)|(?P<uid_b>\d+)_\d+_\d{4}\.\d{2}\.\d{2}_image)\.(?P<ext>tif|json)$",
         re.IGNORECASE,
     )
     _GRIT_MASK_RE = re.compile(
-        r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})_(?P<tag>[A-Za-z]+)(_metadata)?\.(?P<ext>tif|json)$",
-        re.IGNORECASE,
+    r"^(?P<uid>\d+?)_(?P<site>\d+)_(?P<date>\d{4}\.\d{2}\.\d{2})(?:_[A-Za-z]+)?_label(?:_metadata)?\.(?P<ext>tif|json)$",
+    re.IGNORECASE,
     )
 
     def __init__(self, data_root: str, csv_path: Optional[str] = None, random_state: int = 42,
@@ -136,7 +136,7 @@ class IrrigationDataSplitter:
                     m = self._GRIT_IMG_RE.match(fp.name)
                     if not m:
                         continue
-                    uid = m.group("uid")
+                    uid = m.group("uid_a") or m.group("uid_b")
                     ext = m.group("ext").lower()
                     rec = imgs_by_uid.setdefault(uid, {"tif": None, "json": None})
                     if ext == "tif":
