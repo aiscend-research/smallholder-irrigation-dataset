@@ -269,26 +269,6 @@ def main():
     exp_cfg = load_experiment(args.config)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_name = f"{exp_cfg['name']}_{timestamp}"
-    # Random seed for data split
-    if exp_cfg.get("data", {}).get("random_state") is None:
-        exp_cfg["data"]["random_state"] = np.random.randint(0, 10000)
-
-    # Random seed for model
-    rf_cfg = exp_cfg.get("model", {}).get("hyperparameters", {}).get("random_forest", {})
-    if rf_cfg.get("random_state") is None:
-        rf_cfg["random_state"] = np.random.randint(0, 10000)
-        exp_cfg["model"]["hyperparameters"]["random_forest"] = rf_cfg
-
-    # Random seed for SMOTE
-    smote_cfg = exp_cfg.get("model", {}).get("smote", {})
-    if smote_cfg.get("random_state") is None:
-        smote_cfg["random_state"] = np.random.randint(0, 10000)
-        exp_cfg["model"]["smote"] = smote_cfg
-
-    # Log for reproducibility
-    logger.info(f"[seed] data.random_state = {exp_cfg['data']['random_state']}")
-    logger.info(f"[seed] RF.random_state = {rf_cfg['random_state']}")
-    logger.info(f"[seed] SMOTE.random_state = {smote_cfg['random_state']}")
     out_root = resolve_path(exp_cfg["output"]["base_dir"])
     run_dir = os.path.join(out_root, run_name)
     os.makedirs(run_dir, exist_ok=True)
