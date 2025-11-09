@@ -1,398 +1,308 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Run K-fold cross-validation for irrigation classification with site-aware splits.
+
+What this script does:
+1) Builds spatially safe splits (grouped by siteNumeric; optional stratification)
+   This also produces a held-out test list, which this script does not evaluate on.
+2) Reads train/val file lists and a CV manifest CSV
+   (mapping stem -> absolute image_path/label_path) — no file staging/copying.
+3) For each fold: loads scenes from disk, flattens to tabular features,
+   trains the model, and computes metrics on the fold's validation set.
+4) Computes detailed metrics over multiple factors and generates comprehensive
+   visualization plots.
+"""
 import os
 import sys
-import yaml
 import json
+import yaml
 import shutil
+import logging
 from datetime import datetime
-from joblib import dump
-import numpy as np
-from tqdm import tqdm
-import pandas as pd
 from pathlib import Path
+import pandas as pd
+import numpy as np
+from joblib import dump
 
-from ml_pipeline.ml_model import train_model
-from ml_pipeline.evaluation import model_metrics
-from ml_pipeline.evaluation import metrics_over_factors, plot_metrics_over_factors
-from ml_pipeline.evaluation import export_feature_importances, plot_band_time_importance
-import glob
-from ml_pipeline.visualization import plot_ml_predictions
-from custom_dataset import MultiTemporalCropDataset, SHORT_BAND_NAMES
-from ml_pipeline.build_features import (
-    flatten_dataset,
-    compute_nan_stats_for_dataset,
-    time_interpolate_features,
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+ROOT = project_root
+
+from src.modeling.custom_dataset import load_dataset_from_manifest, flatten_dataset_from_tuples, plot_predictions
+from src.modeling.ml_pipeline.ml_model import train_and_evaluate_fold, plot_final_learning_curve, train_model
+from src.modeling.ml_pipeline.evaluation import (
+    metrics_over_factors,
+    plot_metrics_over_factors,
+    export_feature_importances,
+    plot_band_time_importance,
+    plot_band_importance,
+    plot_time_importance,
 )
-from ml_pipeline.evaluation import plot_band_importance, plot_time_importance
+from src.modeling.ml_pipeline.data_splitting import prepare_and_export_splits
 
-# --- Suppress Rasterio NotGeoreferencedWarning if present ---
-import warnings
-try:
-    from rasterio.errors import NotGeoreferencedWarning
-    warnings.filterwarnings("ignore", category=NotGeoreferencedWarning, module=r"rasterio")
-except Exception:
-    pass
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
-
-# ---------------- GRIT defaults + helpers ----------------
-# These are used ONLY if your YAML doesn't provide train/val dirs.
-GRIT_IMAGES_DIR = "/home/waves/data/smallholder-irrigation-dataset/data/features"
-GRIT_MASKS_DIR  = "/home/waves/data/smallholder-irrigation-dataset/data/masks/labels"
-GRIT_OUT_ROOT   = "/home/waves/data/smallholder-irrigation-dataset/data/modeling"
-
-def _resolve_path(p: str | os.PathLike | None) -> str:
-    if p is None:
-        return None  # let caller decide fallback
-    return str(Path(os.path.expandvars(os.path.expanduser(str(p)))).resolve())
-
-def _resolve_split_dirs(data_cfg: dict) -> tuple[str, str]:
-    """
-    Decide where to read train/val from.
-    Priority (for each): YAML 'train_dir'/'val_dir' -> GRIT_OUT_ROOT/train|val
-    """
-    train_dir = data_cfg.get("train_dir")
-    val_dir   = data_cfg.get("val_dir")
-
-    train_dir = _resolve_path(train_dir) if train_dir else os.path.join(GRIT_OUT_ROOT, "train")
-    val_dir   = _resolve_path(val_dir)   if val_dir   else os.path.join(GRIT_OUT_ROOT, "val")
-
-    # sanity checks with helpful hints
-    if not os.path.isdir(train_dir):
-        raise FileNotFoundError(
-            f"Train directory not found: {train_dir}\n"
-            f"Hint: On GRIT this is typically {GRIT_OUT_ROOT}/train. "
-            f"If you haven't created splits yet, run your splitter to populate "
-            f"'{GRIT_OUT_ROOT}/train' and '{GRIT_OUT_ROOT}/val' with "
-            "<uid>_<site>_<YYYY.MM.DD>_image.tif/json and ..._mask.tif/json\" files."
-        )
-    if not os.path.isdir(val_dir):
-        raise FileNotFoundError(
-            f"Val directory not found: {val_dir}\n"
-            f"Hint: On GRIT this is typically {GRIT_OUT_ROOT}/val. "
-            f"If you used a different location, set data.val_dir in experiment.yaml."
-        )
-    return train_dir, val_dir
+# -------------------------------------------------------------------------
+# Utility helpers
+# -------------------------------------------------------------------------
+def resolve_path(path_str: str, base_dir: str | None = None) -> str:
+    if path_str is None:
+        return None
+    if os.path.isabs(path_str):
+        return path_str
+    base = base_dir or ROOT
+    return os.path.normpath(os.path.join(base, path_str))
 
 
-def load_experiment(config_path="experiment.yaml"):
-    with open(config_path, "r") as f:
+def resolve_config_path(config_path: str = "src/modeling/experiment.yaml") -> str:
+    p = Path(config_path)
+    candidates = []
+    if p.is_absolute():
+        candidates.append(p)
+    else:
+        candidates += [
+            Path.cwd() / config_path,
+            Path(ROOT) / config_path,
+            Path(ROOT) / "experiment.yaml",
+            Path.cwd() / "experiment.yaml",
+            Path(ROOT) / "src/modeling/ml_pipeline/experiment.yaml",
+        ]
+    for c in candidates:
+        if c.exists():
+            return str(c.resolve())
+    tried = "\n  - " + "\n  - ".join(str(c) for c in candidates)
+    raise FileNotFoundError(f"experiment.yaml not found. Tried:{tried}")
+
+
+def load_experiment(config_path: str = "src/modeling/experiment.yaml") -> dict:
+    cfg_path = resolve_config_path(config_path)
+    with open(cfg_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def run_experiment(exp_cfg, config_path):
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base_name = exp_cfg["name"]
-    run_name = f"{base_name}_{timestamp}"
+def load_stems(txt_path: str) -> list[str]:
+    p = Path(txt_path)
+    if not p.exists():
+        return []
+    return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
-    base_dir = exp_cfg["output"]["base_dir"]
-    base_dir = _resolve_path(base_dir)
-    experiment_dir = os.path.join(base_dir, run_name)
 
-    if os.path.exists(experiment_dir):
-        print(f"Skipping: {run_name} already exists.")
-        return
+# -------------------------------------------------------------------------
+# Main cross-validation experiment
+# -------------------------------------------------------------------------
+def run_cv_experiment(exp_cfg: dict, experiment_dir: str):
+    data_root = resolve_path(exp_cfg["data"]["data_dir"])
+    csv_path = resolve_path(exp_cfg["data"].get("csv_path"))
+    grit_images_dir = resolve_path(exp_cfg["data"].get("grit_images_dir"))
+    grit_masks_dir = resolve_path(exp_cfg["data"].get("grit_masks_dir"))
 
-    os.makedirs(experiment_dir, exist_ok=True)
+    logger.info("[splits] Building CV splits...")
+    paths = prepare_and_export_splits(
+        data_root=data_root,
+        csv_path=csv_path,
+        y_mode=exp_cfg["data"].get("y_mode", "csv_then_label"),
+        n_splits=exp_cfg["data"].get("n_folds", 5),
+        test_size=exp_cfg["data"].get("test_size", 0.2),
+        val_size=exp_cfg["data"].get("val_size", 0.2),
+        min_samples_per_class=exp_cfg["data"].get("min_samples_per_class", 5),
+        grit_images_dir=grit_images_dir,
+        grit_masks_dir=grit_masks_dir,
+    )
+    cv_root = Path(paths["cv_dir"])
 
-    model_path = os.path.join(experiment_dir, "model.pkl")
-    metrics_path = os.path.join(experiment_dir, "metrics.json")
-    visualization_path = os.path.join(experiment_dir, "prediction_visualization.png")
-    config_snapshot_path = os.path.join(experiment_dir, "experiment.yaml")
-    log_path = os.path.join(experiment_dir, "run.log")
+    compute_detailed = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics", False)
+    label_bands = list(range(1, 9)) if compute_detailed else exp_cfg["data"]["label_bands"]
+    pixels_per_image = exp_cfg["data"].get("pixels_per_image", None)
+    manifest = pd.read_csv(Path(paths["cv_manifest_csv"]))
 
-    shutil.copyfile(config_path, config_snapshot_path)
+    fold_dirs = sorted((cv_root / "train").glob("fold_*"), key=lambda p: p.name)
+    results = []
 
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    original_stdout = sys.stdout
-    with open(log_path, 'w') as log_file:
-        sys.stdout = log_file
+    image_bands = exp_cfg["data"].get("image_bands", None)
+    try:
+        from src.modeling.custom_dataset import SHORT_BAND_NAMES
+        BAND_NAMES = SHORT_BAND_NAMES
+    except Exception:
+        BAND_NAMES = image_bands or [f"Band{i+1}" for i in range(14)]
+
+    for fold_dir in fold_dirs:
+        tr_txt = fold_dir / "train_files.txt"
+        va_txt = fold_dir / "val_files.txt"
+        if not tr_txt.exists() or not va_txt.exists():
+            logger.warning(f"[skip] Missing lists in {fold_dir}")
+            continue
+
+        train_stems = load_stems(str(tr_txt))
+        val_stems = load_stems(str(va_txt))
+        fold_output_dir = os.path.join(experiment_dir, fold_dir.name)
+        os.makedirs(fold_output_dir, exist_ok=True)
+
+        clf, metrics, val_ds, train_size, val_size = train_and_evaluate_fold(
+            train_stems,
+            val_stems,
+            manifest,
+            label_bands,
+            exp_cfg["model"],
+            fold_name=fold_dir.name,
+            pixels_per_image=pixels_per_image,
+            exp_cfg=exp_cfg,
+            fold_dir=fold_output_dir,
+        )
+
+        model_path = os.path.join(fold_output_dir, "model.pkl")
+        dump(clf, model_path)
+        logger.info(f"[{fold_dir.name}] Model saved to {model_path}")
+
+        results.append(
+            {"fold": fold_dir.name, "metrics": metrics, "train_size": train_size, "val_size": val_size}
+        )
+
+        num_samples = exp_cfg.get("visualization", {}).get("num_samples", 2)
+        vis_path = os.path.join(fold_output_dir, f"visualization_{fold_dir.name}.png")
         try:
-            print(f"[{timestamp}] Starting experiment: {base_name}")
-            print(f"Saving outputs to: {experiment_dir}")
+            plot_predictions(val_ds, clf, num_samples=num_samples, save_path=vis_path)
+        except Exception as e:
+            logger.warning(f"[{fold_dir.name}] Visualization failed: {e}")
 
-            data_cfg    = exp_cfg.get("data", {})
-            image_bands = data_cfg.get("image_bands")
-
-            # --- GRIT-aware split directories (train/val) ---
-            train_dir, val_dir = _resolve_split_dirs(data_cfg)
-            print(f"Using train_dir: {train_dir}")
-            print(f"Using   val_dir: {val_dir}")
-
-            if not image_bands:
-                BAND_NAMES = SHORT_BAND_NAMES
-            else:
-                BAND_NAMES = image_bands
-
-            print("Loading train dataset...")
-            train_dataset = MultiTemporalCropDataset(data_dir=train_dir, image_band_names=image_bands)
-            print(f"Train dataset loaded. Samples: {len(train_dataset)}")
-
-            print("Loading val dataset...")
-            val_dataset = MultiTemporalCropDataset(data_dir=val_dir, image_band_names=image_bands)
-            print(f"Val dataset loaded. Samples: {len(val_dataset)}")
-
-            print(f"Loaded datasets -> train: {len(train_dataset)} | val: {len(val_dataset)}")
-            if len(train_dataset) > 0:
-                sample_train = train_dataset[0]
-                print(f"First train sample image shape: {sample_train['image'].shape}, mask shape: {sample_train['mask'].shape}")
-            if len(val_dataset) > 0:
-                sample_val = val_dataset[0]
-                print(f"First val sample image shape: {sample_val['image'].shape}, mask shape: {sample_val['mask'].shape}")
-
-            N_TIMESTEPS = sample_train["image"].shape[1]
-
-            # --- NaN statistics (per band x time) saved under experiment_dir/nan_stats ---
-            nan_stats_dir = os.path.join(experiment_dir, "nan_stats")
-            compute_nan_stats_for_dataset(
-                train_dataset,
-                os.path.join(nan_stats_dir, "train"),
-                split_name="train",
-                save_per_sample=False
-            )
-            compute_nan_stats_for_dataset(
-                val_dataset,
-                os.path.join(nan_stats_dir, "val"),
-                split_name="val",
-                save_per_sample=False
-            )
-
-            print("Flattening train dataset...")
-            X_train, y_train = flatten_dataset(train_dataset)
-            print(f"[DEBUG] X_train shape: {X_train.shape}")
-            print(f"[DEBUG] y_train shape: {y_train.shape}")
-            if X_train.size:
-                print(f"[DEBUG] X_train dtype: {X_train.dtype}  min: {np.nanmin(X_train)}  max: {np.nanmax(X_train)}")
-                print(f"[DEBUG] X_train NaNs: {np.isnan(X_train).sum()}")
-            else:
-                print("[DEBUG] X_train is EMPTY")
-            if y_train.size:
-                print(f"[DEBUG] y_train dtype: {y_train.dtype}  min: {np.nanmin(y_train)}  max: {np.nanmax(y_train)}")
-                print(f"[DEBUG] y_train NaNs: {np.isnan(y_train).sum()}")
-            else:
-                print("[DEBUG] y_train is EMPTY")
-
-            print("Flattening val dataset...")
-            X_val, y_val = flatten_dataset(val_dataset)
-            print(f"[DEBUG] X_val shape: {X_val.shape}")
-            print(f"[DEBUG] y_val shape: {y_val.shape}")
-            if X_val.size:
-                print(f"[DEBUG] X_val dtype: {X_val.dtype}  min: {np.nanmin(X_val)}  max: {np.nanmax(X_val)}")
-                print(f"[DEBUG] X_val NaNs: {np.isnan(X_val).sum()}")
-            else:
-                print("[DEBUG] X_val is EMPTY")
-            if y_val.size:
-                print(f"[DEBUG] y_val dtype: {y_val.dtype}  min: {np.nanmin(y_val)}  max: {np.nanmax(y_val)}")
-                print(f"[DEBUG] y_val NaNs: {np.isnan(y_val).sum()}")
-            else:
-                print("[DEBUG] y_val is EMPTY")
-
-            # Preserve full label tensors for evaluation; use only first two bands for training/inference
-            y_train_full = y_train.copy()
-            y_val_full = y_val.copy()
-
-            # --- NaN handling options: none | drop | temporal ---
-            impute_cfg = exp_cfg.get("imputation", {})
-            mode = str(impute_cfg.get("mode", "temporal")).lower()
-            fill_const = float(impute_cfg.get("fill_constant", 0.0))
-
-            if mode == "temporal":
-                print(f"Imputing features with temporal interpolation (fill_constant={fill_const})...")
-                X_train = time_interpolate_features(X_train, T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
-                X_val   = time_interpolate_features(X_val,   T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
-                print("[DEBUG] After temporal imputation ->",
-                      f"X_train NaNs: {np.isnan(X_train).sum()} | X_val NaNs: {np.isnan(X_val).sum()}")
-
-            elif mode == "drop":
-                print("Dropping rows with any NaN in features (train & val)...")
-                # Train
-                mask_tr = ~np.any(np.isnan(X_train), axis=1)
-                dropped_tr = int((~mask_tr).sum())
-                if dropped_tr > 0:
-                    print(f"[INFO] Dropping {dropped_tr} / {X_train.shape[0]} train rows due to NaNs")
-                X_train = X_train[mask_tr]
-                y_train_full = y_train_full[mask_tr]
-                # Val
-                mask_va = ~np.any(np.isnan(X_val), axis=1)
-                dropped_va = int((~mask_va).sum())
-                if dropped_va > 0:
-                    print(f"[INFO] Dropping {dropped_va} / {X_val.shape[0]} val rows due to NaNs")
-                X_val = X_val[mask_va]
-                y_val_full = y_val_full[mask_va]
-
-            elif mode == "none":
-                print("NaN handling: none (leaving NaNs as-is). WARNING: most sklearn models cannot handle NaNs.")
-            else:
-                print(f"[WARN] Unknown imputation mode '{mode}'. Using 'temporal' by default.")
-                X_train = time_interpolate_features(X_train, T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
-                X_val   = time_interpolate_features(X_val,   T=N_TIMESTEPS, C=len(BAND_NAMES), fill_constant=fill_const)
-
-            y_train = y_train_full[:, :2]
-            y_val_train_only = y_val_full[:, :2]
-            print(f"y_train (first two bands) shape: {y_train.shape}")
-            print(f"y_val   (first two bands) shape: {y_val_train_only.shape}")
-
-            model_type = exp_cfg["model"]["type"].lower()
-            hyperparams = exp_cfg["model"].get("hyperparameters", {}).get(model_type, {})
-
-            print("Training model...")
-            clf = train_model(X_train, y_train, model_type, **hyperparams)
-            print("Model training complete.")
-
-            dump(clf, model_path)
-            print(f"Model saved to {model_path}")
-
-            print("Running predictions...")
-            # Predict in batches with a progress bar to avoid long pauses on large arrays
-            inference_cfg = exp_cfg.get("inference", {})
-            batch_size = int(inference_cfg.get("batch_size", 250000))  # default large to minimize overhead
-            n_rows = X_val.shape[0]
-            y_pred_chunks = []
-            for start in tqdm(range(0, n_rows, batch_size), desc="Predicting", unit="rows"):
-                end = min(start + batch_size, n_rows)
-                y_pred_chunks.append(clf.predict(X_val[start:end]))
-            y_pred = np.concatenate(y_pred_chunks, axis=0)
-            print(f"y_pred shape: {y_pred.shape}")
-
-            metrics = model_metrics(y_pred, y_val_train_only)
-            with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2)
-            print("Metrics:", metrics)
-
-            # --- Save metrics over factors if configured ---
-            comp_deatailed_cfg = exp_cfg.get("evaluation", {}).get("compute_detailed_metrics")
-            if comp_deatailed_cfg:
-                try:
-                    # Dimensions and identifiers
-                    n_imgs = len(val_dataset)
-                    H = val_dataset[0]["image"].shape[2]  # Height
-                    W = val_dataset[0]["image"].shape[3]  # Width
-
-                    # Try to get unique IDs from the validation dataset directly
-                    raw_ids = list(getattr(val_dataset, "paired_unique_ids", []))
-                    if not raw_ids or len(raw_ids) != n_imgs:
-                        raw_ids = [val_dataset[i]["id"] for i in range(n_imgs)]
-                    ids = np.array([int(str(s).split('_', 1)[0]) for s in raw_ids], dtype=int)
-
-                    # --- Select Band 2 (index 1) for presence (binary) ---
-                    target_idx = 1
-                    y_pred_band2 = y_pred[:, target_idx].astype(int).reshape(n_imgs, H, W)
-                    y_test_band2 = y_val_full[:, target_idx].astype(int).reshape(n_imgs, H, W)
-
-                    # Label metadata from LAST 6 bands of y_val_full: shape (n_imgs, 6, H, W)
-                    label_metadata = (
-                        y_val_full[:, -6:]             # (pixels, 6)
-                        .reshape(n_imgs, H, W, 6)      # (n_imgs, H, W, 6)
-                        .transpose(0, 3, 1, 2)         # (n_imgs, 6, H, W)
-                        .astype(int)
-                    )
-
-                    # Output dirs for detailed metrics
-                    detailed_dir = os.path.join(experiment_dir, "detailed_metrics")
-                    plots_dir = os.path.join(detailed_dir, "plots")
-                    os.makedirs(plots_dir, exist_ok=True)
-
-                    # Compute and save JSON under detailed_dir
-                    metrics = metrics_over_factors(
-                        y_pred=y_pred_band2,
-                        y_test=y_test_band2,
-                        multi_class=False,
-                        label_metadata=label_metadata,
-                        ids=ids,
-                        metrics_path=detailed_dir
-                    )
-                    print(f"Saved detailed metrics JSON to: {os.path.join(detailed_dir, 'metrics.json')}")
-
-                    # Plot and save PNGs under detailed_dir/plots
-                    try:
-                        plot_metrics_over_factors(metrics_json=metrics, save_dir=plots_dir)
-                        print(f"Saved detailed metrics plots to: {plots_dir}")
-                    except Exception as plot_e:
-                        import traceback as _tb
-                        print("Failed to plot detailed metrics:", plot_e)
-                        _tb.print_exc()
-
-                except Exception as e:
-                    import traceback
-                    print("Failed to compute metrics over factors:", e)
-                    traceback.print_exc()
-
-            num_samples = exp_cfg["visualization"].get("num_samples", 2)
-            print("Generating prediction visualizations...")
-            plot_ml_predictions(
-                val_dataset, clf,
-                num_samples=num_samples, save_path=visualization_path
-            )
-
-            save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
-            if save_feat_imp and hasattr(clf, "estimators_"):
-                # --- Create subfolders for CSVs and PNGs ---
-                fi_root_dir = os.path.join(experiment_dir, "feature_importance")
+        # ---- Feature importance export ----
+        save_feat_imp = exp_cfg.get("model", {}).get("save_feature_importance", False)
+        if save_feat_imp and hasattr(clf, "feature_importances_"):
+            try:
+                first_img, _, _ = val_ds[0]
+                N_TIMESTEPS = first_img.shape[0] // len(BAND_NAMES)
+                fi_root_dir = os.path.join(fold_output_dir, "feature_importance")
                 fi_csv_dir = os.path.join(fi_root_dir, "csv")
                 fi_plot_dir = os.path.join(fi_root_dir, "plots")
                 os.makedirs(fi_csv_dir, exist_ok=True)
                 os.makedirs(fi_plot_dir, exist_ok=True)
-                # --- Export feature importances to CSV subfolder ---
                 export_feature_importances(clf, BAND_NAMES, N_TIMESTEPS, fi_csv_dir)
-                # Discover CSVs from the csv/ folder
-                fi_csvs = glob.glob(os.path.join(fi_csv_dir, "feature_importance*.csv"))
-                print(f"Found feature importance CSV files: {fi_csvs}")
-                if not fi_csvs:
-                    print(f"Warning: No feature importance files found in {fi_csv_dir}.")
-                else:
-                    band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
-                    time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
-                    band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
 
-                    model_tag = model_type
-                    if os.path.exists(band_csv):
-                        png_path = os.path.join(fi_plot_dir, f"band_importance_{model_tag}.png")
-                        try:
-                            plot_band_importance(band_csv, band_names=BAND_NAMES, save_path=png_path)
-                            print(f"Plotted band importance to {png_path}")
-                        except Exception as e:
-                            print(f"Failed to plot band importance for {band_csv}: {e}")
-                    else:
-                        print(f"Band importance CSV not found: {band_csv}")
+                band_csv = os.path.join(fi_csv_dir, "feature_importance_by_band.csv")
+                time_csv = os.path.join(fi_csv_dir, "feature_importance_by_time.csv")
+                band_time_csv = os.path.join(fi_csv_dir, "feature_importance_detailed.csv")
 
-                    if os.path.exists(time_csv):
-                        png_path = os.path.join(fi_plot_dir, f"time_importance_{model_tag}_T{N_TIMESTEPS}.png")
-                        try:
-                            plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS, save_path=png_path)
-                            print(f"Plotted time importance to {png_path}")
-                        except Exception as e:
-                            print(f"Failed to plot time importance for {time_csv}: {e}")
-                    else:
-                        print(f"Time importance CSV not found: {time_csv}")
+                if os.path.exists(band_csv):
+                    plot_band_importance(band_csv, band_names=BAND_NAMES,
+                                         save_path=os.path.join(fi_plot_dir, "band_importance.png"))
+                if os.path.exists(time_csv):
+                    plot_time_importance(time_csv, num_timesteps=N_TIMESTEPS,
+                                         save_path=os.path.join(fi_plot_dir, "time_importance.png"))
+                if os.path.exists(band_time_csv):
+                    plot_band_time_importance(
+                        importance_df=band_time_csv,
+                        band_names=BAND_NAMES,
+                        num_timesteps=N_TIMESTEPS,
+                        save_path=os.path.join(fi_plot_dir, "band_time_heatmap.png"),
+                    )
+            except Exception as e:
+                logger.warning(f"[{fold_dir.name}] Failed feature importance export: {e}")
 
-                    if band_time_csv and os.path.exists(band_time_csv):
-                        png_path = os.path.join(fi_plot_dir, f"band_time_importance_{model_tag}_T{N_TIMESTEPS}.png")
-                        try:
-                            plot_band_time_importance(
-                                importance_df=band_time_csv,
-                                band_names=BAND_NAMES,
-                                num_timesteps=N_TIMESTEPS,
-                                save_path=png_path
-                            )
-                            print(f"Plotted band-time heatmap to {png_path}")
-                        except Exception as e:
-                            print(f"Failed to plot band-time heatmap for {band_time_csv}: {e}")
-                    else:
-                        print(f"Band-time heatmap CSV not found: {band_time_csv}")
-                    print(f"Feature importance CSVs saved under: {fi_csv_dir}")
-                    print(f"Feature importance plots saved under: {fi_plot_dir}")
-            elif save_feat_imp:
-                print("Warning: Requested to save feature importances, but model does not support 'estimators_'. Skipping feature importance export.")
-            print(f"[{timestamp}] Experiment complete.")
+    # ----------------------------------------------------------------------
+    # Aggregate results and create one global learning curve
+    # ----------------------------------------------------------------------
+    if results:
+        metric_structure = results[0]["metrics"]
+        summary = {"n_folds_completed": len(results), "fold_details": results}
+        for mtype in metric_structure:
+            means, stds = {}, {}
+            for mname in metric_structure[mtype]:
+                vals = [
+                    r["metrics"][mtype][mname]
+                    for r in results
+                    if not isinstance(r["metrics"][mtype][mname], dict)
+                ]
+                if vals:
+                    means[mname] = float(np.mean(vals))
+                    stds[mname] = float(np.std(vals))
+            summary[f"{mtype}_mean"] = means
+            summary[f"{mtype}_std"] = stds
 
-        finally:
-            sys.stdout = original_stdout
-            print(f"Logged output to {log_path}")
+        out_json = Path(experiment_dir) / "cv_results.json"
+        out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        logger.info(f"[cv] Results saved to {out_json}")
+
+        # ---- Final Learning Curve ----
+        try:
+            logger.info("[cv] Running global learning curve on full dataset...")
+            full_ds = load_dataset_from_manifest(
+                manifest["stem"].tolist(), manifest, exp_cfg["data"]["label_bands"]
+            )
+            X_full, y_full, _ = flatten_dataset_from_tuples(
+                full_ds, pixels_per_image=exp_cfg["data"]["pixels_per_image"]
+            )
+            y_full = y_full[:, 1]  # irrigation label
+            best_model = train_model(
+                X_full,
+                y_full,
+                model_type=exp_cfg["model"]["type"],
+                **exp_cfg["model"]["hyperparameters"]["random_forest"],
+            )
+            plot_final_learning_curve(X_full, y_full, best_model, experiment_dir)
+        except Exception as e:
+            logger.warning(f"[cv] Failed to generate final learning curve: {e}")
+
+    else:
+        logger.error("[cv] No folds completed successfully.")
+
+
+# -------------------------------------------------------------------------
+# Entry point
+# -------------------------------------------------------------------------
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="Irrigation ML runner with SMOTE+RF baseline and full metrics.")
+    ap.add_argument(
+        "--config",
+        type=str,
+        default="src/modeling/experiment.yaml",
+        help="Path to the experiment YAML config file",
+    )
+    args = ap.parse_args()
+
+    exp_cfg = load_experiment(args.config)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_name = f"{exp_cfg['name']}_{timestamp}"
+    out_root = resolve_path(exp_cfg["output"]["base_dir"])
+    run_dir = os.path.join(out_root, run_name)
+    os.makedirs(run_dir, exist_ok=True)
+
+    cfg_path = resolve_config_path(args.config)
+    shutil.copyfile(cfg_path, os.path.join(run_dir, "experiment.yaml"))
+
+    fh = logging.FileHandler(os.path.join(run_dir, "run.log"), encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(fh)
+
+    logger.info("=" * 80)
+    logger.info(f"Starting experiment: {exp_cfg['name']}")
+    logger.info(f"Output directory: {run_dir}")
+    logger.info(f"Configuration: {cfg_path}")
+    logger.info("=" * 80)
+
+    try:
+        run_cv_experiment(exp_cfg, run_dir)
+        logger.info("=" * 80)
+        logger.info("[SUCCESS] Experiment completed successfully")
+        logger.info(f"Results saved to: {run_dir}")
+        logger.info("=" * 80)
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error(f"[FAILED] Experiment failed with error: {e}")
+        logger.error("=" * 80)
+        raise
+    finally:
+        logger.removeHandler(fh)
+        fh.close()
+
 
 
 if __name__ == "__main__":
-    config_path = "experiment.yaml"
-    experiments = load_experiment(config_path)
-    if isinstance(experiments, list):
-        for exp_cfg in experiments:
-            run_experiment(exp_cfg, config_path)
-    else:
-        run_experiment(experiments, config_path)
+    main()

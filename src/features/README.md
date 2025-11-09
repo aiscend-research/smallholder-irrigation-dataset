@@ -208,7 +208,7 @@ The per-window GeoTIFFs live in GCS; we then build fixed-length local stacks:
 
 ## Creating Pixel-Level Labels
 
-For each Sentinel-2 image, we classify each pixel as irrigated or not. For irrigated pixels, we also specify the type of irrigation, the labeler's level of certainty, and reasons for any uncertainty. To do this, we overlay labeled polygons on an eight-band `.tif` file, with the following bands.
+For each Sentinel-2 image, we classify each pixel as irrigated or not. For irrigated pixels, we also specify the type of irrigation, the labeler's level of certainty, and reasons for any uncertainty. To do this, we overlay labeled polygons on an eight-band `.tif` file, with the following bands. For mixed pixels, the label is given to the class that is in the center of the pixel. 
 
 <img src="readme_figures/band_table.png" alt="table showing band information" width="600" />
 
