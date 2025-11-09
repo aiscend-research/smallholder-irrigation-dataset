@@ -368,11 +368,16 @@ def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str,
         return None, None
 
 # client helpers
-def get_dense_time_windows(center_date: datetime):
+def get_dense_time_windows(center_date: datetime, start_january=False):
     window = timedelta(days=10)
     total  = NUM_WINDOWS
     half   = timedelta(days=5)
     start  = center_date - (total // 2) * window - half
+
+    # Set start to January 1st
+    if start_january:
+        start = datetime(center_date.year, 1, 1)
+
     return [(start + i * window, start + (i + 1) * window) for i in range(total)]
 
 def calculate_indices(img10: np.ndarray):
@@ -398,7 +403,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     if REQUIRE_VERSION_TAG and (VERSION_TAG is None or VERSION_TAG.strip() == ""):
         raise RuntimeError("VERSION_TAG must be set (bump it for each full run).")
 
-    windows = get_dense_time_windows(date)
+    windows = get_dense_time_windows(date, start_january=True)
     region = get_ee_bounding_box(lat, lon)
 
     # submit & download per window via HTTP
