@@ -16,7 +16,13 @@
       - [Atmospheric Correction](#atmospheric-correction)
       - [Retrieved Bands](#retrieved-bands)
       - [Handling Missing and Invalid Data](#handling-missing-and-invalid-data)
+    - [Data Quality Assessment and Visualization](#data-quality-assessment-and-visualization)
+      - [RGB Images Before Cloud Masking](#rgb-images-before-cloud-masking)
+      - [RGB Images After Cloud Masking](#rgb-images-after-cloud-masking)
+      - [NDVI Before Cloud Masking](#ndvi-before-cloud-masking)
+      - [NDVI After Cloud Masking](#ndvi-after-cloud-masking)
     - [Stacking and Output](#stacking-and-output)
+    - [Running the Download](#running-the-download)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
@@ -100,6 +106,8 @@ The middle window contains the labeled date.
 ![time window graphic](./readme_figures/time_window.png)
 
 Each window selects one Sentinel-2 scene with the lowest cloud fraction inside the 100×100 region (no pixel-level mosaic within the window).
+
+Optionally, set `START_JANUARY` to `True` in `download_sentinel2_mosaics.py` so that all time series begin on January 1st of the year of the image.
 
 ### Sentinel-2 Mosaic Retrieval
 
@@ -205,6 +213,18 @@ The per-window GeoTIFFs live in GCS; we then build fixed-length local stacks:
 - `data/features/{uid}_{site}_{YYYY.MM.DD}_label.tif` – AFTER stack (masked scene + indices)
 - `data/features/{uid}_{site}_{YYYY.MM.DD}_image.json` – metadata per step (cloud fraction, mean NDVI/EVI/NDWI, etc.)
 - `data/features/{uid}_{site}_{YYYY.MM.DD}_label.json` – same fields for AFTER
+
+### Running the Download
+Using a single CPU, the dataset takes a little over a day to download. To run this on the HPC, create a `.sh` file in `src/features` with your desired headers & the commands below:
+
+```shell
+source ../../env/bin/activate
+
+## run python 
+python3 download_sentinel2_mosaics.py
+```
+
+Then use the [Slurm job scheduler](https://slurm.schedmd.com/sbatch.html) to schedule the download.
 
 ## Creating Pixel-Level Labels
 
