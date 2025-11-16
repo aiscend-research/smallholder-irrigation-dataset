@@ -272,3 +272,5 @@ To run tests for this script, run the following command from this directory:
 ```{bash}
 python -m unittest tests/test_create_label_band.py
 ```
+
+Note: Downloaded label TIFs are located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/dataset/labels`
