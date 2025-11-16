@@ -66,7 +66,7 @@ Params:
     - rgb (np.array): A numpy array of RGB values for the satellite image.
     - img_id (int): The unique ID of this label/image pair.
 '''
-def visualize(labels, rgb, img_id):
+def visualize(labels, rgb, ndvi, img_id):
     # Define discrete colormap for class values (e.g., 0–5)
     colors = ['black', 'blue', 'green', 'yellow', 'orange', 'red']
     cmap = ListedColormap(colors)
@@ -89,6 +89,7 @@ def visualize(labels, rgb, img_id):
     # Plot each band
     fig.suptitle(f"Satellite Image with Label Overlays (id {img_id})", fontsize=18, x=0.6, va='center')
 
+    # Plots labels on RGB
     for i in range(8):
         ax = axes[i]
         ax.imshow(rgb)  # draw satellite background
@@ -129,13 +130,70 @@ def visualize(labels, rgb, img_id):
         mappable = ScalarMappable(norm=Normalize(vmin=0, vmax=len_colors - 1), cmap=cmap)
         cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04, ticks=range(len_colors))
 
-        ax.set_title(f'Band {i+1} ({band_dict[i+1]})')
+        ax.set_title(f'Label Band {i+1} ({band_dict[i+1]})')
         ax.axis('off')
 
         plt.tight_layout()
 
         # Create visualizations directory if it doesn't already exist
         png_path = f"data/visualizations/{img_id}_label_visualization.png"
+        os.makedirs(os.path.dirname(png_path), exist_ok=True)
+        plt.savefig(png_path)
+
+    fig, axes = plt.subplots(4, 2, figsize=(10, 16))  # Width x Height in inches
+    axes = axes.flatten()
+
+    # Plot each band
+    fig.suptitle(f"Satellite NDVI with Label Overlays (id {img_id})", fontsize=18, x=0.6, va='center')
+
+    # Plots labels on NDVI
+    for i in range(8):
+        ax = axes[i]
+        ax.imshow(ndvi, cmap="RdYlGn", vmin=-1, vmax=1)  # draw NDVI background
+
+        label_band = labels[i]
+        masked_label = np.ma.masked_where(label_band == 0, label_band)
+        len_colors = len(colors) if i == 7 or i == 0 else 2
+
+        cmap = ListedColormap(colors[:len_colors])
+        im = ax.imshow(masked_label, cmap=cmap, vmin=0, vmax=len_colors - 1, alpha=0)
+
+        # --- Draw outlines around labeled regions, colored by dominant pixel value ---
+        contours = measure.find_contours(label_band, level=0.5)
+
+        for contour in contours:
+            path = Path(contour)
+
+            # Get all pixel coordinates
+            y, x = np.mgrid[0:label_band.shape[0], 0:label_band.shape[1]]
+            coords = np.vstack((y.flatten(), x.flatten())).T
+
+            # Find pixels inside the contour
+            inside = path.contains_points(coords).reshape(label_band.shape)
+            vals_inside = label_band[inside]
+            vals_inside = vals_inside[vals_inside > 0]
+            if len(vals_inside) == 0:
+                continue
+
+            # Find the most common class (dominant value)
+            cls = np.bincount(vals_inside.astype(int)).argmax()
+
+            # Get corresponding color from cmap
+            color = cmap(cls / (len_colors - 1))[:3]
+
+            # Draw the outline with that color
+            ax.plot(contour[:, 1], contour[:, 0], color=color, linewidth=1.5)
+
+        mappable = ScalarMappable(norm=Normalize(vmin=0, vmax=len_colors - 1), cmap=cmap)
+        cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04, ticks=range(len_colors))
+
+        ax.set_title(f'Label Band {i+1} ({band_dict[i+1]})')
+        ax.axis('off')
+
+        plt.tight_layout()
+
+        # Create visualizations directory if it doesn't already exist
+        png_path = f"data/visualizations/{img_id}_label_visualization_ndvi.png"
         os.makedirs(os.path.dirname(png_path), exist_ok=True)
         plt.savefig(png_path)
 
@@ -150,23 +208,20 @@ Params:
 Returns:
     - image (np.array): The label TIF image as a numpy array.
     - rgb (np.array): The RGB values of the satellite image as an array
+    - ndvi (np.array): The NDVI values of the satellite image as an array
 '''
 def retrieve_images(label_path, sat_image_path, uid):
     sat_img = None
     with rasterio.open(sat_image_path) as src:
-        sat_img = src.read([1, 2, 3])  # Read RGB bands
+        sat_img = src.read(list(range(1, 11)))  # Read RGB & NDVI bands
 
     r = _stretch_01(sat_img[2])
     g = _stretch_01(sat_img[0])
     b = _stretch_01(sat_img[1])
+    ndvi = retrieve_ndvi(sat_img)
 
     rgb = np.stack([r, g, b], axis=-1)  # (H,W,3)
     rgb = np.where(np.isnan(rgb), 1, rgb)  # Replace NaNs with 1 (white) for visualization
-
-    # Print percentage of NaN pixels
-    nan_percentage = np.isnan(rgb).any(axis=-1).mean() * 100
-    if nan_percentage >= 80.0:
-        print(f"ID {uid} has satellite image with more than 80% NO_DATA")
 
     # Load TIF file
     with tifffile.TiffFile(label_path) as tif:
@@ -176,8 +231,28 @@ def retrieve_images(label_path, sat_image_path, uid):
     if image.shape[-1] == 8:
         image = np.transpose(image, (2, 0, 1))
 
-    return image, rgb
+    return image, rgb, ndvi
 
+def retrieve_ndvi(sat_img):
+    # NEED TO CALCULATE NDVI -> NOT SAVED IN THE RAW IMAGES...
+    # RAW IMAGE BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12', 'SCL']
+    def m(a_int):
+        return np.ma.masked_equal(a_int, -9999).astype(np.float32) / 10000.0
+    
+    B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12 = [m(b) for b in sat_img[:10]]
+    ndvi = (B8 - B4) / (B8 + B4)
+    def to_int16(ma):
+        ma = np.ma.clip(ma, -1.0, 1.0)
+        out = np.full(ma.shape, -9999, dtype=np.int16)
+        valid = ~np.ma.getmaskarray(ma)
+        out[valid] = (ma[valid] * 10000.0).astype(np.int16)
+        return out
+
+    ndvi = to_int16(ndvi)
+    ndvi = ndvi.astype(np.float32) / 10000.0
+    ndvi[ndvi == -9999] = np.nan
+    return ndvi
+    
 '''
 Given a unique ID of an labelled image, searches for and returns the label TIF file and 
 corresponding satellite image in the data directory. Throws FileNotFoundError if no 
@@ -281,5 +356,5 @@ if __name__ == "__main__":
         label_path, sat_path = arr
         label_path = label_path
         sat_path = sat_path
-        labels, rgb = retrieve_images(label_path, sat_path, img_id)
-        visualize(labels, rgb, img_id)
+        labels, rgb, ndvi = retrieve_images(label_path, sat_path, img_id)
+        visualize(labels, rgb, ndvi, img_id)
