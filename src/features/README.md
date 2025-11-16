@@ -259,6 +259,8 @@ The script will then create a folder `~/data/dataset/labels` containing all labe
 -  `date` is the date of the image (format `YYYY.MM.DD`)
 -  `labeler` is the labeler's initials
 
+`create_label_band.py` assumes that all the features have been downloaded to the data root, at `features_v2`. This is necessary as it uses the downloaded features to ensure geospatial alignment between features and labels.
+
 To run this script, navigate to the `src` directory and run
 
 ```{bash}
