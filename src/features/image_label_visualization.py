@@ -52,7 +52,7 @@ def _stretch_01(channel_int, p_lo=2, p_hi=98):
     else:
         out = (ch - lo) / (hi - lo)
         out = np.clip(out, 0.0, 1.0)
-    out[mask] = 1
+    out[mask] = np.nan
     return out
 
 '''
@@ -151,7 +151,7 @@ Returns:
     - image (np.array): The label TIF image as a numpy array.
     - rgb (np.array): The RGB values of the satellite image as an array
 '''
-def retrieve_images(label_path, sat_image_path):
+def retrieve_images(label_path, sat_image_path, uid):
     sat_img = None
     with rasterio.open(sat_image_path) as src:
         sat_img = src.read([1, 2, 3])  # Read RGB bands
@@ -161,7 +161,12 @@ def retrieve_images(label_path, sat_image_path):
     b = _stretch_01(sat_img[1])
 
     rgb = np.stack([r, g, b], axis=-1)  # (H,W,3)
-    rgb = np.where(np.isnan(rgb), 0, rgb)  # Replace NaNs with 0 for visualization
+    rgb = np.where(np.isnan(rgb), 1, rgb)  # Replace NaNs with 1 (white) for visualization
+
+    # Print percentage of NaN pixels
+    nan_percentage = np.isnan(rgb).any(axis=-1).mean() * 100
+    if nan_percentage >= 80.0:
+        print(f"ID {uid} has satellite image with more than 80% NO_DATA")
 
     # Load TIF file
     with tifffile.TiffFile(label_path) as tif:
@@ -264,7 +269,7 @@ def select_uids(n=10, irrigation=True, certainty_thresh=1):
             table = table[table['irrigation'] > certainty_thresh]
     
     # Randomly select n uids
-    uids = table['unique_id'].sample(n=n, random_state=42).tolist()
+    uids = table['unique_id'].sample(n=n).tolist()
     return uids
 
 if __name__ == "__main__":
@@ -276,5 +281,5 @@ if __name__ == "__main__":
         label_path, sat_path = arr
         label_path = label_path
         sat_path = sat_path
-        labels, rgb = retrieve_images(label_path, sat_path)
+        labels, rgb = retrieve_images(label_path, sat_path, img_id)
         visualize(labels, rgb, img_id)
