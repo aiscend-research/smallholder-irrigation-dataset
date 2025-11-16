@@ -59,6 +59,7 @@ MAX_IN_FLIGHT_EXPORTS = int(os.environ.get("MAX_IN_FLIGHT_EXPORTS", "10"))
 
 NO_DATA     = -9999
 NUM_WINDOWS = 37
+START_JANUARY = True # True to start time series on January 1st, False to center time series around image date
 
 # 10 reflectance bands to keep
 BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12']
@@ -403,7 +404,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     if REQUIRE_VERSION_TAG and (VERSION_TAG is None or VERSION_TAG.strip() == ""):
         raise RuntimeError("VERSION_TAG must be set (bump it for each full run).")
 
-    windows = get_dense_time_windows(date, start_january=True)
+    windows = get_dense_time_windows(date, start_january=START_JANUARY)
     region = get_ee_bounding_box(lat, lon)
 
     # submit & download per window via HTTP
