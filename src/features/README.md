@@ -23,6 +23,7 @@
       - [NDVI After Cloud Masking](#ndvi-after-cloud-masking)
     - [Stacking and Output](#stacking-and-output)
     - [Running the Download](#running-the-download)
+    - [Dataset Location](#dataset-location)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
@@ -225,6 +226,22 @@ python3 download_sentinel2_mosaics.py
 ```
 
 Then use the [Slurm job scheduler](https://slurm.schedmd.com/sbatch.html) to schedule the download.
+
+### Dataset Location
+The dataset is located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/`. There are three versions: 
+
+|Folder Name|Date Downloaded|
+|-----------|-----------|
+|features|August 5th, 2025|
+|features_v2|October 12, 2025|
+|features_v3|November 9, 2025|
+
+A note on the differences between versions:
+- `features` downloaded everything locally and also to the Google Cloud Bucket, which made the download speed exponentially slower (took around a week to download all sites)
+- `features_v2` downloads everything locally (bypassing Google Cloud Bucket), which makes downloading a lot easier. It takes a little less than a 1 minute to download each row of `latest_irrigation_table.csv`, whereas it took approximately 15 minutes in the previous download.
+  - Modifications were made to `latest_irrigation_table.csv` between downloads, so the IDs in `features` do not match with those in `features_v2`
+- `features` has some issues with the cloud masking in which a lot of images were mostly blank, save a few small patches of colored pixels. Some updates to improve the cloud masking in `features_v2`. Also, images more than 80% blank are dropped in `features_v2`, whereas they were kept in `features`
+- `features_v3` uses the same download logic as `features_v2`, except all time windows begin on January 1st.
 
 ## Creating Pixel-Level Labels
 
