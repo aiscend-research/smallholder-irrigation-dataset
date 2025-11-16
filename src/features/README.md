@@ -174,6 +174,14 @@ For a particular window, data may be missing (if there is no satellite imagery w
 
 The downloaded time series data can be visualized and analyzed for quality assessment using the provided visualization tools. These tools help researchers understand temporal patterns, data coverage, and seasonal variations in the satellite imagery.
 
+`visualize_tif.py` is used to visualize an image of a specific ID. After downloading that image to the data root, to visualize it:
+
+```shell
+python3 visualize_tif.py {uid_of_image_to_visualize}
+```
+
+Visualizations of RGB/NDVI before and after masking are downloaded to the data root, under `features/visualization`.  
+
 #### RGB Images Before Cloud Masking
 Shows the raw Sentinel-2 RGB composite (B4=Red, B3=Green, B2=Blue) before cloud masking is applied:
 
