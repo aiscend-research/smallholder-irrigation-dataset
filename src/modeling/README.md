@@ -1,12 +1,12 @@
 ## Overview
 
-This folder contains a **machine learning pipeline for running experiments on multi-temporal Sentinel-2 satellite imagery** for irrigation classification. The pipeline is built for a specific dataset structure—each sample consists of a `.tif` image file, a corresponding `.tif` mask file, and `.json` metadata files, with support for spatial-aware data splitting and 8-band irrigation label structure.
+This folder contains a **machine learning pipeline for running experiments on multi-temporal Sentinel-2 satellite imagery** for irrigation classification. The pipeline is built for a specific dataset structure—each sample consists of a `.tif` image file, a corresponding `.tif` mask file, and a `.json` metadata file, with support for spatial-aware data splitting and 8-band irrigation label structure.
 
 ---
 
 ## Dataset Structure
 
-- **Images:** Each `.tif` image contains 14 spectral bands × 37 time steps (total 518 bands per sample). Can be adjusted as needed.
+- **Images:** Each `.tif` image contains 14 spectral bands × 37 time steps (total 518 bands per sample).
 - **Masks:** Each `.tif` mask contains 8 bands representing different irrigation classification targets.
 - **Metadata:** Each `.json` file contains location and temporal information.
 - **File Naming:** Consistent convention `{unique_id}_{site_id}_{date}_{type}.tif`
@@ -19,7 +19,7 @@ This folder contains a **machine learning pipeline for running experiments on mu
 
 Example layout:
 ```
-training_data/
+data/modeling/
 ├── 1_5168346_2023.09.06_image.tif
 ├── 1_5168346_2023.09.06_label.tif
 ├── 1_5168346_2023.09.06_image.json
@@ -32,6 +32,7 @@ training_data/
 
 ```
 ├── run_experiment.py          # Main experiment runner (config-driven)
+├── final_test.py              # (WIP) Test a final/best model
 ├── experiment.yaml            # Config file for experiments
 ├── custom_dataset.py          # PyTorch Dataset for multi-temporal Sentinel-2 data
 ├── ml_pipeline/               # Core ML pipeline
@@ -46,7 +47,7 @@ training_data/
 
 ### Core Components
 - **custom_dataset.py:**  
-  Loads `.tif` image/mask files, reshapes to (14, 37, H, W) for images, (8, H, W) for masks. Supports band and time selection and metadata extraction.
+  Loads `.tif` image/mask files, reshapes to (14, 37, H, W) for images, (8, H, W) for masks. Supports band selection and metadata extraction.
 
 - **data_splitting.py:**  
   `IrrigationDataSplitter` class for spatial-aware data splitting with stratified sampling. Prevents spatial data leakage by grouping at the site level. Supports both one-shot train/val/test splits and K-fold cross-validation with held-out test sets.
@@ -59,10 +60,10 @@ training_data/
   Model training (Random Forest, Gradient Boosting) and inference. Supports multi-label (multi-band) targets.
 
 - **evaluation.py:**  
-This file provides evaluation utilities for smallholder irrigation models, including pixel-level metrics, image-level summaries, and detailed breakdowns by metadata factors. It also supports visualizing feature importances across bands and timesteps.
+  Reports per-band accuracy and F1 scores for irrigation classification.
 
 - **visualization.py:**  
-Plots model predictions and ground truth masks for selected samples.
+  Plots model predictions and ground truth masks for selected samples.
 
 ### Experiment Runner
 - **run_experiment.py:**  
@@ -136,7 +137,7 @@ data/modeling/splits/
 
 ## Usage Notes
 
-- `-9999` in images is treated as invalid/masked pixels and are ignored.
+- `-9999` in images and `-1` in masks are treated as invalid/masked pixels and are ignored.
 - Georeferencing is not required for ML (Rasterio warnings are safe to ignore).
 
 ## Best Practices

@@ -1,8 +1,10 @@
+import seaborn as sns
 from sklearn.metrics import confusion_matrix
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
+from tqdm import tqdm
 
 MASK_CLASS_NAMES = [["No irrigation", "Small-scale", "Tree crop", "Industrial", "Lawn", "Covered"], ["No irrigation", "Irrigation"]]
 MASK_COLORS = [["#cccccc", "#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd", "#d62728"], ["#cccccc", "#1f77b4"]]
