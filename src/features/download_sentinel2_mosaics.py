@@ -247,6 +247,36 @@ def build_weighted_scl(raw_toa: ee.Image,
 
 # per-window export
 def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, file_name: str, out_dir: str, collection: str = "L1C"):
+    """
+    Download the best quality Sentinel-2 image for a location and time window.
+    
+    Retrieves a 1km × 1km (100×100 pixels at 10m resolution) Sentinel-2 image centered 
+    on the given coordinates, selecting the image with maximum good-quality pixel coverage
+    after applying collection-specific quality filtering.
+    
+    Quality Masking Strategy:
+        - L2A: Uses Scene Classification Layer (SCL) to mask clouds (classes 8,9,10), 
+          cloud shadows (class 3), saturated pixels (class 1), and no data (class 0).
+          Keeps vegetation, bare soil, water, unclassified, and snow pixels.
+        
+        - L1C: Uses QA60 band to identify clouds (bit 10) and cirrus (bit 11).
+          Pre-filters to exclude ANY image containing opaque clouds in the region
+          (to avoid undetectable cloud shadows), then masks remaining cirrus pixels.
+    
+    Args:
+        lat: Latitude of region center (WGS84 decimal degrees)
+        lon: Longitude of region center (WGS84 decimal degrees)
+        start_date: Start of date range in 'YYYY-MM-DD' format
+        end_date: End of date range in 'YYYY-MM-DD' format
+        file_name: Output filename (e.g., 's2_image.tif')
+        out_dir: Directory path where file will be saved (created if doesn't exist)
+        collection: Either 'L1C' (Top-of-Atmosphere) or 'L2A' (Surface Reflectance).
+                   Default is 'L1C'.
+
+    Returns:
+        None: Always returns None. Check logs for success/failure status.
+        Output file is saved to {out_dir}/{file_name} if successful.
+    """
 
     # Define region and date range
     start_date, end_date = ee.Date(start_date), ee.Date(end_date)
@@ -306,7 +336,7 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     # Note if you found no images
     if col.size().getInfo() == 0:
         logging.warning(f"No images found for {lat},{lon} between {start_date} and {end_date}")
-        return None, None
+        return None
 
     # Score and pick best
     def score_image(img):
@@ -327,6 +357,7 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
 
     # HTTP download locally
     if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
+    output_path = os.path.join(out_dir, file_name)
 
     # save image
     url = masked.getDownloadURL({
@@ -336,11 +367,14 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     })
 
     try:
-        resp = requests.get(url); resp.raise_for_status()
-        with open(f"{out_dir}/{file_name}", 'wb') as f: f.write(resp.content)
+        resp = requests.get(url)
+        resp.raise_for_status()
+        with open(output_path, 'wb') as f: f.write(resp.content)
+        logging.info(f"Successfully downloaded: {output_path}")
+        return None
     except Exception as e:
         logging.error(f"Failed to download masked image for {file_name}: {e}")
-        return None, None
+        return None
 
 # client helpers
 def get_dense_time_windows(center_date: datetime, start_january=False):
