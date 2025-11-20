@@ -114,25 +114,6 @@ def initialize_earthengine():
     logging.info("Earth Engine initialized.")
 
 # helpers
-def _site_root_prefix(site_id: str) -> str:
-    p = f"{EXPORT_ROOT}/{site_id}" if EXPORT_ROOT else site_id
-    return f"{VERSION_TAG}/{p}" if VERSION_TAG else p
-
-def gcs_prefix_exists(prefix: str) -> bool:
-    try:
-        return len(fs.ls(f"{bucket}/{prefix}")) > 0
-    except Exception:
-        return False
-
-def gcs_delete_tree(prefix: str):
-    try:
-        fs.rm(f"{bucket}/{prefix}", recursive=True)
-    except FileNotFoundError:
-        pass
-
-def sanitize_description(desc: str) -> str:
-    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;_-")
-    return ''.join([c if c in allowed else '_' for c in desc])[:95]
 
 def _utm_epsg_from_latlon(lat: float, lon: float) -> str:
     zone = int((lon + 180) // 6) + 1
