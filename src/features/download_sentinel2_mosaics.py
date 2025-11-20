@@ -246,7 +246,7 @@ def build_weighted_scl(raw_toa: ee.Image,
     return scl.toUint16()
 
 # per-window export
-def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, collection: str, prefix_base: str, out_dir: str):
+def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, file_name: str, out_dir: str, collection: str = "L1C"):
 
     # Define region and date range
     start_date, end_date = ee.Date(start_date), ee.Date(end_date)
@@ -254,70 +254,92 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, co
     point = ee.Geometry.Point([lon, lat])
     region = point.buffer(500).bounds()
 
-    # For L2A data, pick the least cloudy image and mask out poor quality pixels using SCL (scene classification) band. 
-    # For L1C data, due to no SCL and only QA60, 
-    # only images with less than 5% cloud coverage and mask out remaining up to 5% cloud coverage. 
-    # Also apply atmospheric correction to the image.
+    # Retieve the best image for the given collection and date range, masking out poor quality pixels. 
+
+    # For L2A data, pick the least cloudy image 
+    # and mask out poor quality pixels (cloud shadows, clouds, cirrus, reflectance saturation) using SCL (scene classification) band. 
+    # For L1C data, there is no SCL so we only know where there are clouds and cirrus pixels using QA60.
+    # Therefore, we not only choose the image with the fewest poor quality pixels,
+    # but we first toss any image with any opaque clouds present at all
 
     assert collection in ["L1C", "L2A"]
 
     if collection == "L2A":
-
-        best = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        col = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(region)
-            .filterDate(start_date, end_date)
-            .sort('CLOUDY_PIXEL_PERCENTAGE')
-            .first())
+            .filterDate(start_date, end_date))
         
-        scl = best.select('SCL')
-        
-        # Mask: no data (0), saturated (1), cloud shadows (3), 
-        #       clouds medium/high (8,9), cirrus (10)
-        # Keep: vegetation (4), bare soil (5), water (6), snow (11 - optional)
-        good_pixels = (scl.eq(4)    # vegetation
-                    .Or(scl.eq(5))  # bare soil
-                    .Or(scl.eq(6))  # water
-                    .Or(scl.eq(7))  # unclassified (can be good)
-                    .Or(scl.eq(11))  # snow
-                    )
-
-        masked = best.updateMask(good_pixels).select(BANDS)
+        # Define quality mask for L2A
+        def get_quality_mask(img):
+            scl = img.select('SCL')
+            return scl.eq(4).Or(scl.eq(5)).Or(scl.eq(6)).Or(scl.eq(7)).Or(scl.eq(11)) # vegetation, bare soil, water, unclassified, snow
 
     elif collection == "L1C":
-        best = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-                .filterBounds(region)
-                .filterDate(start_date, end_date)
-                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
-                .sort('CLOUDY_PIXEL_PERCENTAGE')
-                .first())
+        col = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+            .filterBounds(region)
+            .filterDate(start_date, end_date))
 
-        qa60 = best.select('QA60')
-        mask = qa60.bitwiseAnd(1 << 10).Or(qa60.bitwiseAnd(1 << 11)).Not()  # not cloud/cirrus
-        masked = best.updateMask(mask)
+        # Additional step for L1C:
+        # Remove any images that have any clouds at all, 
+        # since we have no way of knowing which pixels have cloud shadow
+        def check_clouds(img):
+            qa60 = img.select('QA60')
+            clouds = qa60.bitwiseAnd(1 << 10).neq(0)  # Only opaque clouds (bit 10)
+            
+            cloud_pixels = clouds.reduceRegion(
+                reducer=ee.Reducer.sum(),
+                geometry=region,
+                scale=60,
+                maxPixels=1e8
+            ).values().get(0)
+            
+            return img.set('has_clouds', ee.Number(cloud_pixels).gt(0))
+        
+        col = col.map(check_clouds).filter(ee.Filter.eq('has_clouds', False))
+        
+        # Define quality mask for L1C
+        def get_quality_mask(img):
+            qa60 = img.select('QA60')
+            return qa60.bitwiseAnd(1 << 10).Or(qa60.bitwiseAnd(1 << 11)).Not() # not cloud or cirrus
+
+    # Common code for both
+    # Note if you found no images
+    if col.size().getInfo() == 0:
+        logging.warning(f"No images found for {lat},{lon} between {start_date} and {end_date}")
+        return None, None
+
+    # Score and pick best
+    def score_image(img):
+        quality_mask = get_quality_mask(img)
+        good_count = quality_mask.reduceRegion(
+            reducer=ee.Reducer.sum(),
+            geometry=region,
+            scale=60,
+            maxPixels=1e8
+        ).values().get(0)
+        return img.set('good_pixel_count', good_count)
+
+    best = col.map(score_image).sort('good_pixel_count', False).first()
+
+    # Apply mask
+    quality_mask = get_quality_mask(best)
+    masked = best.updateMask(quality_mask).select(BANDS)
 
     # HTTP download locally
     if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
 
-    un_file = f"{out_dir}/{prefix_base.split('/')[-1]}.tif"
-    url_un = unmasked_img.getDownloadURL({
-        'region': region, 'scale': 10, 'crs': _utm_epsg_from_latlon(lat, lon), 'format': 'GeoTIFF'
+    # save image
+    url = masked.getDownloadURL({
+        'region': region, 
+        'scale': 10, 
+        'format': 'GeoTIFF'
     })
-    try:
-        resp = requests.get(url_un); resp.raise_for_status()
-        with open(un_file, 'wb') as f: f.write(resp.content)
-    except Exception as e:
-        logging.error(f"Failed to download unmasked image for {prefix_base}: {e}")
-        return None, None
 
-    ms_file = f"{out_dir}/{prefix_base.split('/')[-1]}_masked.tif"
-    url_ms = masked_img.getDownloadURL({
-        'region': region, 'scale': 10, 'crs': _utm_epsg_from_latlon(lat, lon), 'format': 'GeoTIFF'
-    })
     try:
-        resp = requests.get(url_ms); resp.raise_for_status()
-        with open(ms_file, 'wb') as f: f.write(resp.content)
+        resp = requests.get(url); resp.raise_for_status()
+        with open(f"{out_dir}/{file_name}", 'wb') as f: f.write(resp.content)
     except Exception as e:
-        logging.error(f"Failed to download masked image for {prefix_base}: {e}")
+        logging.error(f"Failed to download masked image for {file_name}: {e}")
         return None, None
 
 # client helpers
@@ -364,12 +386,10 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
         futures = []
         for start, end in windows:
             s, e = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
-            base = f"{site_id}/s2_{lat:.2f}_{lon:.2f}_{s}_{e}"
-            un_path = os.path.join(TMP_DIR, f"{base}.tif")
-            ms_path = os.path.join(TMP_DIR, f"{base}_masked.tif")
-            if not (os.path.exists(un_path) and os.path.exists(ms_path)):
-                futures.append(executor.submit(s2_image_exporter, lat, lon, s, e, base, region,
-                                               os.path.join(TMP_DIR, site_id)))
+            out_dir = os.path.join(TMP_DIR, site_id)
+            file_name = f"s2_{lat:.2f}_{lon:.2f}_{s}_{e}_masked"
+            if not os.path.exists(os.path.join(out_dir, file_name)):
+                futures.append(executor.submit(s2_image_exporter, lat, lon, s, e, file_name, out_dir))
         for fut in as_completed(futures):
             try:
                 fut.result()
