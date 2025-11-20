@@ -256,73 +256,59 @@ def build_weighted_scl(raw_toa: ee.Image,
     return scl.toUint16()
 
 # per-window export
-def export_window_best(lat: float, lon: float, s: str, e: str, prefix_base: str, region: ee.Geometry, out_dir: str):
-    start_ee, end_ee = ee.Date(s), ee.Date(e)
+def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, collection: str, prefix_base: str, out_dir: str):
 
-    l1c_col = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-               .filterBounds(region)
-               .filterDate(start_ee, end_ee))
-    if l1c_col.size().getInfo() == 0:
-        logging.warning(f"[FALLBACK] No images for {lat},{lon} between {s} and {e}")
-        return None, None
+    # Define region and date range
+    start_date, end_date = ee.Date(start_date), ee.Date(end_date)
 
-    prob_col = (ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
-                .filterBounds(region).filterDate(start_ee, end_ee))
+    point = ee.Geometry.Point([lon, lat])
+    region = point.buffer(500).bounds()
 
-    # fetch and join SR SCL
-    if USE_SR_SCL_SHADOW:
-        sr_col = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                  .filterBounds(region).filterDate(start_ee, end_ee)
-                  .select(['SCL']))
-    else:
-        sr_col = ee.ImageCollection([])
+    # For L2A data, pick the least cloudy image and mask out poor quality pixels using SCL (scene classification) band. 
+    # For L1C data, due to no SCL and only QA60, 
+    # only images with less than 5% cloud coverage and mask out remaining up to 5% cloud coverage. 
+    # Also apply atmospheric correction to the image.
 
-    col = _attach_s2cloudless_prob(l1c_col, prob_col)
-    col = _attach_sr_scl(col, sr_col)
+    assert collection in ["L1C", "L2A"]
 
-    def per_image(img):
-        img = ee.Image(img)
-        raw_toa = ensure_all_bands(img).select(BANDS)
+    if collection == "L2A":
 
-        if USE_QA60_IN_MASK:
-            qa60 = img.select('QA60')
-            qa_cloud  = qa60.bitwiseAnd(1 << 10).neq(0)
-            qa_cirrus = qa60.bitwiseAnd(1 << 11).neq(0)
-        else:
-            qa_cloud  = ee.Image(0)
-            qa_cirrus = ee.Image(0)
+        best = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterBounds(region)
+            .filterDate(start_date, end_date)
+            .sort('CLOUDY_PIXEL_PERCENTAGE')
+            .first())
+        
+        scl = best.select('SCL')
+        
+        # Mask: no data (0), saturated (1), cloud shadows (3), 
+        #       clouds medium/high (8,9), cirrus (10)
+        # Keep: vegetation (4), bare soil (5), water (6), snow (11 - optional)
+        good_pixels = (scl.eq(4)    # vegetation
+                    .Or(scl.eq(5))  # bare soil
+                    .Or(scl.eq(6))  # water
+                    .Or(scl.eq(7))  # unclassified (can be good)
+                    .Or(scl.eq(11))  # snow
+                    )
 
-        prob = img.select('S2CLOUDLESS')
-        scl  = build_weighted_scl(raw_toa, prob, qa_cloud, qa_cirrus, region)
+        masked = best.updateMask(good_pixels).select(BANDS)
 
-        # SR shadow union
-        if USE_SR_SCL_SHADOW:
-            shadow_sr = img.select('SCL_SR').eq(3)
-            scl = scl.where(shadow_sr, 3)
+    elif collection == "L1C":
+        best = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+                .filterBounds(region)
+                .filterDate(start_date, end_date)
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
+                .sort('CLOUDY_PIXEL_PERCENTAGE')
+                .first())
 
-        cloud_mask = scl.eq(9).max(scl.eq(10)).max(scl.eq(3))  # include shadows
-        cf = cloud_mask.reduceRegion(ee.Reducer.mean(), region, 60, maxPixels=1e8).values().get(0)
+        qa60 = best.select('QA60')
+        mask = qa60.bitwiseAnd(1 << 10).Or(qa60.bitwiseAnd(1 << 11)).Not()  # not cloud/cirrus
+        masked = best.updateMask(mask)
 
-        return img.addBands(raw_toa, overwrite=True)\
-                  .addBands(scl.rename('SCL'))\
-                  .set('cloud_frac', ee.Number(ee.Algorithms.If(cf, cf, 1.0)))
-
-    scored = col.map(per_image)
-    best = scored.sort('cloud_frac').first()
-
-    raw  = ee.Image(best).select(BANDS)
-    scl  = ee.Image(best).select('SCL')
+    # If L1C data, apply atmospheric correction
 
     dos  = pseudo_atmospheric_correction(raw, region)\
              .max(ee.Image(0)).min(ee.Image(10000)).toUint16()
-
-    # mask clouds + cirrus + shadow
-    cloud_mask = scl.eq(9).max(scl.eq(10)).max(scl.eq(3))
-    masked_ref = dos.where(cloud_mask, NO_DATA).toInt16()
-    masked_scl = scl.where(cloud_mask, NO_DATA).toInt16()
-
-    unmasked_img = dos.addBands(scl).toInt16()
-    masked_img   = masked_ref.addBands(masked_scl.rename('SCL')).toInt16()
 
     # HTTP download locally
     if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
@@ -397,7 +383,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             un_path = os.path.join(TMP_DIR, f"{base}.tif")
             ms_path = os.path.join(TMP_DIR, f"{base}_masked.tif")
             if not (os.path.exists(un_path) and os.path.exists(ms_path)):
-                futures.append(executor.submit(export_window_best, lat, lon, s, e, base, region,
+                futures.append(executor.submit(s2_image_exporter, lat, lon, s, e, base, region,
                                                os.path.join(TMP_DIR, site_id)))
         for fut in as_completed(futures):
             try:
