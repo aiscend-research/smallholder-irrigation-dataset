@@ -254,7 +254,7 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     on the given coordinates, selecting the image with maximum good-quality pixel coverage
     after applying collection-specific quality filtering.
     
-    Quality Masking Strategy:
+    Quality Masking Strategy (no data value = 0):
         - L2A: Uses Scene Classification Layer (SCL) to mask clouds (classes 8,9,10), 
           cloud shadows (class 3), saturated pixels (class 1), and no data (class 0).
           Keeps vegetation, bare soil, water, unclassified, and snow pixels.
@@ -279,8 +279,6 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     """
 
     # Define region and date range
-    start_date, end_date = ee.Date(start_date), ee.Date(end_date)
-
     point = ee.Geometry.Point([lon, lat])
     region = point.buffer(500).bounds()
 
@@ -297,7 +295,7 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     if collection == "L2A":
         col = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(region)
-            .filterDate(start_date, end_date))
+            .filterDate(ee.Date(start_date), ee.Date(end_date)))
         
         # Define quality mask for L2A
         def get_quality_mask(img):
@@ -307,25 +305,30 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     elif collection == "L1C":
         col = (ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
             .filterBounds(region)
-            .filterDate(start_date, end_date))
+            .filterDate(ee.Date(start_date), ee.Date(end_date)))
 
         # Additional step for L1C:
         # Remove any images that have any clouds at all, 
         # since we have no way of knowing which pixels have cloud shadow
         def check_clouds(img):
             qa60 = img.select('QA60')
-            clouds = qa60.bitwiseAnd(1 << 10).neq(0)  # Only opaque clouds (bit 10)
+            clouds = qa60.bitwiseAnd(1 << 10).neq(0)
             
-            cloud_pixels = clouds.reduceRegion(
+            # Check if ANY cloud pixels exist in region
+            result = clouds.reduceRegion(
                 reducer=ee.Reducer.sum(),
                 geometry=region,
                 scale=60,
-                maxPixels=1e8
-            ).values().get(0)
+                maxPixels=1e9
+            )
             
-            return img.set('has_clouds', ee.Number(cloud_pixels).gt(0))
+            # Get the value, default to 0 if None
+            cloud_pixels = ee.Number(result.get('QA60', 0))
+            has_clouds = cloud_pixels.gt(0)
+            
+            return img.set('has_clouds', has_clouds)
         
-        col = col.map(check_clouds).filter(ee.Filter.eq('has_clouds', False))
+        col = col.map(check_clouds).filter(ee.Filter.eq('has_clouds', ee.Number(0)))
         
         # Define quality mask for L1C
         def get_quality_mask(img):
