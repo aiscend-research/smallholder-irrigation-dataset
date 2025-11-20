@@ -131,16 +131,6 @@ def ensure_all_bands(img: ee.Image) -> ee.Image:
     zeros = ee.Image(ee.List(missing).iterate(_adder, ee.Image().select()))
     return img.addBands(zeros, overwrite=False).select(BANDS)
 
-def pseudo_atmospheric_correction(image: ee.Image, region: ee.Geometry) -> ee.Image:
-    bands = ['B2','B3','B4','B8']
-    stats = image.reduceRegion(
-        reducer=ee.Reducer.percentile([1]),
-        geometry=region, scale=20, maxPixels=1e8
-    )
-    corrected_imgs = [image.select(b).subtract(ee.Number(stats.get(b))).rename(b) for b in bands]
-    corrected = ee.Image.cat(corrected_imgs)
-    return image.addBands(corrected, overwrite=True)
-
 def choose_s2c_threshold(raw_toa: ee.Image, region: ee.Geometry) -> ee.Number:
     vis_mean = raw_toa.select(['B2','B3','B4']).divide(10000).reduce(ee.Reducer.mean())
     mean_b = ee.Number(vis_mean.reduceRegion(
@@ -304,11 +294,6 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, co
         qa60 = best.select('QA60')
         mask = qa60.bitwiseAnd(1 << 10).Or(qa60.bitwiseAnd(1 << 11)).Not()  # not cloud/cirrus
         masked = best.updateMask(mask)
-
-    # If L1C data, apply atmospheric correction
-
-    dos  = pseudo_atmospheric_correction(raw, region)\
-             .max(ee.Image(0)).min(ee.Image(10000)).toUint16()
 
     # HTTP download locally
     if not os.path.exists(out_dir): os.makedirs(out_dir, exist_ok=True)
