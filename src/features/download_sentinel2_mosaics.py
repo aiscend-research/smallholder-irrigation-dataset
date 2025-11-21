@@ -245,7 +245,6 @@ def build_weighted_scl(raw_toa: ee.Image,
     scl = ee.Image(7).where(cloud, 9).where(cirrus, 10)
     return scl.toUint16()
 
-# per-window export
 def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, file_name: str, out_dir: str, collection: str = "L1C"):
     """
     Download the best quality Sentinel-2 image for a location and time window.
