@@ -43,14 +43,16 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     on the given coordinates, selecting the image with maximum good-quality pixel coverage
     after applying collection-specific quality filtering.
     
-    Quality Masking Strategy (GEE no data value = 0):
-        - L2A: Uses Scene Classification Layer (SCL) to mask clouds (classes 8,9,10), 
-          cloud shadows (class 3), saturated pixels (class 1), and no data (class 0).
-          Keeps vegetation, bare soil, water, unclassified, and snow pixels.
-        
-        - L1C: Uses QA60 band to identify clouds (bit 10) and cirrus (bit 11).
-          Pre-filters to exclude ANY image containing opaque clouds in the region
-          (to avoid undetectable cloud shadows), then masks remaining cirrus pixels.
+    Quality masking (GEE no data value is 0):
+
+    L2A:
+    - Select the least cloudy image.
+    - Mask cloud shadows, clouds, cirrus, and saturated pixels using the SCL band.
+    - Keep only valid surface classes.
+
+    L1C:
+    - No SCL available, so only clouds and cirrus can be detected from QA60.
+    - Use a custom detector (not very precise) to find cloudy pixels and buffer them by 2 km to also remove likely cloud shadows.
     
     Args:
         lat: Latitude of region center (WGS84 decimal degrees)
@@ -84,13 +86,7 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
     region = point.buffer(500).bounds()
 
     # Retieve the best image for the given collection and date range, masking out poor quality pixels. 
-
-    # For L2A data, pick the least cloudy image 
-    # and mask out poor quality pixels (cloud shadows, clouds, cirrus, reflectance saturation) using SCL (scene classification) band. 
-    # For L1C data, there is no SCL so we only know where there are clouds and cirrus pixels using QA60.
-    # Therefore, we not only choose the image with the fewest poor quality pixels,
-    # but we first toss any image with any opaque clouds present at all
-
+    
     assert collection in ["L1C", "L2A"]
 
     if collection == "L2A":
