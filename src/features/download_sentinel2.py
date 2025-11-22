@@ -108,33 +108,40 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
             .filterBounds(region)
             .filterDate(ee.Date(start_date), ee.Date(end_date)))
 
-        # Additional step for L1C:
-        # Remove any images that have any clouds at all, 
-        # since we have no way of knowing which pixels have cloud shadow
-        def check_clouds(img):
+        def get_quality_mask(img):
+            # 1. Get QA60 clouds and cirrus (bad pixels)
             qa60 = img.select('QA60')
-            clouds = qa60.bitwiseAnd(1 << 10).neq(0)
+            qa60_clouds = qa60.bitwiseAnd(1 << 10).neq(0)
+            qa60_cirrus = qa60.bitwiseAnd(1 << 11).neq(0)
             
-            # Check if ANY cloud pixels exist in region
-            result = clouds.reduceRegion(
-                reducer=ee.Reducer.sum(),
-                geometry=region,
-                scale=60,
-                maxPixels=1e9
+            # 2. Get custom cloud mask (bad pixels)
+            custom_clouds = create_l1c_cloud_mask(img)
+            
+            # 3. Resample custom clouds to QA60 resolution
+            custom_clouds_60m = custom_clouds.reproject(qa60_clouds.projection())
+            
+            # 4. Combine ALL bad pixels
+            bad_pixels = qa60_clouds.Or(qa60_cirrus).Or(custom_clouds_60m.eq(1))
+            
+            # 5. Reduce to 2km resolution - if ANY pixel in 1km area is bad, whole area is bad
+            bad_pixels_coarse = bad_pixels.reduceResolution(
+                reducer=ee.Reducer.max(),  # Max = if any pixel is 1 (cloud), result is 1
+                maxPixels=2048
+            ).reproject(
+                crs=qa60_clouds.projection().crs(),
+                scale=2000  # 2km resolution
             )
             
-            # Get the value, default to 0 if None
-            cloud_pixels = ee.Number(result.get('QA60', 0))
-            has_clouds = cloud_pixels.gt(0)
+            # 6. Resample back to 60m resolution
+            bad_pixels_buffered = bad_pixels_coarse.reproject(
+                crs=qa60_clouds.projection().crs(),
+                scale=60
+            )
+
+            # 7. Invert to get good pixels (mask)
+            good_pixels = bad_pixels_buffered.Not()
             
-            return img.set('has_clouds', has_clouds)
-        
-        col = col.map(check_clouds).filter(ee.Filter.eq('has_clouds', ee.Number(0)))
-        
-        # Define quality mask for L1C
-        def get_quality_mask(img):
-            qa60 = img.select('QA60')
-            return qa60.bitwiseAnd(1 << 10).Or(qa60.bitwiseAnd(1 << 11)).Not() # not cloud or cirrus
+            return good_pixels.rename('cloud_mask')
 
     # Common code for both
     # Note if you found no images
@@ -180,7 +187,74 @@ def s2_image_exporter(lat: float, lon: float, start_date: str, end_date: str, fi
         logging.error(f"Failed to download masked image for {file_name}: {e}")
         return None
 
-def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datetime, out_dir: str, start_month: int=1, num_windows: int=36, timestep: int=10, window_buffer: int=3):
+def create_l1c_cloud_mask(img: ee.Image, 
+                          cloud_threshold: float = 0.55,
+                          veg_ndvi_threshold: float = 0.55) -> ee.Image:
+    """
+    Create a pixel-by-pixel cloud mask for L1C imagery.
+    
+    Args:
+        img: Sentinel-2 L1C image
+        cloud_threshold: Cloud probability threshold (0-1). Lower = stricter. Default 0.3
+        veg_ndvi_threshold: NDVI threshold for vegetation guard. Higher = less conservative. Default 0.55
+    
+    Returns:
+        ee.Image: Binary mask where 1 = cloud, 0 = clear
+    """
+    
+    # Normalize bands to 0-1
+    blue = img.select('B2').divide(10000)
+    green = img.select('B3').divide(10000)
+    red = img.select('B4').divide(10000)
+    nir = img.select('B8').divide(10000)
+    swir = img.select('B11').divide(10000)
+    
+    # Calculate NDVI
+    ndvi = nir.subtract(red).divide(nir.add(red).add(1e-6))
+    
+    # Calculate standard deviation of RGB (clouds are uniform/white)
+    vis = ee.Image.cat([blue, green, red])
+    vis_std = vis.reduce(ee.Reducer.stdDev())
+    
+    # 1. Brightness indicator
+    vis_mean = img.select(['B2','B3','B4']).divide(10000).reduce(ee.Reducer.mean())
+    p_bright = vis_mean.subtract(0.30).divide(0.15).clamp(0, 1)
+    
+    # 2. SWIR indicator (clouds are dark in SWIR)
+    p_swir = swir.subtract(0.12).divide(0.10).clamp(0, 1)
+    
+    # 3. Blue/SWIR ratio (clouds have high ratio)
+    p_ratio = blue.divide(swir.add(1e-6)).subtract(1.2).divide(0.5).clamp(0, 1)
+    
+    # 4. Whiteness (low std = uniform white color = cloud)
+    p_white = ee.Image(1).subtract(vis_std.divide(0.06).clamp(0, 1))
+    
+    # Combine indicators
+    cloud_prob = (p_bright.multiply(0.4)
+                  .add(p_swir.multiply(0.2))
+                  .add(p_ratio.multiply(0.2))
+                  .add(p_white.multiply(0.2)))
+    
+    # Vegetation guard
+    veg_guard = ndvi.lte(veg_ndvi_threshold)
+    
+    # Apply threshold (tunable!)
+    is_cloud = cloud_prob.gt(cloud_threshold).And(veg_guard)
+    
+    return is_cloud.toUint8().rename('cloud_mask')
+
+
+def retrieve_time_series_stack(
+    site_id: str, 
+    lat: float, 
+    lon: float, 
+    date: datetime, 
+    out_dir: str, 
+    collection: str="L1C",
+    start_month: int=1, 
+    num_windows: int=36, 
+    timestep: int=10, 
+    window_buffer: int=3):
     """
     Download and stack Sentinel-2 images over a time series, save result, and clean up.
     
@@ -201,9 +275,9 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
 
     # Create time windows
     step_size = timedelta(days=timestep)
-    num_windows = num_windows + (window_buffer * 2)
+    num_windows_buffered = num_windows + (window_buffer * 2)
     start_date = datetime(date.year, start_month, 1) - (step_size * window_buffer)
-    time_windows = [(start_date + i * step_size, start_date + (i + 1) * step_size) for i in range(num_windows)]
+    time_windows = [(start_date + i * step_size, start_date + (i + 1) * step_size) for i in range(num_windows_buffered)]
 
     # Create temporary directory for individual downloads
     temp_dir = os.path.join(out_dir, "_tmp", site_id)
@@ -225,7 +299,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
             
             if not os.path.exists(file_path):
                 file_name = os.path.basename(file_path)
-                futures.append(executor.submit(s2_image_exporter, lat, lon, start_str, end_str, file_name, temp_dir))
+                futures.append(executor.submit(s2_image_exporter, lat, lon, start_str, end_str, file_name, temp_dir, collection))
         
         for fut in as_completed(futures):
             try:
@@ -307,7 +381,7 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
     
     stacked_array = np.stack(stack, axis=0)
     
-    # Reshape for saving: (num_windows, num_bands, H, W) -> (num_windows*num_bands, H, W)
+    # Reshape for saving: (num_windows_buffered, num_bands, H, W) -> (num_windows_buffered*num_bands, H, W)
     T, B, H, W = stacked_array.shape
     reshaped = stacked_array.transpose(1, 0, 2, 3).reshape(T * B, H, W)
     
@@ -333,9 +407,10 @@ def retrieve_time_series_stack(site_id: str, lat: float, lon: float, date: datet
         'year': int(date.year),
         'bands': S2_BANDS,
         'shape': list(stacked_array.shape),
-        'num_windows': num_windows,
+        'num_windows_buffered': num_windows_buffered,
         'timestep_days': timestep,
-        'start_month': start_month,
+        'start_month_unbuffered': start_month,
+        'window_buffer': 3,
         'windows': metadata_windows
     }
     
@@ -371,3 +446,28 @@ def process_row(row, out_dir):
     )
     
     logging.info(f"Completed {site_id}")
+
+if __name__ == '__main__':
+
+    initialize_earthengine()
+
+    TEST_OUT_DIR = './test_timeseries_output_L1C'
+
+    # Test with a known good location
+    test_site_id = "test_site_001"
+    test_lat = 37.5
+    test_lon = -120.5
+    test_date = datetime(2023, 6, 15)
+
+    retrieve_time_series_stack(
+        site_id=test_site_id,
+        lat=test_lat,
+        lon=test_lon,
+        date=test_date,
+        collection="L1C",
+        out_dir=TEST_OUT_DIR,
+        start_month=1,
+        num_windows=12,  # Use fewer windows for faster testing
+        timestep=10,
+        window_buffer=1
+    )
