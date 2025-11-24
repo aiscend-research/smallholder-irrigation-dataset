@@ -13,6 +13,7 @@ from matplotlib.colors import Normalize
 from ..utils.utils import get_data_root, find_project_root
 import pandas as pd
 import re
+import sys
 
 
 # Refer to src/features/README.md for dataset version info
@@ -350,6 +351,14 @@ def select_uids(n=10, irrigation=True, certainty_thresh=1):
 if __name__ == "__main__":
 
     uids = select_uids(10, True, 3)
+    
+    # Visualize single UID
+    if len(sys.argv) > 1:
+        try:
+            uids = [int(sys.argv[1])]
+        except ValueError:
+            raise SystemExit("Usage (optionally specify UID): python3 src/features/image_label_visualization.py [uid]")
+
     paths = {uid : [*find_files_for_id(uid)] for uid in uids}
 
     for img_id, arr in paths.items():
