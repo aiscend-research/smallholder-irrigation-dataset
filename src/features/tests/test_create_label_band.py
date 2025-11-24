@@ -4,60 +4,68 @@ Contains tests for helper functions for creating label band
 
 import unittest
 from datetime import datetime, timedelta
-from create_label_band import create_irrigation_table, get_survey_data, retrieve_polygons, rasterize_polygons, save_label_raster, create_labels, create_bounding_box
+from create_label_band import create_irrigation_table, retrieve_polygons, rasterize_polygons, save_label_raster
 from utils.utils import get_data_root
 import rasterio
 import os
+from utils.geometries import bounding_box
+from shapely.geometry import box
+from rasterio.crs import CRS
+from rasterio.warp import transform_geom
+from shapely.geometry import shape, mapping
+
+IMAGE_CRS = 'EPSG:32735' # Coordinate reference system for the feature images
+
+# Helper function to create a bounding box – For testing on placeholder image.
+def create_bounding_box(center_lat, center_lon):
+    """
+    Helper function for tests that creates a bounding box around a center point with a given size. 
+    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
+    
+    Parameters:
+        - center_lat (float): Latitude of the center point.
+        - center_lon (float): Longitude of the center point.
+    
+    Returns:
+        - image_meta (dict): Dictionary which contains:
+            - height (int): Height of the bounding box in pixels.
+            - width (int): Width of the bounding box in pixels.
+            - crs (str): Coordinate reference system.
+            - transform (Affine): Affine transformation for the bounding box.
+    """
+
+    # Get lat/lon bounds
+    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
+
+    # Image dimensions
+    width = 100
+    height = 100
+
+    # Create a Shapely geometry of the bounding box
+    geom = box(min_lon, min_lat, max_lon, max_lat)
+
+    # Transform to desired CRS
+    geom_utm = shape(transform_geom(CRS.from_string("EPSG:4326"), IMAGE_CRS, mapping(geom)))
+    min_x, min_y, max_x, max_y = geom_utm.bounds
+    pixel_size_x = (max_x - min_x) / width
+    pixel_size_y = (max_y - min_y) / height
+    transform = rasterio.transform.from_origin(min_x, max_y, pixel_size_x, pixel_size_y)
+
+    image_meta = {
+        'height': height,
+        'width': width,
+        'crs': IMAGE_CRS,
+        'transform': transform,
+        'dtype': 'uint8',
+    }
+
+    return image_meta
 
 # Tests for helper functions in create_label_band.py: get_survey_data, 
 # retrieve_polygons, rasterize_polygons, save_label_raster
 class TestLabelBandFunctions(unittest.TestCase):
     def setUp(self):
         self.IRRIGATION_TABLE = create_irrigation_table()
-
-    # test for get_survey_data()
-    def test_get_survey_data(self):
-        """
-        Test the get_survey_data function to ensure it correctly extracts latitude, longitude,
-        and survey date from the filename with the correct format.
-        """
-
-        img_path = "s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif"
-        (lat, lon, survey_date) = get_survey_data(img_path)
-
-        self.assertEqual(
-            "-10.4035", 
-            lat,
-            msg=f"test_get_survey_data fail: Expecteed lat -10.4035 but got {lat}"
-        )
-        self.assertEqual(
-            "29.1319", 
-            lon,
-            msg=f"test_get_survey_data fail: Expecteed lon 29.1319 but got {lon}"
-        )
-        self.assertEqual(
-            datetime.strptime("2023-05-25", "%Y-%m-%d").date() + timedelta(15), 
-            survey_date,
-            msg=f"test_get_survey_data fail: Expected survey date 2023-05-25 but got {survey_date}"
-        )
-        img_path = "s2_-12.0468_26.3789_2020-07-31_2020-08-10_off-30.tif"
-        (lat, lon, survey_date) = get_survey_data(img_path)
-
-        self.assertEqual(
-            "-12.0468",
-            lat,
-            msg=f"test_get_survey_data fail: Expecteed lat -10.4035 but got {lat}"
-        )
-        self.assertEqual(
-            "26.3789",
-            lon,
-            msg=f"test_get_survey_data fail: Expecteed lon 29.1319 but got {lon}"
-        )
-        self.assertEqual(
-            datetime.strptime("2020-08-05", "%Y-%m-%d").date() + timedelta(30),
-            survey_date,
-            msg=f"test_get_survey_data fail: Expected survey date 2020-08-05 but got {survey_date}"
-        )
 
     # tests for retrieve_polygons()
     def test_retrieve_polygons_invalid_file(self):
@@ -99,7 +107,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         from the source file, when there is only one corresponding polygon.
         """
 
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 3504043
         internal_id = 21
         timestamp = datetime.strptime("2020-8-27", "%Y-%m-%d").date()
@@ -133,7 +141,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         from the source file, when there are multiple corresponding polygons.
         """
 
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5062566
         internal_id = 21
         timestamp = datetime.strptime("2019-06-14", "%Y-%m-%d").date()
@@ -167,7 +175,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         Test the rasterize_polygons function to ensure it correctly rasterizes polygons
         into a band, when there are polygons within the bounding box.
         """
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5062566
         internal_id = 21
         timestamp = datetime.strptime("2019-06-14", "%Y-%m-%d").date()
@@ -197,7 +205,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         )
 
         # Test another case
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5107007
         internal_id = 16
         timestamp = datetime.strptime("2020-9-3", "%Y-%m-%d").date()
@@ -245,7 +253,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         Test the rasterize_polygons function to ensure it returns an irrigation band of zeros
         when no polygons are present.
         """
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5107007
         internal_id = 16
         timestamp = datetime.strptime("2016-9-9", "%Y-%m-%d").date()
@@ -277,7 +285,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         when there are no uncertainties in the polygon.
         """
         # survey has one polygon of certainty 5
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 3504043
         internal_id = 21
         timestamp = datetime.strptime("2020-8-27", "%Y-%m-%d").date()
@@ -306,7 +314,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         when there is one type of uncertainty in the set of polygons.
         """
         # survey has one polygon of certainty 5
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5107007
         internal_id = 16
         timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
@@ -422,7 +430,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         Test rasterize_polygons to ensure that it correctly creates a certainty band
         when there are polygons with varying certainty scores.
         """
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5107007
         internal_id = 16
         timestamp = datetime.strptime("2020-8-21", "%Y-%m-%d").date()
@@ -470,7 +478,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         Test rasterize_polygons to ensure that it correctly creates a certainty band
         when there are no polygons.
         """
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/MV_950-974.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5107007
         internal_id = 16
         timestamp = datetime.strptime("2016-9-9", "%Y-%m-%d").date()
@@ -557,7 +565,7 @@ class TestLabelBandFunctions(unittest.TestCase):
         Test save_label_raster to ensure that it correctly saves the label raster
         when there is no irrigation in it.
         """
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/JL_KL_v2_101-125.geojson"
+        irrigation_geojson = "./tests/dummy.geojson"
         survey_id = 5062566
         internal_id = 21
         timestamp = datetime.strptime("2019-06-19", "%Y-%m-%d").date()

@@ -112,3 +112,5 @@ To run tests for this script, run the following command from this directory:
 ```{bash}
 python -m unittest tests/test_create_label_band.py
 ```
+
+Note that `dummy.geojson` is a dummy GeoJSON file which is used for testing. This imitates the format of the GeoJSON polygon files.
