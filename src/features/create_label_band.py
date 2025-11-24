@@ -11,7 +11,8 @@ import os
 import sys
 import rasterio
 from rasterio.features import rasterize
-from rasterio.transform import from_origin
+from rasterio.warp import transform_geom
+from rasterio.crs import CRS
 import geopandas as gpd
 from shapely.geometry import mapping
 import numpy as np
@@ -25,8 +26,6 @@ if project_root not in sys.path:
 
 # import utils.utils
 from utils.utils import *
-from utils.geometries import bounding_box
-IMAGE_CRS = 'EPSG:32633'  # Coordinate reference system for the images
 
 '''
 Small class definition to be able to pass in data object
@@ -39,47 +38,6 @@ class LabelTif:
 
     def read(self):
         return self.array
-
-def create_bounding_box(center_lat, center_lon):
-    """
-    Helper function for tests that creates a bounding box around a center point with a given size. 
-    Uses method utils.geometries.bouding_box to retrieve lat/lon bounds.
-    
-    Parameters:
-        - center_lat (float): Latitude of the center point.
-        - center_lon (float): Longitude of the center point.
-    
-    Returns:
-        - image_meta (dict): Dictionary which contains:
-            - height (int): Height of the bounding box in pixels.
-            - width (int): Width of the bounding box in pixels.
-            - crs (str): Coordinate reference system.
-            - transform (Affine): Affine transformation for the bounding box.
-    """
-
-    # Get lat/lon bounds
-    min_lat, min_lon, max_lat, max_lon = bounding_box(center_lat, center_lon)
-
-    # Image dimensions
-    width = 100
-    height = 100
-
-    pixel_size_lon = (max_lon - min_lon) / width
-    pixel_size_lat = (max_lat - min_lat) / height
-    top_left_lon = min_lon
-    top_left_lat = max_lat
-
-    transform = rasterio.transform.from_origin(top_left_lon, top_left_lat, pixel_size_lon, pixel_size_lat)
-
-    image_meta = {
-        'height': height,
-        'width': width,
-        'crs': IMAGE_CRS,
-        'transform': transform,
-        'dtype': 'uint8',
-    }
-
-    return image_meta
 
 def create_labels():
     """
@@ -105,8 +63,8 @@ def create_labels():
         internal_id = row.internal_id
         unique_id = row.unique_id
         survey_id = int(row.site_id)
-        lon, lat = row.x, row.y
-        image_meta = create_bounding_box(lat, lon)
+        path_to_feature_file = get_data_root() + "features_v2/" + f"{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_image.tif"
+        image_meta = get_image_meta(path_to_feature_file)
         timestamp = date(row.year, row.month, row.day)
         gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
 
@@ -128,38 +86,6 @@ def create_irrigation_table():
 
     IRRIGATION_TABLE['site_id'] = IRRIGATION_TABLE['site_id'].apply(lambda id: id[3:])
     return IRRIGATION_TABLE
-
-def get_survey_data(input_image_path):
-    """
-    Retrieves the survey date for a particular .tif image.
-    
-    PRECONDITON: 
-        Assume that the image path has format s2_{lat}_{lon}_{windowStartDate}_{windowEndDate}_off-{offset}.tif
-        Example: s2_-10.4035_29.1319_2023-05-20_2023-05-30_off-15.tif
-
-    Parameters:
-        - input_image_path (str): The input path of the .tif image of interest.
-
-    Output:
-        - lat (str): Location latitute
-        - lon (str): Location longitude
-        - survey_date (Date): Date of corresponding survey.
-    """
-
-    # Retrieve tokens
-    tokens = input_image_path[:-4].split("_")
-    
-    # Start, end date
-    lat = tokens[1]
-    lon = tokens[2]
-    start_date = datetime.strptime(tokens[3], "%Y-%m-%d").date()
-    end_date = datetime.strptime(tokens[4], "%Y-%m-%d").date()
-
-    # Retrieve survey date
-    middle_date = start_date + (end_date - start_date) / 2
-    offset = int(tokens[-1][4:])
-    survey_date = middle_date + timedelta(days=offset)
-    return lat, lon, survey_date
 
 def get_image_meta(input_image_path):
     """
@@ -236,6 +162,12 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
 
      # Add certainty score band
     shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
+    # Transform geoms from ESPG:4326 to image_meta's crs
+    shapes = [
+        (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
+        for geom, value in shapes
+    ]
+
     certainty_array = rasterize(
         shapes=shapes,
         out_shape=(image_meta['height'], image_meta['width']),
@@ -256,6 +188,11 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
 
     for i in range(5):
         shapes = [(geom, 1) for geom, cat in zip(gdf.geometry, gdf.uncertainty_explanation) if UNCERTAINTY_TYPES[i] in cat.split(";")]
+        # Transform geoms from ESPG:4326 to image_meta's crs
+        shapes = [
+            (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
+            for geom, value in shapes
+        ]
         mask = rasterize(
             shapes=shapes,
             out_shape=(image_meta['height'], image_meta['width']),
@@ -277,6 +214,7 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
         cat = cat.split(";")[0]
         if cat not in IRRIGATION_TYPES:
             raise ValueError(f"Unknown category: '{cat}'")
+        geom = transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)) # Transform geom from ESPG:4326 to image_meta's crs
         shapes.append((geom, IRRIGATION_TYPES[cat]))
 
 
