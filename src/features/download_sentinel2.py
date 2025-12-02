@@ -7,11 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import matplotlib.pyplot as plt
 import rasterio
 
+import pandas as pd
 import numpy as np
 import rasterio
-from rasterio.transform import from_origin
-from skimage.transform import resize
-from skimage.morphology import binary_dilation, footprint_rectangle
 import ee
 import requests
 
@@ -27,7 +25,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from src.utils.utils import load_config, find_project_root
+from src.utils.utils import load_config, find_project_root, get_data_root
 
 config = load_config()
 
@@ -508,8 +506,11 @@ def retrieve_time_series_stack(
         'lat': float(lat),
         'lon': float(lon),
         'year': int(date.year),
+        'collection': collection,
         'bands': S2_BANDS,
         'shape': list(stacked_masked.shape),
+        'target_size': target_size,  
+        'num_windows': num_windows,
         'num_windows_buffered': num_windows_buffered,
         'timestep_days': timestep,
         'start_month_unbuffered': start_month,
@@ -639,27 +640,198 @@ def visualize_time_series_stack(out_dir, file_id):
     plt.tight_layout()
     plt.show()
 
-if __name__ == '__main__':
+def dataset_download(csv, download_dir, 
+                collection='L1C',
+                start_month=1,
+                num_windows=36,
+                timestep=10,
+                window_buffer=3,
+                target_size=100, 
+                subset=False):
+    """
+    Download and stack images for each site represented by a row in a CSV.
+    
+    Args:
+        csv: Path to csv with columns: x, y, unique_id, site_id, year, month, day
+        download_dir: Output directory for all files
+        collection: 'L1C' or 'L2A'
+        start_month: Month to start time series (1=January, excluding buffer)
+        num_windows: Number of timesteps to download (excluding buffer)
+        timestep: Days per timestep
+        window_buffer: Extra timesteps before/after for augmentation
+        target_size: Size in pixels for all images (default 100x100)
+    
+    Returns:
+        str: Success message
+    """
 
     initialize_earthengine()
 
-    test_out_dir = './test_timeseries_output_L1C'
+    # Create a version folder for this download based on datetime and save a metadata file within with all the arguments used
+    version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = os.path.join(download_dir, version_name)
+    os.makedirs(out_dir, exist_ok=False)
 
-    # Test with a known good location
-    test_site_id = "test_site_001"
-    test_lat = 37.5
-    test_lon = -120.5
-    test_date = datetime(2023, 6, 15)
+    # Save metadata for this run
+    args_dict = locals().copy()
+    metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
+    with open(metadata_path, "w") as f:
+        json.dump(args_dict, f, indent=2)
+    
+    # Read in the each observation to download data for
+    data = pd.read_csv(csv)
+    
+    if subset == True:
+        data = data.head(10)
 
-    retrieve_time_series_stack(
-        site_id=test_site_id,
-        lat=test_lat,
-        lon=test_lon,
-        date=test_date,
-        collection="L1C",
-        out_dir=test_out_dir,
+    logging.info(f"Starting to process {len(data)} rows from {LABEL_CSV}")
+
+    rows = list(data.iterrows())
+    for _, row in rows:
+    
+        # Extract row data
+        lat, lon = row['y'], row['x']
+        uid = row['unique_id']
+        date = datetime(int(row['year']), int(row['month']), int(row['day']))
+        
+        # Create file naming
+        date_str = f"{date.year}.{date.month:02d}.{date.day:02d}"
+        sid_raw = str(row['site_id'])
+        sid_for_name = sid_raw.replace('id_', '')
+        file_id = f"{uid}_{sid_for_name}_{date_str}"
+        
+        logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
+
+        # Download and stack - pass all parameters through
+        retrieve_time_series_stack(
+            file_id=file_id,
+            lat=lat,
+            lon=lon,
+            date=date,
+            out_dir=out_dir,
+            collection=collection,
+            start_month=start_month,
+            num_windows=num_windows,
+            timestep=timestep,
+            window_buffer=window_buffer,
+            target_size=target_size
+        )
+        
+        # Add unique_id to metadata (for matching back to CSV)
+        metadata_file = os.path.join(out_dir, f"{file_id}_metadata.json")
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+        
+        metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
+        metadata['original_site_id'] = sid_raw
+        
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        logging.info(f"Completed {file_id}")
+
+    get_stats(out_dir)
+
+    return f"Processed {file_id} successfully"
+
+def get_stats(out_dir):
+    """
+    Compute summary statistics from Sentinel-2 metadata files in a directory.
+
+    Scans the specified output directory for metadata files whose names end with
+    "_metadata.json" (excluding files that start with "metadata_"), parses each
+    JSON file to extract a list under the "windows" key, and computes:
+        - how many samples meet the images coverage criterion (>=50% windows
+          with 'file_exists' == True),
+        - the median of per-sample average masked fraction across all samples
+          (each sample's average is the mean of its windows' 'masked_fraction').
+
+    Parameters
+    ----------
+    out_dir : str
+        Path to the directory containing the per-sample metadata JSON files.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - total_samples (int)
+            - samples_with_50pct_images (int)
+            - percent_with_50pct_images (float, 0-100)
+            - median_of_avg_masked_fraction (float, 0-1)
+    Side effects
+    ------------
+    - Writes a JSON file named "download_stats.json" into out_dir containing
+      the same dictionary that is returned.
+    - Logs errors when individual metadata files cannot be read or parsed; such
+      files are skipped when computing per-sample counts.
+    """
+
+    all_metadata_files = [f for f in os.listdir(out_dir) if f.endswith('_metadata.json') and not f.startswith('metadata_')]
+    total_samples = len(all_metadata_files)
+    samples_with_50pct_images = 0
+
+    per_sample_avg_maskeds = []
+
+    for mf in all_metadata_files:
+        path = os.path.join(out_dir, mf)
+        try:
+            with open(path, 'r') as f:
+                meta = json.load(f)
+        except Exception as e:
+            logging.error(f"Failed to read metadata {path}: {e}")
+            continue
+
+        windows = meta.get('windows', [])
+        if not windows:
+            continue
+
+        num_true = sum(1 for w in windows if w.get('file_exists') is True)
+        # masked_fraction may be missing for some windows; default to 1.0 (fully masked)
+        masked_vals = [float(w.get('masked_fraction', 1.0)) for w in windows]
+
+        if (num_true / len(windows)) >= 0.5:
+            samples_with_50pct_images += 1
+
+        # compute per-sample average masked fraction and collect
+        avg_masked = float(sum(masked_vals) / len(masked_vals))
+        per_sample_avg_maskeds.append(avg_masked)
+
+    # median across samples of the per-sample average masked fraction
+    if len(per_sample_avg_maskeds) > 0:
+        median_avg_masked = float(np.median(per_sample_avg_maskeds))
+    else:
+        median_avg_masked = 0.0
+
+    stats = {
+        'total_samples': total_samples,
+        'samples_with_50pct_images': samples_with_50pct_images,
+        'percent_with_50pct_images': (samples_with_50pct_images / total_samples) * 100 if total_samples > 0 else 0,
+        'median_of_avg_masked_fraction': median_avg_masked
+    }
+
+    # Save stats
+    stats_file = os.path.join(out_dir, "download_stats.json")
+    with open(stats_file, 'w') as f:
+        json.dump(stats, f, indent=2)
+
+    return stats
+
+if __name__ == '__main__':
+
+    LABEL_CSV    = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
+
+    data_root = get_data_root()
+    DOWNLOAD_DIR = os.path.join(data_root, "features")
+
+    dataset_download(
+        csv=LABEL_CSV,
+        download_dir=DOWNLOAD_DIR,
+        collection='L1C',
         start_month=1,
-        num_windows=12,  # Use fewer windows for faster testing
+        num_windows=36,
         timestep=10,
-        window_buffer=1
+        window_buffer=3,
+        target_size=100,
+        subset=True  # Set to True to test with just 10 rows
     )
