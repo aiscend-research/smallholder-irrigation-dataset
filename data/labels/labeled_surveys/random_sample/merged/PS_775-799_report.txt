@@ -1,1 +1,1 @@
-Row 47 (internal_id 20, 19/6/2019): survey marked irrigation 4 (uncertain) but found a polygon with certainty 5 (certain).
+All checks passed successfully.

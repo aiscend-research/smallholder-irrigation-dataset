@@ -1,1 +1,1 @@
-{"date": "2025-08-06T10:32:29.043380", "file": "latest_irrigation_table.csv", "description": "The latest labeled irrigation data", "file_format": "csv", "source": "src/processing/batch_process.py"}
+{"date": "2026-01-05T15:14:19.984644", "file": "latest_irrigation_table.csv", "description": "The latest labeled irrigation data", "file_format": "csv", "source": "src/processing/batch_process.py"}
