@@ -48,13 +48,17 @@ Each script creates or saves new files as it runs:
 * `survey_to_csv.py` creates a `.csv` file in the `processed/` folder with survey results
 * `polygons_to_geojson.py` creates a `.geojson` file in the `processed/` folder with labeled polygons
 * `merge_survey_and_polygons.py` creates a merged CSV with survey and polygon data in the `merged/` folder and saves a log file summarizing issues (e.g., missing polygons, duplicate IDs, or outliers)
-* `process_folder.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`, and then pools the latest labeled irrigation data for the group:
+* `batch_process.py` runs all three steps in sequence and saves outputs to `processed/` and `merged/`, and then pools the latest labeled irrigation data for the group:
 
 ```bash
 python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
 ```
 
-This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
+This will output the following master files for the group (default: random_sample):
+- `latest_irrigation_table.csv` - The most recent version of each labeled survey
+- `latest_irrigation_data.geojson` - Same data with bounding box geometries
+- `latest_polygons_table.csv` - All irrigation polygons from the latest surveys
+- `latest_polygons.geojson` - Same polygon data in GeoJSON format
 
 You can either fully process a single pair of survey and polygon files, or batch process an entire folder.
 
@@ -97,7 +101,37 @@ This command runs all three steps on everything inside the `raw/` folder:
 python src/processing/batch_process.py data/labels/labeled_surveys/random_sample/raw/
 ```
 
-This will also output the latest irrigation table (CSV) and GeoJSON with bounding boxes for the group (default: random_sample).
+This will also output the master files listed above for the group (default: random_sample).
+
+---
+
+### 📊 How Latest Survey Selection Works
+
+When running `batch_process.py`, the script automatically identifies the most recent version of each survey using a priority system. This ensures only the latest, corrected data makes it into the master files.
+
+**Version Priority (highest to lowest):**
+
+1. **Corrected v2**: `[EDITOR_INITIALS]_[ORIGINAL_INITIALS]_v2_[range]`
+   - Example: `AB_JL_v2_1-25` (AB corrected JL's survey, version 2)
+
+2. **Corrected**: `[EDITOR_INITIALS]_[ORIGINAL_INITIALS]_[range]`
+   - Example: `JL_AB_1-25` (JL corrected AB's survey)
+
+3. **Uncorrected v2**: `[INITIALS]_v2_[range]`
+   - Example: `AB_v2_1-25` (AB revised their own survey)
+
+4. **Original**: `[INITIALS]_[range]`
+   - Example: `AB_1-25` (AB's original survey)
+
+**Special Cases:**
+- `AB_JL_101-125` and `PS_101-125` are manually included (don't follow standard pattern)
+- `MV_76-100` is explicitly excluded (corrupted file, never corrected)
+
+**How it works:**
+- The script reads ALL merged survey files from the `merged/` folder
+- For each unique plot/site, it selects the survey with the highest priority version
+- Only the selected surveys appear in `latest_irrigation_table.csv`
+- The `most_recent` column in the CSV indicates which surveys were selected (value = 1)
 
 ---
 
@@ -179,14 +213,14 @@ These habits will help keep the project organized, make collaboration easier, an
 
 ## Running Tests
 
-To run all unit tests:
+To run all unit tests for the processing module:
 
-```{bash}
-python -m unittest discover tests
+```bash
+python -m unittest discover src/processing/tests
 ```
 
 Or, to run a specific test file:
 
-```{bash}
-python -m unittest tests/test_polygons_to_geojson.py
+```bash
+python -m unittest src/processing/tests/test_polygons_to_geojson.py
 ```
