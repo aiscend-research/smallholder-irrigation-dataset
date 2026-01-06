@@ -213,14 +213,15 @@ These habits will help keep the project organized, make collaboration easier, an
 
 ## Running Tests
 
-To run all unit tests for the processing module:
-
 ```bash
-python -m unittest discover src/processing/tests
+# Run all processing tests
+python -m unittest discover src/processing/tests -v
+
+# Run specific test file
+python -m unittest src/processing/tests/test_polygons_to_geojson.py -v
+python -m unittest src/processing/tests/test_batch_process.py -v
 ```
 
-Or, to run a specific test file:
-
-```bash
-python -m unittest src/processing/tests/test_polygons_to_geojson.py
-```
+**What's tested:**
+- `test_polygons_to_geojson.py`: Text parsing, fuzzy matching for uncertainty categories
+- `test_batch_process.py`: Version priority logic, special cases (AB_JL_101-125, PS_101-125, MV_76-100), edge cases
