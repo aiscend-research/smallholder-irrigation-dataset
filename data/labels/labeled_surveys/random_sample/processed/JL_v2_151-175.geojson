@@ -17672,7 +17672,7 @@
         "year": 2019,
         "certainty": 4,
         "uncertainty_explanation": "",
-        "category": "lawn;tree_crop"
+        "category": "tree_crop;lawn"
       },
       "geometry": {
         "type": "Polygon",

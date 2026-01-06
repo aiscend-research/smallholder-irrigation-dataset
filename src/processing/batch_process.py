@@ -1,6 +1,7 @@
 import os
 import sys
 import pandas as pd
+import re
 from survey_to_csv import process_xml_zip
 import geopandas as gpd
 from shapely.geometry import box
@@ -16,8 +17,73 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from src.utils.utils import generate_latest_irrigation_data, save_data
+from src.utils.utils import save_data, get_data_root
 from src.utils.geometries import bounding_box, survey_polygon
+
+
+def generate_latest_irrigation_data(group_name="random_sample"):
+    """
+    Generate the latest irrigation data by merging labeled survey files,
+    identifying the most recent surveys, and filtering the data accordingly.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the most recent irrigation data.
+    """
+
+    # Define the folder containing merged survey files
+    merged_folder = os.path.join(get_data_root(), f"labels/labeled_surveys/{group_name}/merged")
+
+    # List all files in the merged folder
+    files = os.listdir(merged_folder)
+
+    # Read and merge all CSV files into a single DataFrame
+    df = pd.concat(
+        [pd.read_csv(os.path.join(merged_folder, file)) for file in files if file.endswith('.csv')],
+        ignore_index=True
+    )
+
+    # Identify the most recent source file for each survey (plot_file)
+    survey_files = df['plot_file'].unique()
+    most_recent_source = []
+
+    for survey_file in survey_files:
+        # Get all source files associated with the current survey file
+        source_files = df[df['plot_file'] == survey_file]['source_file'].unique().tolist()
+
+        # Determine the most recent source file based on priority
+        corrected_v2 = [s for s in source_files if re.match(r'^[A-Z]+_[A-Z]+_v2', s)]
+        corrected = [s for s in source_files if re.match(r'^[A-Z]+_[A-Z]+_', s) and 'v2' not in s]
+        uncorrected_v2 = [s for s in source_files if re.match(r'^[A-Z]+_v2', s)]
+
+        if corrected_v2:
+            most_recent_source.append(corrected_v2)
+        elif corrected:
+            most_recent_source.append(corrected)
+        elif uncorrected_v2:
+            most_recent_source.append(uncorrected_v2)
+        elif source_files:
+            most_recent_source.append(source_files)
+        else:
+            most_recent_source.append(None)  # Handle cases with no source files
+
+    # Add a column to indicate if the source file is the most recent for its survey
+    df['most_recent'] = df.apply(
+        lambda x: 1 if x['source_file'] in most_recent_source[survey_files.tolist().index(x['plot_file'])] else 0,
+        axis=1
+    )
+
+    # Manually mark 'AB_JL_101-125' and 'PS_101-125' as the most recent survey
+    # (these don't follow the logic above but we still want them since they are the most recent for these labelers)
+    df.loc[df['source_file'].isin(['AB_JL_101-125', 'PS_101-125']), 'most_recent'] = 1
+
+    # Filter the DataFrame to keep only the most recent surveys
+    df = df[df['most_recent'] == 1]
+
+    # Exclude surveys with 'MV_76-100' in the source file name
+    # This survey was never corrected due to a read issue
+    df = df[~df['source_file'].str.contains('MV_76-100')]
+
+    return df
 
 
 def process_and_merge_folder(folder_path):

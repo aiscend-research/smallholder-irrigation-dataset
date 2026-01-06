@@ -1,1 +1,5 @@
 server_data_root: '/home/waves/data/smallholder-irrigation-dataset/data/'
+
+earthengine:
+  service_account_key: secrets/earthengine-key.json
+  bucket_name: irr-earthengine-exports
