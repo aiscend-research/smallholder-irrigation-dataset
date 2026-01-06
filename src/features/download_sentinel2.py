@@ -827,7 +827,7 @@ if __name__ == '__main__':
     dataset_download(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        collection='L1C',
+        collection='L2A',
         start_month=1,
         num_windows=36,
         timestep=10,
