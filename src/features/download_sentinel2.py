@@ -827,11 +827,11 @@ if __name__ == '__main__':
     dataset_download(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        collection='L2A',
+        collection='L1C',
         start_month=1,
         num_windows=36,
         timestep=10,
         window_buffer=3,
         target_size=100,
-        subset=True  # Set to True to test with just 10 rows
+        subset=False  # Set to True to test with just 10 rows
     )
