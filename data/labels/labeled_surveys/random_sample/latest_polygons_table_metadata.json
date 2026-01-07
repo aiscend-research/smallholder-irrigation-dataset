@@ -1,1 +1,1 @@
-{"date": "2026-01-05T15:14:22.308526", "file": "latest_polygons_table.csv", "description": "The latest labeled irrigation polygons (CSV) for the most recent surveys.", "file_format": "csv", "source": "src/processing/batch_process.py"}
+{"date": "2026-01-07T15:17:02.889238", "file": "latest_polygons_table.csv", "description": "The latest labeled irrigation polygons (CSV) for the most recent surveys.", "file_format": "csv", "source": "src/processing/batch_process.py"}

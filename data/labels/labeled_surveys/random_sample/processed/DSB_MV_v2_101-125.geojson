@@ -2039,7 +2039,7 @@
         "day": 16,
         "year": 2018,
         "certainty": 2,
-        "uncertainty_explanation": "only slightly green;uneven",
+        "uncertainty_explanation": "uneven;only slightly green",
         "category": "small-scale"
       },
       "geometry": {

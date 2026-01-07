@@ -211,6 +211,40 @@ def merge_and_check(survey_path: str, polygons_path: Optional[str] = None, certa
     survey_results.drop(columns="geometry").to_csv(results_path, index=False)
     print(f"Saved merged dataset at {results_path}")
 
+    # Extract the final operator initials from the source file name
+    # For files like "AB_JL_101-125" or "JL_DSB_v2_126-150", the first initials are the final operator
+    source_file_basename = os.path.basename(survey_path).replace(".csv", "")
+
+    # Remove "_v2" if present, then get first part before underscore
+    temp_name = source_file_basename.replace("_v2_", "_")
+    final_operator_initials = temp_name.split("_")[0]
+
+    print(f"Setting operator_initials to '{final_operator_initials}' for all polygons (from file: {source_file_basename})")
+
+    # Fix internal_id values in polygons that used site_id numbers instead
+    # Create a lookup: site_id -> correct internal_id
+    site_to_internal_id = survey_gdf[['site_id', 'internal_id']].drop_duplicates().set_index('site_id')['internal_id'].to_dict()
+
+    # Check each polygon's internal_id and operator_initials
+    for idx, row in polygons.iterrows():
+        site_id = row['site_id']
+        internal_id = row['internal_id']
+
+        # Fix operator_initials to reflect the final operator (who did the checking/correction)
+        polygons.at[idx, 'operator_initials'] = final_operator_initials
+
+        # Extract the numeric part of site_id (e.g., "id_3511469" -> 3511469)
+        if site_id.startswith('id_'):
+            site_id_number = int(site_id.replace('id_', ''))
+
+            # If the polygon's internal_id matches the site_id number, it's wrong
+            if internal_id == site_id_number:
+                # Look up the correct internal_id from the survey
+                correct_internal_id = site_to_internal_id.get(site_id)
+                if correct_internal_id is not None:
+                    polygons.at[idx, 'internal_id'] = correct_internal_id
+                    print(f"Fixed internal_id for polygon {row['name']}: {internal_id} -> {correct_internal_id}")
+
     # Select relevant site-level columns from survey_gdf to add to the polygons
     survey_info_cols = ['site_id', 'internal_id', 'plot_file', 'x', 'y', 'water_source', 'year', 'month', 'day', 'source_file']
     survey_info = survey_gdf[survey_info_cols].drop_duplicates()
