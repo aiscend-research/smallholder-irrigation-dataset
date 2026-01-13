@@ -2152,7 +2152,7 @@
         "day": 19,
         "year": 2019,
         "certainty": 3,
-        "uncertainty_explanation": "unclear signs of agriculture;uneven",
+        "uncertainty_explanation": "uneven;unclear signs of agriculture",
         "category": "small-scale"
       },
       "geometry": {
