@@ -114,7 +114,64 @@ python3 src/features/create_label_band.py
 python -m unittest src/features/tests/test_create_label_band.py
 ```
 
-### 3. Machine Learning Pipeline
+### 3. Label Quality Control (Inter-Rater Comparison)
+
+Assess labeling consistency by comparing a ground truth labeler against other labelers. Located in `src/labels/` with the main notebook at `notebooks/labeler_comparison.ipynb`.
+
+**Run the comparison**:
+```python
+from src.labels.label_comparison import LabelComparison
+
+comparison = LabelComparison(
+    irrigation_table_path='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    polygons_path='data/labels/labeled_surveys/random_sample/latest_polygons.geojson',
+    image_boundaries_path='data/labels/labeled_surveys/random_sample/latest_irrigation_data.geojson',
+    gt_operator='AB',                              # Ground truth labeler
+    comparison_operators=['DSB', 'JL', 'KL', 'MV', 'PS'],  # Comparison labelers
+    min_certainty=4,                               # Filter polygons by certainty
+    date_tolerance_days=1,                         # Match images ±1 day
+    output_dir='outputs/labeler_comparison'        # Save figures/CSVs here
+)
+
+# Generate all plots and metrics
+for op in comparison.comparison_operators:
+    comparison.plot_confusion_matrix(op)           # Image-level detection confusion matrix
+    comparison.plot_detection_metrics_bar(op)      # Image-level precision/recall/F1 bar chart
+    comparison.plot_area_metrics_bar(op)           # Area overlap precision/recall/IoU bar chart
+    comparison.plot_area_histograms(op)            # Per-image metric distributions
+    comparison.print_summary(op)                   # Print summary statistics
+
+# Generate summary tables with weighted averages
+detection_table, area_table = comparison.generate_summary_tables()
+```
+
+**Two Levels of Metrics**:
+
+1. **Image-Level Detection**: Binary classification - did the labeler detect ANY irrigation?
+   - TP: Both GT and comparison saw irrigation
+   - FP: Only comparison saw irrigation
+   - FN: Only GT saw irrigation
+   - TN: Neither saw irrigation
+   - Precision = TP / (TP + FP)
+   - Recall = TP / (TP + FN)
+
+2. **Area Overlap**: How much do the labeled polygon areas agree?
+   - For each image, union all GT polygons and all comparison polygons
+   - Precision = intersection_area / comp_area (% of marked area that was correct)
+   - Recall = intersection_area / gt_area (% of GT area that was found)
+   - IoU = intersection_area / union_area
+   - Overall metrics sum areas across all images before computing ratios
+
+**Output Files** (saved to `output_dir`):
+- `{op}_confusion_matrix.png` - Image detection confusion matrix
+- `{op}_detection_metrics.png` - Image detection bar chart
+- `{op}_area_metrics.png` - Area overlap bar chart
+- `{op}_area_histograms.png` - Per-image metric distributions
+- `{site_id}_{date}.png` - Side-by-side polygon comparison plots
+- `image_detection_metrics.csv` - Summary table with weighted averages
+- `area_overlap_metrics.csv` - Summary table with weighted averages
+
+### 4. Machine Learning Pipeline
 
 Run experiments on multi-temporal Sentinel-2 imagery for irrigation classification.
 
@@ -142,9 +199,10 @@ python src/modeling/run_experiment.py
 1. **Sampling** (`src/sampling/`): Generate 1km grid points over agricultural lands using GFSAD Cropland Extent data → Output: GeoJSON/GeoPackage with sample locations
 2. **Label Generation** (`src/labels/`): Use `surveys_with_locations.py` to create Earth Collect surveys from sampling locations → Manual labeling in Google Earth Pro/Earth Collect
 3. **Processing** (`src/processing/`): Convert `.zip` surveys and `.kml` polygons to CSV/GeoJSON → Merge and validate → Pool into `latest_irrigation_table.csv`
-4. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply DOS atmospheric correction and cloud masking → Create 37-step stacks with 14 bands each
-5. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 8-band label `.tif` files
-6. **Modeling** (`src/modeling/`): Spatial-aware data splitting → Flatten multi-temporal data → Train ML models (Random Forest, Gradient Boosting) → Evaluate and visualize
+4. **Quality Control** (`src/labels/label_comparison.py`): Compare labels across labelers → Compute inter-rater metrics → Generate summary tables and visualizations
+5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply DOS atmospheric correction and cloud masking → Create 37-step stacks with 14 bands each
+6. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 8-band label `.tif` files
+7. **Modeling** (`src/modeling/`): Spatial-aware data splitting → Flatten multi-temporal data → Train ML models (Random Forest, Gradient Boosting) → Evaluate and visualize
 
 ### Utility Functions (`src/utils/`)
 - `utils.py`: Contains critical helper functions:

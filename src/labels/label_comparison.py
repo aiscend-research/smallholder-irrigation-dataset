@@ -1,8 +1,74 @@
 """
-Object-oriented interface for inter-rater label comparison.
+Inter-Rater Label Comparison for Quality Control.
 
-This module provides the LabelComparison class for comparing irrigation labels
-between a ground truth labeler and one or more comparison labelers.
+This module provides the LabelComparison class for assessing labeling consistency
+by comparing irrigation polygon labels between a ground truth (GT) labeler and
+one or more comparison labelers.
+
+Usage
+-----
+```python
+from src.labels.label_comparison import LabelComparison
+
+comparison = LabelComparison(
+    irrigation_table_path='data/labels/.../latest_irrigation_table.csv',
+    polygons_path='data/labels/.../latest_polygons.geojson',
+    image_boundaries_path='data/labels/.../latest_irrigation_data.geojson',
+    gt_operator='AB',
+    comparison_operators=['DSB', 'JL', 'KL', 'MV', 'PS'],
+    min_certainty=4,
+    date_tolerance_days=1,
+    output_dir='outputs/comparison'
+)
+
+# Generate plots and metrics for each operator
+for op in comparison.comparison_operators:
+    comparison.plot_confusion_matrix(op)
+    comparison.plot_detection_metrics_bar(op)
+    comparison.plot_area_metrics_bar(op)
+    comparison.plot_area_histograms(op)
+    comparison.print_summary(op)
+
+# Generate summary tables with weighted averages
+detection_df, area_df = comparison.generate_summary_tables()
+```
+
+Metrics
+-------
+Two levels of metrics are computed:
+
+1. **Image-Level Detection** (binary: did labeler detect ANY irrigation?)
+   - TP: Both GT and comparison labeled irrigation polygons
+   - FP: Only comparison labeled (false alarm)
+   - FN: Only GT labeled (missed detection)
+   - TN: Neither labeled
+   - Precision = TP / (TP + FP)
+   - Recall = TP / (TP + FN)
+
+2. **Area Overlap** (continuous: how much do polygon areas agree?)
+   - For each image, union all polygons per labeler
+   - Precision = intersection_area / comp_area
+     (What fraction of area marked by comparison was correct?)
+   - Recall = intersection_area / gt_area
+     (What fraction of GT area was found by comparison?)
+   - IoU = intersection_area / union_area
+   - Overall metrics sum areas across all images before computing ratios
+
+Output Files
+------------
+When output_dir is set, the following files are saved:
+- {op}_confusion_matrix.png: Image detection confusion matrix
+- {op}_detection_metrics.png: Detection metrics bar chart
+- {op}_area_metrics.png: Area overlap metrics bar chart
+- {op}_area_histograms.png: Per-image metric distributions
+- {site_id}_{date}.png: Side-by-side polygon comparison plots
+- image_detection_metrics.csv: Summary table with all operators
+- area_overlap_metrics.csv: Summary table with all operators
+
+See Also
+--------
+- notebooks/labeler_comparison.ipynb: Interactive notebook for running comparisons
+- src/labels/inter_rater_comparison.py: Helper functions used by this class
 """
 
 import os

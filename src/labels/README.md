@@ -58,3 +58,72 @@ Once the survey is modified, it can be zipped back up and imported into Collect 
 Load in and fill out the survey in Earth Collect/Google Earth Pro. The survey responses can be exported as a zip file in Earth Collect, and polygons can be placed in a folder and exported as a `.kml` file in Google Earth Pro. 
 
 For more information on generating and exporting labels, please refer to the [📝 Labeling Guide](https://docs.google.com/document/d/1F-5uTBTCsP3ZU5hwj1NE4RYbmBofbXzeytcCKIT6iz8/edit?usp=sharing)
+
+---
+
+# Quality Control: Inter-Rater Comparison
+
+After labels are collected from multiple labelers, use the `LabelComparison` class to assess labeling consistency by comparing a ground truth (GT) labeler against other labelers.
+
+## Quick Start
+
+```python
+from src.labels.label_comparison import LabelComparison
+
+comparison = LabelComparison(
+    irrigation_table_path='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    polygons_path='data/labels/labeled_surveys/random_sample/latest_polygons.geojson',
+    image_boundaries_path='data/labels/labeled_surveys/random_sample/latest_irrigation_data.geojson',
+    gt_operator='AB',                              # Ground truth labeler initials
+    comparison_operators=['DSB', 'JL', 'KL', 'MV', 'PS'],
+    min_certainty=4,                               # Filter polygons by certainty
+    date_tolerance_days=1,                         # Match images ±1 day
+    output_dir='outputs/labeler_comparison'
+)
+
+# Generate all plots and summary
+for op in comparison.comparison_operators:
+    comparison.plot_confusion_matrix(op)
+    comparison.plot_detection_metrics_bar(op)
+    comparison.plot_area_metrics_bar(op)
+    comparison.plot_area_histograms(op)
+    comparison.print_summary(op)
+
+# Generate summary tables with weighted averages
+detection_table, area_table = comparison.generate_summary_tables()
+```
+
+See `notebooks/labeler_comparison.ipynb` for a complete interactive example.
+
+## Metrics
+
+Two levels of metrics are computed:
+
+### 1. Image-Level Detection
+Binary classification: Did the labeler detect ANY irrigation in the image?
+- **Precision** = TP / (TP + FP) — Of images where comparison labeled irrigation, how many did GT agree?
+- **Recall** = TP / (TP + FN) — Of images where GT saw irrigation, how many did comparison detect?
+
+### 2. Area Overlap
+How much do the labeled polygon areas agree?
+- **Precision** = intersection_area / comp_area — What % of area marked by comparison was correct?
+- **Recall** = intersection_area / gt_area — What % of GT area was found by comparison?
+- **IoU** = intersection_area / union_area
+
+Overall area metrics sum areas across all matched images before computing ratios.
+
+## Output Files
+
+When `output_dir` is specified, the following files are saved:
+- `{op}_confusion_matrix.png` — Image detection confusion matrix
+- `{op}_detection_metrics.png` — Detection metrics bar chart
+- `{op}_area_metrics.png` — Area overlap bar chart
+- `{op}_area_histograms.png` — Per-image metric distributions
+- `{site_id}_{date}.png` — Side-by-side polygon comparison plots
+- `image_detection_metrics.csv` — Summary table with weighted averages
+- `area_overlap_metrics.csv` — Summary table with weighted averages
+
+## Module Structure
+
+- `label_comparison.py` — Main `LabelComparison` class with all plotting and metric methods
+- `inter_rater_comparison.py` — Helper functions for loading/filtering data

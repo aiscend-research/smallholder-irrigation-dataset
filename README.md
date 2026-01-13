@@ -4,7 +4,7 @@
 This repository defines and executes the sampling protocol for the smallholder dry season irrigation dataset in arid/semi-arid regions of Sub-Saharan Africa with a single rainy season. The goal is to ensure consistent, reproducible, and well-documented sampling that aligns with data download, labeling processes, and final dataset creation.
 
 ## Workflow
-Generating this dataset requires four main steps. First, the area of interest and places to be sampled must be defined. Second, these regions are manually labeled for smallholder dry season irrigation presence using Earth Collect and Google Earth Pro, using any high reslution dry season imagery avaialable at that location. Third, satellite data is downloaded from Google Earth Engine and aligned with the sampling locations. Finally, the data is processed and cleaned to create the final dataset.
+Generating this dataset requires five main steps. First, the area of interest and places to be sampled must be defined. Second, these regions are manually labeled for smallholder dry season irrigation presence using Earth Collect and Google Earth Pro, using any high resolution dry season imagery available at that location. Third, label quality is assessed through inter-rater comparison. Fourth, satellite data is downloaded from Google Earth Engine and aligned with the sampling locations. Finally, the data is processed and cleaned to create the final dataset.
 
 1. **Sampling:**
    - Generate AOIs and sampling grids automatically.
@@ -14,11 +14,18 @@ Generating this dataset requires four main steps. First, the area of interest an
    - Use Collect survey tools to generate field labels.
    - Store labels with associated metadata.
 
-3. **Feature Extraction:**
+3. **Quality Control:**
+   - Compare labels across multiple labelers using `src/labels/label_comparison.py`.
+   - Compute image-level detection metrics (precision, recall, F1).
+   - Compute area overlap metrics (IoU, precision, recall).
+   - Generate summary tables with weighted averages.
+   - See `notebooks/labeler_comparison.ipynb` for interactive analysis.
+
+4. **Feature Extraction:**
    - Download publicly available satellite data from Google Earth Engine.
    - Ensure alignment with sampling locations and configurations.
 
-4. **Data Processing:**
+5. **Data Processing:**
    - Clean and integrate labels with satellite features.
    - Prepare final datasets for analysis or model training.
 
@@ -28,14 +35,19 @@ Generating this dataset requires four main steps. First, the area of interest an
 ├── config.yaml                # Project configuration file
 ├── CONTRIBUTING.md            # Contribution guidelines
 ├── LICENSE                    # License file
-├── README.md                  # (Superseded by this version)
+├── README.md                  # This file
+├── CLAUDE.md                  # Developer guide for Claude Code
 ├── requirements.txt           # Python dependencies
 ├── notebooks/                 # Jupyter notebooks for data exploration and prototyping
+│   └── labeler_comparison.ipynb  # Inter-rater comparison analysis
 ├── src/                       # Main source code folder
 │   ├── processing/            # Scripts to clean, merge, and convert survey and polygon data
 │   ├── sampling/              # Grid-based sampling code
-│   ├── labels/                # Label generation and formatting utilities
-│   ├── features/              # Placeholder for feature extraction scripts
+│   ├── labels/                # Label generation, formatting, and quality control
+│   │   ├── label_comparison.py      # LabelComparison class for inter-rater metrics
+│   │   └── inter_rater_comparison.py # Helper functions for comparison
+│   ├── features/              # Feature extraction and satellite data download
+│   ├── modeling/              # ML model training and evaluation
 │   └── utils/                 # Shared utility functions (e.g., figures, geometries)
 ```
 
