@@ -5,6 +5,8 @@ This module provides the LabelComparison class for comparing irrigation labels
 between a ground truth labeler and one or more comparison labelers.
 """
 
+import os
+
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -12,7 +14,6 @@ import numpy as np
 from matplotlib.patches import Patch
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-import warnings
 
 # Import helper functions from the original module
 from .inter_rater_comparison import (
@@ -22,8 +23,6 @@ from .inter_rater_comparison import (
     get_polygons_for_image,
     get_image_boundary,
     get_internal_id,
-    compute_iou,
-    match_polygons
 )
 
 
@@ -47,8 +46,6 @@ class LabelComparison:
         Minimum certainty level for polygons
     date_tolerance_days : int, default=1
         Date matching tolerance in days
-    iou_threshold : float, default=0.1
-        IoU threshold for polygon matching
     output_dir : str, optional
         Directory to save all figures. If None, figures are shown but not saved.
     """
@@ -62,7 +59,6 @@ class LabelComparison:
         comparison_operators: List[str],
         min_certainty: int = 3,
         date_tolerance_days: int = 1,
-        iou_threshold: float = 0.1,
         output_dir: Optional[str] = None
     ):
         self.irrigation_table_path = irrigation_table_path
@@ -72,12 +68,10 @@ class LabelComparison:
         self.comparison_operators = comparison_operators
         self.min_certainty = min_certainty
         self.date_tolerance_days = date_tolerance_days
-        self.iou_threshold = iou_threshold
         self.output_dir = output_dir
 
         # Create output directory if specified
         if self.output_dir:
-            import os
             os.makedirs(self.output_dir, exist_ok=True)
             print(f"Figures will be saved to: {self.output_dir}")
 
@@ -248,7 +242,10 @@ class LabelComparison:
 
     def compute_area_metrics(self, comp_op: str) -> pd.DataFrame:
         """
-        Compute polygon-level area overlap metrics.
+        Compute area-based overlap metrics at the image level.
+
+        For each matched image, unions all GT polygons and all comparison polygons,
+        then records the areas for computing overall precision/recall.
 
         Parameters
         ----------
@@ -258,8 +255,14 @@ class LabelComparison:
         Returns
         -------
         pd.DataFrame
-            Per-image area metrics with precision, recall, f1, mean_iou
+            Per-image area data with:
+            - gt_area: total area marked by GT
+            - comp_area: total area marked by comparison labeler
+            - intersection_area: overlapping area
+            - union_area: total area covered by either labeler
         """
+        from shapely.ops import unary_union
+
         if comp_op in self._area_metrics:
             return self._area_metrics[comp_op]
 
@@ -281,49 +284,80 @@ class LabelComparison:
             n_gt = len(gt_polys)
             n_comp = len(comp_polys)
 
-            # Both agree no irrigation
-            if n_gt == 0 and n_comp == 0:
-                results.append({
-                    'site_id': site_id, 'gt_date': gt_date, 'comp_date': comp_date,
-                    'n_gt': 0, 'n_comp': 0, 'n_matched': 0,
-                    'mean_iou': np.nan, 'precision': 1.0, 'recall': 1.0, 'f1': 1.0,
-                    'both_no_irrigation': True
-                })
-                continue
+            # Compute areas (0 if no polygons)
+            if n_gt > 0:
+                gt_union = unary_union(gt_polys.geometry)
+                gt_area = gt_union.area
+            else:
+                gt_union = None
+                gt_area = 0.0
 
-            # One saw irrigation, other didn't
-            if n_gt == 0 or n_comp == 0:
-                results.append({
-                    'site_id': site_id, 'gt_date': gt_date, 'comp_date': comp_date,
-                    'n_gt': n_gt, 'n_comp': n_comp, 'n_matched': 0,
-                    'mean_iou': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0,
-                    'both_no_irrigation': False
-                })
-                continue
+            if n_comp > 0:
+                comp_union = unary_union(comp_polys.geometry)
+                comp_area = comp_union.area
+            else:
+                comp_union = None
+                comp_area = 0.0
 
-            # Both have polygons - compute matches
-            matches = match_polygons(gt_polys, comp_polys, self.iou_threshold)
-            n_matched = len(matches)
-            mean_iou = np.mean([iou for _, _, iou in matches]) if n_matched > 0 else 0.0
-
-            # FIXED: Precision and recall were swapped!
-            # Precision = of comp's polygons, how many matched GT
-            precision = n_matched / n_comp if n_comp > 0 else 0.0
-            # Recall = of GT's polygons, how many were found by comp
-            recall = n_matched / n_gt if n_gt > 0 else 0.0
-
-            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+            # Compute intersection and union areas
+            if gt_union is not None and comp_union is not None:
+                intersection_area = gt_union.intersection(comp_union).area
+                union_area = gt_union.union(comp_union).area
+            else:
+                intersection_area = 0.0
+                union_area = gt_area + comp_area  # No overlap possible
 
             results.append({
                 'site_id': site_id, 'gt_date': gt_date, 'comp_date': comp_date,
-                'n_gt': n_gt, 'n_comp': n_comp, 'n_matched': n_matched,
-                'mean_iou': mean_iou, 'precision': precision, 'recall': recall, 'f1': f1,
-                'both_no_irrigation': False
+                'n_gt': n_gt, 'n_comp': n_comp,
+                'gt_area': gt_area, 'comp_area': comp_area,
+                'intersection_area': intersection_area, 'union_area': union_area
             })
 
         area_metrics_df = pd.DataFrame(results)
         self._area_metrics[comp_op] = area_metrics_df
         return area_metrics_df
+
+    def compute_overall_area_metrics(self, comp_op: str) -> Dict:
+        """
+        Compute overall area-based precision, recall, and IoU across all images.
+
+        Parameters
+        ----------
+        comp_op : str
+            Comparison operator initials
+
+        Returns
+        -------
+        dict
+            Overall metrics:
+            - precision: total_intersection / total_comp_area
+            - recall: total_intersection / total_gt_area
+            - iou: total_intersection / total_union
+            - f1: harmonic mean of precision and recall
+        """
+        area_df = self.compute_area_metrics(comp_op)
+
+        total_gt_area = area_df['gt_area'].sum()
+        total_comp_area = area_df['comp_area'].sum()
+        total_intersection = area_df['intersection_area'].sum()
+        total_union = area_df['union_area'].sum()
+
+        precision = total_intersection / total_comp_area if total_comp_area > 0 else 0.0
+        recall = total_intersection / total_gt_area if total_gt_area > 0 else 0.0
+        iou = total_intersection / total_union if total_union > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+        return {
+            'precision': precision,
+            'recall': recall,
+            'iou': iou,
+            'f1': f1,
+            'total_gt_area': total_gt_area,
+            'total_comp_area': total_comp_area,
+            'total_intersection': total_intersection,
+            'total_union': total_union
+        }
 
     def plot_confusion_matrix(self, comp_op: str, ax=None, show=True):
         """Plot confusion matrix for image-level detection."""
@@ -341,7 +375,7 @@ class LabelComparison:
             [metrics['fn'], metrics['tn']]
         ])
 
-        im = ax.imshow(cm, cmap='Blues', aspect='auto')
+        ax.imshow(cm, cmap='Blues', aspect='auto')
 
         for i in range(2):
             for j in range(2):
@@ -364,7 +398,6 @@ class LabelComparison:
         if created_fig:
             plt.tight_layout()
             if self.output_dir:
-                import os
                 filepath = os.path.join(self.output_dir, f'{comp_op}_confusion_matrix.png')
                 fig.savefig(filepath, dpi=150, bbox_inches='tight')
                 print(f"Saved: {filepath}")
@@ -410,7 +443,6 @@ class LabelComparison:
         if created_fig:
             plt.tight_layout()
             if self.output_dir:
-                import os
                 filepath = os.path.join(self.output_dir, f'{comp_op}_detection_metrics.png')
                 fig.savefig(filepath, dpi=150, bbox_inches='tight')
                 print(f"Saved: {filepath}")
@@ -422,58 +454,97 @@ class LabelComparison:
         return fig if created_fig else None
 
     def plot_area_histograms(self, comp_op: str, figsize=(12, 10), show=True):
-        """Plot histograms of area overlap metrics."""
-        area_metrics_df = self.compute_area_metrics(comp_op)
+        """Plot histograms of per-image area metrics (precision, recall, F1, IoU)."""
+        area_df = self.compute_area_metrics(comp_op)
+
+        # Filter to images where at least one labeler saw irrigation
+        has_irrigation = (area_df['gt_area'] > 0) | (area_df['comp_area'] > 0)
+        area_with_irr = area_df[has_irrigation].copy()
+
+        # Compute per-image metrics
+        # Precision: intersection / comp_area (0 if comp_area == 0, i.e., FN case - no prediction)
+        # But FN means comp didn't label, so precision is undefined. We include FP cases (precision=0).
+        # Recall: intersection / gt_area (0 if gt_area == 0, i.e., FP case - no GT)
+        # But FP means GT didn't label, so recall is undefined. We include FN cases (recall=0).
+
+        # For precision: include images where comp labeled (comp_area > 0)
+        # If GT also labeled: precision = intersection/comp_area
+        # If GT didn't label (FP): precision = 0 (all predictions wrong)
+        area_with_irr['precision'] = np.where(
+            area_with_irr['comp_area'] > 0,
+            area_with_irr['intersection_area'] / area_with_irr['comp_area'],
+            np.nan  # No prediction made (FN case) - exclude from precision histogram
+        )
+
+        # For recall: include images where GT labeled (gt_area > 0)
+        # If comp also labeled: recall = intersection/gt_area
+        # If comp didn't label (FN): recall = 0 (missed everything)
+        area_with_irr['recall'] = np.where(
+            area_with_irr['gt_area'] > 0,
+            area_with_irr['intersection_area'] / area_with_irr['gt_area'],
+            np.nan  # No GT (FP case) - exclude from recall histogram
+        )
+
+        # IoU: intersection / union (always defined if at least one labeled)
+        area_with_irr['iou'] = area_with_irr['intersection_area'] / area_with_irr['union_area']
+        area_with_irr['iou'] = area_with_irr['iou'].fillna(0)
+
+        # F1: harmonic mean (0 if either precision or recall is 0 or undefined)
+        area_with_irr['f1'] = np.where(
+            (area_with_irr['precision'] > 0) & (area_with_irr['recall'] > 0),
+            2 * area_with_irr['precision'] * area_with_irr['recall'] / (area_with_irr['precision'] + area_with_irr['recall']),
+            0.0
+        )
 
         fig, axes = plt.subplots(2, 2, figsize=figsize)
 
-        # Precision
-        axes[0, 0].hist(area_metrics_df['precision'], bins=20,
-                       edgecolor='black', alpha=0.7)
+        # Precision (images where comp labeled something)
+        precision_data = area_with_irr['precision'].dropna()
+        axes[0, 0].hist(precision_data, bins=20, edgecolor='black', alpha=0.7)
         axes[0, 0].set_xlabel('Precision')
         axes[0, 0].set_ylabel('Count')
-        axes[0, 0].set_title('Polygon Precision Distribution')
-        axes[0, 0].axvline(area_metrics_df['precision'].mean(),
-                          color='red', linestyle='--', linewidth=2, label='Mean')
-        axes[0, 0].legend()
+        axes[0, 0].set_title(f'Per-Image Precision\n({len(precision_data)} images where {comp_op} labeled)')
+        if len(precision_data) > 0:
+            axes[0, 0].axvline(precision_data.mean(), color='red',
+                              linestyle='--', linewidth=2, label=f"Mean: {precision_data.mean():.3f}")
+            axes[0, 0].legend()
 
-        # Recall
-        axes[0, 1].hist(area_metrics_df['recall'], bins=20,
-                       edgecolor='black', alpha=0.7)
+        # Recall (images where GT labeled something)
+        recall_data = area_with_irr['recall'].dropna()
+        axes[0, 1].hist(recall_data, bins=20, edgecolor='black', alpha=0.7)
         axes[0, 1].set_xlabel('Recall')
         axes[0, 1].set_ylabel('Count')
-        axes[0, 1].set_title('Polygon Recall Distribution')
-        axes[0, 1].axvline(area_metrics_df['recall'].mean(),
-                          color='red', linestyle='--', linewidth=2, label='Mean')
-        axes[0, 1].legend()
+        axes[0, 1].set_title(f'Per-Image Recall\n({len(recall_data)} images where {self.gt_operator} labeled)')
+        if len(recall_data) > 0:
+            axes[0, 1].axvline(recall_data.mean(), color='red',
+                              linestyle='--', linewidth=2, label=f"Mean: {recall_data.mean():.3f}")
+            axes[0, 1].legend()
 
-        # F1
-        axes[1, 0].hist(area_metrics_df['f1'], bins=20,
-                       edgecolor='black', alpha=0.7)
+        # F1 (all images with irrigation)
+        axes[1, 0].hist(area_with_irr['f1'], bins=20, edgecolor='black', alpha=0.7)
         axes[1, 0].set_xlabel('F1 Score')
         axes[1, 0].set_ylabel('Count')
-        axes[1, 0].set_title('Polygon F1 Score Distribution')
-        axes[1, 0].axvline(area_metrics_df['f1'].mean(),
-                          color='red', linestyle='--', linewidth=2, label='Mean')
-        axes[1, 0].legend()
+        axes[1, 0].set_title(f'Per-Image F1\n({len(area_with_irr)} images with irrigation)')
+        if len(area_with_irr) > 0:
+            axes[1, 0].axvline(area_with_irr['f1'].mean(), color='red',
+                              linestyle='--', linewidth=2, label=f"Mean: {area_with_irr['f1'].mean():.3f}")
+            axes[1, 0].legend()
 
-        # IoU (excluding both-no-irrigation)
-        iou_data = area_metrics_df[~area_metrics_df['both_no_irrigation']]['mean_iou'].dropna()
-        axes[1, 1].hist(iou_data, bins=20, edgecolor='black', alpha=0.7)
-        axes[1, 1].set_xlabel('Mean IoU')
+        # IoU (all images with irrigation)
+        axes[1, 1].hist(area_with_irr['iou'], bins=20, edgecolor='black', alpha=0.7)
+        axes[1, 1].set_xlabel('IoU')
         axes[1, 1].set_ylabel('Count')
-        axes[1, 1].set_title('Mean IoU Distribution\n(excluding both-no-irrigation)')
-        if len(iou_data) > 0:
-            axes[1, 1].axvline(iou_data.mean(), color='red',
-                              linestyle='--', linewidth=2, label='Mean')
-        axes[1, 1].legend()
+        axes[1, 1].set_title(f'Per-Image IoU\n({len(area_with_irr)} images with irrigation)')
+        if len(area_with_irr) > 0:
+            axes[1, 1].axvline(area_with_irr['iou'].mean(), color='red',
+                              linestyle='--', linewidth=2, label=f"Mean: {area_with_irr['iou'].mean():.3f}")
+            axes[1, 1].legend()
 
-        plt.suptitle(f'Area Overlap Metrics: {self.gt_operator} (GT) vs {comp_op}',
+        plt.suptitle(f'Per-Image Area Metrics: {self.gt_operator} (GT) vs {comp_op}',
                     fontsize=14, fontweight='bold')
         plt.tight_layout()
 
         if self.output_dir:
-            import os
             filepath = os.path.join(self.output_dir, f'{comp_op}_area_histograms.png')
             fig.savefig(filepath, dpi=150, bbox_inches='tight')
             print(f"Saved: {filepath}")
@@ -483,6 +554,50 @@ class LabelComparison:
             plt.close(fig)
 
         return fig
+
+    def plot_area_metrics_bar(self, comp_op: str, ax=None, show=True):
+        """Plot bar chart of overall area-based metrics."""
+        metrics = self.compute_overall_area_metrics(comp_op)
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+            created_fig = True
+        else:
+            fig = None
+            created_fig = False
+
+        metric_names = ['Precision', 'Recall', 'F1', 'IoU']
+        metric_values = [
+            metrics['precision'], metrics['recall'], metrics['f1'], metrics['iou']
+        ]
+
+        colors = ['green', 'blue', 'purple', 'orange']
+        bars = ax.bar(metric_names, metric_values, color=colors,
+                     alpha=0.7, edgecolor='black')
+
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height, f'{height:.3f}',
+                   ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+        ax.set_ylabel('Value', fontsize=12, fontweight='bold')
+        ax.set_title(f'Area Overlap Metrics: {self.gt_operator} (GT) vs {comp_op}',
+                    fontsize=13, fontweight='bold')
+        ax.set_ylim(0, 1.1)
+        ax.grid(axis='y', alpha=0.3)
+
+        if created_fig:
+            plt.tight_layout()
+            if self.output_dir:
+                filepath = os.path.join(self.output_dir, f'{comp_op}_area_metrics.png')
+                fig.savefig(filepath, dpi=150, bbox_inches='tight')
+                print(f"Saved: {filepath}")
+            if show:
+                plt.show()
+            if self.output_dir:
+                plt.close(fig)
+
+        return fig if created_fig else None
 
     def plot_image_comparison(self, site_id: str, gt_date: datetime,
                             figsize=(15, 5), show=True):
@@ -550,8 +665,7 @@ class LabelComparison:
                 ax=ax1, facecolor='lightgray', edgecolor='black', alpha=0.3
             )
         if len(gt_polys) > 0:
-            gt_polys.plot(ax=ax1, facecolor='blue', edgecolor='darkblue',
-                         alpha=0.6, linewidth=1.5)
+            gt_polys.plot(ax=ax1, facecolor='blue', edgecolor='none', alpha=0.3)
 
         gt_title = f'{self.gt_operator} ({gt_date.date()})'
         if gt_internal_id:
@@ -573,8 +687,7 @@ class LabelComparison:
                     ax=ax2, facecolor='lightgray', edgecolor='black', alpha=0.3
                 )
             if len(comp_polys) > 0:
-                comp_polys.plot(ax=ax2, facecolor='red', edgecolor='darkred',
-                               alpha=0.6, linewidth=1.5)
+                comp_polys.plot(ax=ax2, facecolor='red', edgecolor='none', alpha=0.3)
 
             comp_title = f'{comp_op} ({comp_date.date()})'
             if comp_id:
@@ -599,14 +712,12 @@ class LabelComparison:
                 if comp_op in comp_poly_dict:
                     comp_polys = comp_poly_dict[comp_op]
                     if len(comp_polys) > 0:
-                        comp_polys.plot(ax=ax2, facecolor=color, edgecolor=color,
-                                       alpha=0.6, linewidth=1.5)
+                        comp_polys.plot(ax=ax2, facecolor=color, edgecolor='none', alpha=0.3)
                         total_polys += len(comp_polys)
-                        legend_handles.append(Patch(facecolor=color, edgecolor=color,
+                        legend_handles.append(Patch(facecolor=color, edgecolor='none',
                                                    label=f'{comp_op} ({len(comp_polys)})'))
                     else:
-                        # Still add to legend even if no polygons
-                        legend_handles.append(Patch(facecolor=color, edgecolor=color,
+                        legend_handles.append(Patch(facecolor=color, edgecolor='none',
                                                    label=f'{comp_op} (0)', alpha=0.3))
                 else:
                     # Operator didn't label this image - show in legend as "N/A"
@@ -630,18 +741,16 @@ class LabelComparison:
 
         legend_handles_overlay = []
         if len(gt_polys) > 0:
-            gt_polys.plot(ax=ax3, facecolor='blue', edgecolor='darkblue',
-                         alpha=0.4, linewidth=1.2)
-            legend_handles_overlay.append(Patch(facecolor='blue', edgecolor='darkblue',
+            gt_polys.plot(ax=ax3, facecolor='blue', edgecolor='none', alpha=0.25)
+            legend_handles_overlay.append(Patch(facecolor='blue', edgecolor='none',
                                                 label=self.gt_operator))
 
         if len(comparison_dates) == 1:
             comp_op = list(comparison_dates.keys())[0]
             comp_polys = comp_poly_dict[comp_op]
             if len(comp_polys) > 0:
-                comp_polys.plot(ax=ax3, facecolor='red', edgecolor='darkred',
-                               alpha=0.4, linewidth=1.2)
-                legend_handles_overlay.append(Patch(facecolor='red', edgecolor='darkred',
+                comp_polys.plot(ax=ax3, facecolor='red', edgecolor='none', alpha=0.25)
+                legend_handles_overlay.append(Patch(facecolor='red', edgecolor='none',
                                                     label=comp_op))
         else:
             for i, comp_op in enumerate(self.comparison_operators):
@@ -649,10 +758,9 @@ class LabelComparison:
                     comp_polys = comp_poly_dict[comp_op]
                     if len(comp_polys) > 0:
                         color = colors[i % len(colors)]
-                        comp_polys.plot(ax=ax3, facecolor=color, edgecolor=color,
-                                       alpha=0.4, linewidth=1.2)
+                        comp_polys.plot(ax=ax3, facecolor=color, edgecolor='none', alpha=0.25)
                         legend_handles_overlay.append(Patch(facecolor=color,
-                                                           edgecolor=color,
+                                                           edgecolor='none',
                                                            label=comp_op))
 
         ax3.set_title('Overlay', fontsize=11)
@@ -664,7 +772,6 @@ class LabelComparison:
         plt.tight_layout()
 
         if self.output_dir:
-            import os
             filepath = os.path.join(self.output_dir, f'{site_id}_{gt_date.date()}.png')
             fig.savefig(filepath, dpi=150, bbox_inches='tight')
         if show:
@@ -756,7 +863,6 @@ class LabelComparison:
         print(f"Plotting {len(all_images)} images...")
 
         if output_dir:
-            import os
             os.makedirs(output_dir, exist_ok=True)
 
         for i, (site_id, gt_date) in enumerate(sorted(all_images), 1):
@@ -817,13 +923,120 @@ class LabelComparison:
         print(f"  Recall: {det['recall']:.3f}")
         print(f"  F1: {det['f1']:.3f}")
 
-        # Area metrics
-        area = self.compute_area_metrics(comp_op)
-        print(f"\nPolygon-Level Area Overlap (mean):")
-        print(f"  Precision: {area['precision'].mean():.3f}")
-        print(f"  Recall: {area['recall'].mean():.3f}")
-        print(f"  F1: {area['f1'].mean():.3f}")
+        # Overall area metrics
+        area_metrics = self.compute_overall_area_metrics(comp_op)
+        print(f"\nArea Overlap (overall):")
+        print(f"  Precision: {area_metrics['precision']:.3f}")
+        print(f"  Recall: {area_metrics['recall']:.3f}")
+        print(f"  F1: {area_metrics['f1']:.3f}")
+        print(f"  IoU: {area_metrics['iou']:.3f}")
 
-        iou_data = area[~area['both_no_irrigation']]['mean_iou'].dropna()
-        if len(iou_data) > 0:
-            print(f"  Mean IoU: {iou_data.mean():.3f}")
+    def generate_summary_tables(self, save_csv: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Generate summary tables for image detection and area overlap metrics.
+
+        Compiles metrics across all comparison operators and computes weighted
+        averages based on total images labeled by each operator in the dataset.
+
+        Parameters
+        ----------
+        save_csv : bool, default=True
+            Whether to save tables as CSV files to output_dir
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, pd.DataFrame]
+            (image_detection_table, area_overlap_table)
+        """
+        # Get total images labeled by each operator (from full dataset, not just matched)
+        total_images_by_op = {}
+        for op in self.comparison_operators:
+            total_images_by_op[op] = len(self.df_dict[op])
+
+        # Compile image detection metrics
+        detection_rows = []
+        for comp_op in self.comparison_operators:
+            det = self.compute_detection_metrics(comp_op)
+            matches_df = self._matches_dict[comp_op]
+            detection_rows.append({
+                'Operator': comp_op,
+                'Matched Images': len(matches_df),
+                'Total Images Labeled': total_images_by_op[comp_op],
+                'TP': det['tp'],
+                'FP': det['fp'],
+                'FN': det['fn'],
+                'TN': det['tn'],
+                'Precision': det['precision'],
+                'Recall': det['recall'],
+                'F1': det['f1']
+            })
+
+        detection_df = pd.DataFrame(detection_rows)
+
+        # Compute weighted average for detection metrics
+        weights = detection_df['Total Images Labeled'].values
+        weight_sum = weights.sum()
+
+        detection_avg = {
+            'Operator': 'Weighted Avg',
+            'Matched Images': detection_df['Matched Images'].sum(),
+            'Total Images Labeled': weight_sum,
+            'TP': detection_df['TP'].sum(),
+            'FP': detection_df['FP'].sum(),
+            'FN': detection_df['FN'].sum(),
+            'TN': detection_df['TN'].sum(),
+            'Precision': np.average(detection_df['Precision'], weights=weights),
+            'Recall': np.average(detection_df['Recall'], weights=weights),
+            'F1': np.average(detection_df['F1'], weights=weights)
+        }
+        detection_df = pd.concat([detection_df, pd.DataFrame([detection_avg])], ignore_index=True)
+
+        # Compile area overlap metrics
+        area_rows = []
+        for comp_op in self.comparison_operators:
+            area = self.compute_overall_area_metrics(comp_op)
+            area_rows.append({
+                'Operator': comp_op,
+                'Total Images Labeled': total_images_by_op[comp_op],
+                'Precision': area['precision'],
+                'Recall': area['recall'],
+                'F1': area['f1'],
+                'IoU': area['iou']
+            })
+
+        area_df = pd.DataFrame(area_rows)
+
+        # Compute weighted average for area metrics
+        area_avg = {
+            'Operator': 'Weighted Avg',
+            'Total Images Labeled': weight_sum,
+            'Precision': np.average(area_df['Precision'], weights=weights),
+            'Recall': np.average(area_df['Recall'], weights=weights),
+            'F1': np.average(area_df['F1'], weights=weights),
+            'IoU': np.average(area_df['IoU'], weights=weights)
+        }
+        area_df = pd.concat([area_df, pd.DataFrame([area_avg])], ignore_index=True)
+
+        # Display tables
+        print("\n" + "="*80)
+        print("IMAGE-LEVEL DETECTION METRICS")
+        print("="*80)
+        print(detection_df.to_string(index=False))
+
+        print("\n" + "="*80)
+        print("AREA OVERLAP METRICS")
+        print("="*80)
+        print(area_df.to_string(index=False))
+
+        # Save CSVs
+        if save_csv and self.output_dir:
+            detection_path = os.path.join(self.output_dir, 'image_detection_metrics.csv')
+            area_path = os.path.join(self.output_dir, 'area_overlap_metrics.csv')
+
+            detection_df.to_csv(detection_path, index=False)
+            area_df.to_csv(area_path, index=False)
+
+            print(f"\nSaved: {detection_path}")
+            print(f"Saved: {area_path}")
+
+        return detection_df, area_df
