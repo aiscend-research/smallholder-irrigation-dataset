@@ -4,11 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository defines and executes a sampling protocol for creating a smallholder dry season irrigation dataset in arid/semi-arid regions of Sub-Saharan Africa. The workflow involves:
+This repository defines and executes a sampling protocol for creating a smallholder **dry season** irrigation dataset in arid/semi-arid regions of Sub-Saharan Africa (primarily Zambia). The workflow involves:
 1. **Sampling**: Generate AOIs and sampling grids automatically
 2. **Labeling**: Manual annotation using Earth Collect and Google Earth Pro
 3. **Feature Extraction**: Download satellite data from Google Earth Engine aligned with sampling locations
 4. **Data Processing**: Clean and integrate labels with satellite features for ML training
+
+**Key Constraints**:
+- **Temporal scope**: Dry season only (June-October, 5 months)
+- **Primary labelers**: DSB, JL, KL, MV (four UCSB undergraduates)
+- **Test set**: KL's labels exclusively (highest precision=0.75, recall=0.57 from QC analysis)
 
 ## Environment Setup
 
@@ -75,6 +80,16 @@ python src/processing/batch_process.py data/labels/labeled_surveys/random_sample
 ```
 
 This also outputs `latest_irrigation_table.csv` and a GeoJSON with bounding boxes.
+
+**Key Output Files**:
+- `latest_irrigation_table.csv` - Image-level data with coverage statistics
+- `latest_polygons_table.csv` - Polygon-level data with areas and categories
+
+**Important Data Concepts**:
+- **Irrigation certainty scale**: 1=no irrigation, 2-5=irrigation with increasing certainty
+- **High-certainty coverage** (`percent_coverage_hc`): Includes polygons with certainty ≥ 3 (defined in `src/processing/merge_survey_and_polygons.py`)
+- **Polygon categories**: `small-scale`, `industrial`, `tree_crop`, `lawn`, `covered`
+- **Deduplication**: Some images were labeled by multiple labelers (e.g., survey 101-125 for QC). When aggregating, deduplicate by `image_id` (site_id + date), keeping labels with priority: KL > MV > DSB > JL
 
 **Check for warnings in latest surveys**:
 ```bash
@@ -171,7 +186,24 @@ detection_table, area_table = comparison.generate_summary_tables()
 - `image_detection_metrics.csv` - Summary table with weighted averages
 - `area_overlap_metrics.csv` - Summary table with weighted averages
 
-### 4. Machine Learning Pipeline
+### 4. Dataset Analysis Notebooks
+
+Located in `notebooks/`:
+
+- **`results.ipynb`**: Dataset description and quality control results
+  - QC comparison metrics (Anna Boser and Peter Siame as ground truth)
+  - Summary statistics by labeler (locations, images, polygons)
+  - Distribution histograms (images per location, polygons per image, polygon sizes, irrigation coverage)
+  - Monthly breakdown (June-October only)
+  - KL-only subsection for test set characterization
+
+- **`splits.ipynb`**: Test set sizing analysis
+  - Sample size requirements for statistical power
+  - Monthly/yearly breakdown for KL's labels
+  - Temporal change detection capacity (locations with both irrigated and non-irrigated images)
+  - Comparison of KL-only vs all-labelers data
+
+### 5. Machine Learning Pipeline
 
 Run experiments on multi-temporal Sentinel-2 imagery for irrigation classification.
 
