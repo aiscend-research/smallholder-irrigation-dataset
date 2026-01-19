@@ -210,3 +210,6 @@ data/labels/labeled_surveys/random_sample/images_districts_ag.csv
 
 .idea/*
 */.idea/*
+
+notebooks/find_vis_images.py
+data/labels/GEE_screenshots/*
