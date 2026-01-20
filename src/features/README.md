@@ -253,35 +253,107 @@ A note on the differences between versions:
 
 ## Creating Pixel-Level Labels
 
-For each Sentinel-2 image, we classify each pixel as irrigated or not. For irrigated pixels, we also specify the type of irrigation, the labeler's level of certainty, and reasons for any uncertainty. To do this, we overlay labeled polygons on an eight-band `.tif` file, with the following bands. For mixed pixels, the label is given to the class that is in the center of the pixel. 
+For each Sentinel-2 stack, we create pixel-level irrigation labels by rasterizing the labeled polygons. The script creates **separate label files for each labeler** who annotated a given site-date, enabling multi-labeler comparison and consensus analysis.
 
-<img src="readme_figures/band_table.png" alt="table showing band information" width="600" />
+### Label Band Structure (9 bands)
 
-The first band specifies the type of irrigation, if any, and the second is a simple binary mask of the first. These bands only include areas as irrigated if they clear a certain threshold of certainty, with the default being >=3. 
+| Band | Name | Description | Values |
+|------|------|-------------|--------|
+| 1 | Categorical irrigation | Type of irrigation | 0=none, 1=small-scale, 2=tree_crop, 3=industrial, 4=lawn, 5=covered |
+| 2 | Binary irrigation mask | Simple presence/absence | 0=no irrigation, 1=irrigated |
+| 3 | Uncertainty: unclear agriculture | Labeler uncertainty flag | 0/1 |
+| 4 | Uncertainty: only slightly green | Labeler uncertainty flag | 0/1 |
+| 5 | Uncertainty: uneven | Labeler uncertainty flag | 0/1 |
+| 6 | Uncertainty: may be natural | Labeler uncertainty flag | 0/1 |
+| 7 | Uncertainty: may be fishpond | Labeler uncertainty flag | 0/1 |
+| 8 | Certainty score | Labeler confidence | 0=no polygon, 1-5 (5=highest) |
+| 9 | Polygon coverage % | Fraction of pixel covered | 0-100 (for mixed pixel analysis) |
 
-The next five bands are binary masks indicating the reasons for any uncertainty of the irrigation classification, with each band corresponding to a different uncertainty explanation. The last band indicates the certainty score, with 5 being high certainty, 1 being low certainty, and 0 indicating no irrigation. These bands include all areas regardless of their level of certainty.
+**Notes:**
+- Bands 1-2 only include polygons with certainty >= 3 (configurable threshold)
+- Bands 3-8 include all polygons regardless of certainty
+- Band 9 uses 10x supersampling to calculate actual pixel coverage percentage, enabling identification of mixed pixels (partially covered by polygons)
 
-The script will then create a folder `~/data/dataset/labels` containing all labels. For each input image, it will create a label file in format `uniqueID_siteID_date_labeler.tif` where
-- `uniqueID` is a unique identifier for the label
--  `siteID` is the ID of the site
--  `date` is the date of the image (format `YYYY.MM.DD`)
--  `labeler` is the labeler's initials
+### Mixed Pixel Handling
 
-`create_label_band.py` assumes that all the features have been downloaded to the data root, at `features_v2`. This is necessary as it uses the downloaded features to ensure geospatial alignment between features and labels.
+For pixels that are only partially covered by a polygon:
+- **Bands 1-2**: Use center-point approach (pixel labeled based on whether its center falls inside the polygon)
+- **Band 9**: Shows actual coverage percentage (0-100%), calculated via supersampling
 
-To run this script, navigate to the `src` directory and run
+This allows downstream analysis to:
+- Filter to only fully-covered pixels (coverage = 100%)
+- Weight samples by coverage confidence
+- Identify edge pixels for special handling
 
-```{bash}
-python3 features/create_label_band.py
+### Output Files
+
+For each stack file and each labeler who annotated that site-date, the script creates:
+```
+{unique_id}_{site_id}_{YYYY.MM.DD}_{operator}_labels.tif
 ```
 
-This will create a folder `~/data/dataset/labels` with all corresponding labels.
-
-To run tests for this script, run the following command from this directory:
-
-```{bash}
-python -m unittest tests/test_create_label_band.py
+For example, if site `5133803` on `2018-10-03` was labeled by KL, AB, and JL:
+```
+100_5133803_2018.10.03_KL_labels.tif
+100_5133803_2018.10.03_AB_labels.tif
+100_5133803_2018.10.03_JL_labels.tif
 ```
 
-Note that `dummy.geojson` is a dummy GeoJSON file which is used for testing. This imitates the format of the GeoJSON polygon files.
-Note: Downloaded label TIFs are located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/dataset/labels`
+**BUG:** The unique ID in the main dataset file do not necessarily correspond to the features and their labels and should therefore be ignored!
+
+**Important:** Images labeled as "no irrigation" (no polygons) also get label files with all zeros, ensuring complete coverage for model training.
+
+### Running the Script
+
+```bash
+# From project root
+python src/features/create_label_band.py --download_dir data/features --version 20260107_180813
+
+# Or use defaults (latest version)
+python src/features/create_label_band.py
+```
+
+**From Python:**
+```python
+from src.features.create_label_band import create_labels
+create_labels('data/features', '20260107_180813')
+```
+
+### Current Dataset
+
+Labels for the `20260107_180813` feature download are stored alongside the stack files:
+- **Total label files**: 3,536
+- **With irrigation polygons**: 1,244
+- **Empty labels (no irrigation)**: 2,292
+
+---
+
+## Visualization Tools
+
+### GEE Screenshot Visualization
+
+`gee_screenshot_visualization.py` provides functions to overlay labeled polygons on Google Earth Pro screenshots for publication-quality figures.
+
+```python
+from src.features.gee_screenshot_visualization import (
+    list_available_screenshots,
+    plot_screenshot_with_polygons,
+    plot_random_screenshot
+)
+
+# List available screenshots
+screenshots = list_available_screenshots()
+
+# Plot a specific screenshot with polygon overlays from all labelers
+plot_screenshot_with_polygons(
+    survey='201-225',
+    internal_id=13,
+    month=7, day=31, year=2023
+)
+
+# Or plot a random one
+plot_random_screenshot()
+```
+
+Screenshots should be placed in `data/labels/GEE_screenshots/` with naming format:
+`{survey}_{internal_id}_{MM-DD-YY}.png`

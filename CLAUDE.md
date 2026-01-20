@@ -123,11 +123,22 @@ python3 src/features/download_sentinel2_mosaics.py
 python3 src/features/visualize_tif.py {uid_of_image}
 ```
 
-**Create pixel-level labels**:
+**Create pixel-level labels** (9-band labels with per-labeler files):
 ```bash
-python3 src/features/create_label_band.py
-python -m unittest src/features/tests/test_create_label_band.py
+# Run on latest feature download
+python src/features/create_label_band.py --download_dir data/features --version 20260107_180813
+
+# Or from Python
+from src.features.create_label_band import create_labels
+create_labels('data/features', '20260107_180813')
 ```
+
+Output: `{uid}_{site}_{YYYY.MM.DD}_{operator}_labels.tif` with 9 bands:
+- Band 1: Categorical irrigation type (1-5)
+- Band 2: Binary irrigation mask
+- Bands 3-7: Uncertainty flags
+- Band 8: Certainty score (1-5)
+- Band 9: Polygon coverage % (0-100, for mixed pixel analysis)
 
 ### 3. Label Quality Control (Inter-Rater Comparison)
 
@@ -221,9 +232,9 @@ python src/modeling/run_experiment.py
 - Copy of experiment config
 
 **Dataset Structure**:
-- **Images**: 14 spectral bands × 37 time steps = 518 bands per `.tif`
-- **Masks**: 8-band `.tif` with irrigation labels (type, presence, uncertainty, certainty)
-- **Metadata**: `.json` with location and temporal info
+- **Images**: 10 spectral bands × 42 time steps = 420 bands per `*_stack.tif`
+- **Masks**: 9-band `*_labels.tif` with irrigation labels (type, presence, uncertainty flags, certainty, coverage %)
+- **Metadata**: `*_metadata.json` with location and temporal info
 
 ## Architecture Notes
 
@@ -233,7 +244,7 @@ python src/modeling/run_experiment.py
 3. **Processing** (`src/processing/`): Convert `.zip` surveys and `.kml` polygons to CSV/GeoJSON → Merge and validate → Pool into `latest_irrigation_table.csv`
 4. **Quality Control** (`src/labels/label_comparison.py`): Compare labels across labelers → Compute inter-rater metrics → Generate summary tables and visualizations
 5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply DOS atmospheric correction and cloud masking → Create 37-step stacks with 14 bands each
-6. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 8-band label `.tif` files
+6. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 9-band label `.tif` files per labeler (includes coverage % for mixed pixel analysis)
 7. **Modeling** (`src/modeling/`): Spatial-aware data splitting → Flatten multi-temporal data → Train ML models (Random Forest, Gradient Boosting) → Evaluate and visualize
 
 ### Utility Functions (`src/utils/`)

@@ -1,10 +1,16 @@
 '''
-create_label_band.py
+create_label_band_new.py
 Functions to apply labels to all .tif images with corresponding labelled polygons.
 
-Output: 
-    .tif image at time T with Label band at the same resolution of the original image,
-    binary mask which represents the prescence or absence of irrigation at each pixel.
+Output:
+    For each stack .tif and each labeler who annotated that location-date:
+    A label .tif with 9 bands at the same resolution as the original image.
+
+Changes from original create_label_band.py:
+    - Flexible directory paths (not hardcoded)
+    - Creates separate label files for EACH labeler
+    - Properly transforms coordinates from EPSG:4326 to image CRS
+    - Adds band 8: % polygon coverage for mixed pixel analysis
 '''
 
 import os
@@ -16,138 +22,186 @@ from rasterio.crs import CRS
 import geopandas as gpd
 from shapely.geometry import mapping
 import numpy as np
-from matplotlib import pyplot as plt
-from datetime import date, datetime, timedelta
+import logging
 
-# Not sure if we need this, but wouldn't load utils without this.
+# Add project root to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# import utils.utils
-from utils.utils import *
+from utils.utils import get_data_root
 
-'''
-Small class definition to be able to pass in data object
-into utils.py's save_data function.
-'''
-class LabelTif:
-    def __init__(self, array, meta):
-        self.array = array
-        self.meta = meta.copy()
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    def read(self):
-        return self.array
 
-def create_labels():
+def create_labels(download_dir, version_name=None):
     """
-    Creates labels the .tif images with corresponding labelled polygons.
-    Note: For a particular .tif image, we may have more than one polygon file.
-    Therefore, we may create multiple labels for a single .tif image.
+    Creates labels for all downloaded .tif stacks with perfect spatial alignment.
+    Creates SEPARATE label files for EACH labeler who annotated each location-date.
 
     Parameters:
-        - path (str): Location of the specific tif image
-    """
-    
-    # Retrieve irrigation table
-    IRRIGATION_TABLE = create_irrigation_table()
-    
-    # Create a label .tif for each location/time/source combination
-    for row in IRRIGATION_TABLE.itertuples():
-        irrigation_geojson = row.source_file
-        irrigation_geojson = get_data_root() + "/labels/labeled_surveys/random_sample/processed/" + irrigation_geojson + ".geojson" 
-        
-        if not os.path.isfile(irrigation_geojson):
-            raise RuntimeError(f"Unable to find irrigation geojson file: {irrigation_geojson}")
+        - download_dir (str): Root directory containing versioned downloads
+        - version_name (str, optional): Specific version folder name. If None, uses latest.
 
-        internal_id = row.internal_id
-        unique_id = row.unique_id
-        survey_id = int(row.site_id)
-        path_to_feature_file = get_data_root() + "features_v2/" + f"{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_image.tif"
-        image_meta = get_image_meta(path_to_feature_file)
-        timestamp = date(row.year, row.month, row.day)
-        gdf = retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp)
-
-        # Retrieve labels
-        label_array = rasterize_polygons(gdf, image_meta)
-
-        # Save labels – to data/dataset/labels
-        operator_initials = irrigation_geojson.split("/")[-1].split("_")[0]
-        output_label_path = f"dataset/labels/{unique_id}_{survey_id}_{row.year:04d}.{row.month:02d}.{row.day:02d}_{operator_initials}.tif"
-        save_label_raster(label_array, image_meta, output_label_path, 
-                          description=f"Row {unique_id} of irrigation table: Label for site {survey_id} at {timestamp.strftime('%Y.%m.%d')} by {operator_initials}")
-
-def create_irrigation_table():
-    '''
-    Creates irrigation table with location, time, and source.
-    '''
-    IRRIGATION_TABLE = pd.read_csv(get_data_root() + 
-                                "/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
-
-    IRRIGATION_TABLE['site_id'] = IRRIGATION_TABLE['site_id'].apply(lambda id: id[3:])
-    return IRRIGATION_TABLE
-
-def get_image_meta(input_image_path):
-    """
-    Retrieve metadata for a particular .tif image.
-
-    Parameters:
-        - input_image_path (str): The input path of the .tif image of interest.
-
-    Output: 
-        - image_meta (dict): Stores image metadata
-    """
-    with rasterio.open(input_image_path) as src:
-        image_meta = src.meta.copy()
-
-    return image_meta
-
-def retrieve_polygons(irrigation_geojson, survey_id, internal_id, image_meta, timestamp):
-    """
-    Retrieve polygons corresponding to a particular .tif image.
-
-    Parameters:
-        - irrigation_geojson (str): Path of GeoJSON file that corresponds to the particular image 
-        we are working with.
-        - survey_id (int): Full survey id to retrieve polygons at the correct location
-        - internal_id (int): Internal survey id to retrieve polygons at the correct location
-        - image_meta (dict): Metadata of particular .tif image we are working with.
-        - timestamp (Date): Date
-
-    Output: 
-        - gdf (geopandas.geodataframe.GeoDataFrame): DataFrame that corresponds to the polygons 
-        for the particular image.
+    Returns:
+        - None. Creates {file_id}_{operator}_labels.tif for each stack file and labeler.
     """
 
-    # Check that irrigation_geojson exists
-    if not os.path.isfile(irrigation_geojson):
-        raise RuntimeError(f"Unable to find irrigation geojson file: {irrigation_geojson}")
-    
-    gdf = gpd.read_file(irrigation_geojson)
-    gdf = gdf.set_crs(image_meta['crs'], allow_override=True)
+    # Get the version directory
+    if version_name is None:
+        versions = [d for d in os.listdir(download_dir) if os.path.isdir(os.path.join(download_dir, d))]
+        versions.sort(reverse=True)
+        if not versions:
+            raise RuntimeError(f"No version directories found in {download_dir}")
+        version_name = versions[0]
+        logging.info(f"Using latest version: {version_name}")
 
-    # Retrieve correct location. Note some polygons' internal_id is actually
-    # its survey id, so we must check both ids.
-    gdf = gdf[ (gdf['internal_id'] == survey_id) | (gdf['internal_id'] == internal_id)]
+    version_dir = os.path.join(download_dir, version_name)
+    if not os.path.exists(version_dir):
+        raise RuntimeError(f"Version directory not found: {version_dir}")
 
-    # Filter by times
-    gdf = gdf[ (gdf['year'] == timestamp.year) & (gdf['month'] == timestamp.month) & (gdf['day'] == timestamp.day)]
+    # Load the combined polygons file (contains all labelers)
+    polygons_path = os.path.join(get_data_root(), 'labels/labeled_surveys/random_sample/latest_polygons.geojson')
+    if not os.path.exists(polygons_path):
+        raise RuntimeError(f"Polygons file not found: {polygons_path}")
+    all_polygons = gpd.read_file(polygons_path)
+    logging.info(f"Loaded {len(all_polygons)} polygons from {polygons_path}")
 
-    return gdf
+    # Load irrigation table to map unique_id -> site_id, date
+    irrigation_table = load_irrigation_table()
 
-def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
+    # Find all stack files (unmasked versions)
+    stack_files = [f for f in os.listdir(version_dir)
+                   if f.endswith('_stack.tif') and '_masked' not in f]
+
+    logging.info(f"Found {len(stack_files)} stack files to label")
+
+    for stack_file in stack_files:
+        file_id = stack_file.replace('_stack.tif', '')
+        stack_path = os.path.join(version_dir, stack_file)
+
+        # Parse from filename: "{unique_id}_{site_numeric}_{YYYY.MM.DD}_stack.tif"
+        # NOTE: unique_id in filename may not match irrigation table, so we use site + date
+        try:
+            parts = file_id.split('_')
+            site_numeric = parts[1]  # e.g., "5119273"
+            date_str = parts[2]      # e.g., "2021.09.16"
+            date_parts = date_str.split('.')
+            year, month, day = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
+            site_id = f"id_{site_numeric}"
+        except (ValueError, IndexError) as e:
+            logging.warning(f"Could not parse filename {file_id}: {e}, skipping")
+            continue
+
+        # Verify site exists in irrigation table
+        table_rows = irrigation_table[irrigation_table['site_id'] == site_id]
+        if len(table_rows) == 0:
+            logging.warning(f"No irrigation table entry found for site_id {site_id}, skipping")
+            continue
+
+        # Read the actual stack to get exact CRS and transform
+        with rasterio.open(stack_path) as src:
+            image_meta = {
+                'crs': src.crs,
+                'transform': src.transform,
+                'height': src.height,
+                'width': src.width,
+                'dtype': 'uint8'
+            }
+
+        logging.info(f"Processing {file_id}: site={site_id}, date={year}-{month:02d}-{day:02d}")
+
+        # Find all labelers who annotated this site-date
+        site_polygons = all_polygons[
+            (all_polygons['site_id'] == site_id) &
+            (all_polygons['year'] == year) &
+            (all_polygons['month'] == month) &
+            (all_polygons['day'] == day)
+        ]
+
+        if len(site_polygons) == 0:
+            # No polygons = "no irrigation" label. Find which labelers assessed this image.
+            # Look up in irrigation table by site_id and date
+            matching_rows = irrigation_table[
+                (irrigation_table['site_id'] == site_id) &
+                (irrigation_table['year'] == year) &
+                (irrigation_table['month'] == month) &
+                (irrigation_table['day'] == day)
+            ]
+
+            if len(matching_rows) == 0:
+                logging.warning(f"No irrigation table entry for {file_id}, skipping")
+                continue
+
+            # Create empty label files for each labeler who assessed this image
+            labelers = matching_rows['operator_initials'].unique()
+            logging.info(f"No polygons for {file_id}, creating empty labels for {len(labelers)} labelers: {list(labelers)}")
+
+            for operator in labelers:
+                # Create empty label array (all zeros)
+                empty_gdf = gpd.GeoDataFrame(columns=['geometry', 'certainty', 'category', 'uncertainty_explanation'])
+                label_array = rasterize_polygons(empty_gdf, image_meta)
+
+                output_label_path = os.path.join(version_dir, f"{file_id}_{operator}_labels.tif")
+                save_label_raster(
+                    label_array,
+                    image_meta,
+                    output_label_path,
+                    description=f"Labels for {file_id} by {operator}: site {site_id} at {year}.{month:02d}.{day:02d} (no irrigation)"
+                )
+                logging.info(f"  Created empty labels for {operator}")
+            continue
+
+        # Get unique labelers for this site-date
+        labelers = site_polygons['operator_initials'].unique()
+        logging.info(f"Found {len(site_polygons)} polygons from {len(labelers)} labelers: {list(labelers)}")
+
+        # Create a label file for EACH labeler
+        for operator in labelers:
+            operator_polygons = site_polygons[site_polygons['operator_initials'] == operator].copy()
+
+            # Rasterize this labeler's polygons
+            label_array = rasterize_polygons(operator_polygons, image_meta)
+
+            # Save with operator in filename
+            output_label_path = os.path.join(version_dir, f"{file_id}_{operator}_labels.tif")
+            save_label_raster(
+                label_array,
+                image_meta,
+                output_label_path,
+                description=f"Labels for {file_id} by {operator}: site {site_id} at {year}.{month:02d}.{day:02d}"
+            )
+
+            logging.info(f"  Created labels for {operator}: {len(operator_polygons)} polygons")
+
+
+def load_irrigation_table():
+    """Load and prepare the irrigation table."""
+    import pandas as pd
+    irrigation_path = os.path.join(get_data_root(), 'labels/labeled_surveys/random_sample/latest_irrigation_table.csv')
+    df = pd.read_csv(irrigation_path)
+    return df
+
+
+def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample=10):
     """
     Rasterizes the polygons to match the resolution of the particular image.
+    Properly transforms coordinates from EPSG:4326 to image CRS.
 
     Parameters:
-        - gdf (geopandas.geodataframe.GeoDataFrame): DataFrame that corresponds to the polygons for the 
-        particular image.
-        -image_meta (dict): Metadata of particular .tif image we are working with.
-        - certainty_thresh (int): Minimum certainty for a polygon to be considered irrigated.
+        - gdf (geopandas.geodataframe.GeoDataFrame): Polygons for this image/labeler
+        - image_meta (dict): Metadata of the .tif image
+        - certainty_thresh (int): Minimum certainty for irrigation classification (default 3)
+        - coverage_supersample (int): Factor to supersample for coverage calculation (default 10)
 
-    Output: 
-        - label_array (numpy.ndarray): A binary numpy array of the same shape as the input image, with
-        1's representing irrigated pixels, 0's representing unirrigated pixels.
+    Output:
+        - label_array (numpy.ndarray): Array with shape (9, height, width) containing:
+            Band 0: Categorical irrigation (1=small-scale, 2=tree_crop, 3=industrial, 4=lawn, 5=covered)
+            Band 1: Binary irrigation mask (1=irrigated, 0=not irrigated)
+            Bands 2-6: Uncertainty flags (1=has this uncertainty type, 0=doesn't)
+            Band 7: Certainty score (1-5)
+            Band 8: % polygon coverage (0-100) for certainty >= threshold
     """
     IRRIGATION_TYPES = {
         "small-scale": 1,
@@ -157,27 +211,6 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
         "covered": 5
     }
 
-    # Create a label array with 8 bands, band 1 for each type of irrigation, bands 2-6 for uncertainty explanations
-    labels = np.zeros((8, image_meta['height'], image_meta['width']), dtype=np.uint8)
-
-     # Add certainty score band
-    shapes = [(geom, certainty) for geom, certainty in zip(gdf.geometry, gdf.certainty)]
-    # Transform geoms from ESPG:4326 to image_meta's crs
-    shapes = [
-        (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
-        for geom, value in shapes
-    ]
-
-    certainty_array = rasterize(
-        shapes=shapes,
-        out_shape=(image_meta['height'], image_meta['width']),
-        transform=image_meta['transform'],
-        fill=0,
-        dtype='uint8'
-    )
-    labels[7] = certainty_array
-
-    # Retrieve uncertainty bands 2-6
     UNCERTAINTY_TYPES = [
         "unclear signs of agriculture",
         "only slightly green",
@@ -186,69 +219,180 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3):
         "may be a fishpond"
     ]
 
-    for i in range(5):
-        shapes = [(geom, 1) for geom, cat in zip(gdf.geometry, gdf.uncertainty_explanation) if UNCERTAINTY_TYPES[i] in cat.split(";")]
-        # Transform geoms from ESPG:4326 to image_meta's crs
-        shapes = [
-            (transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)), value)
-            for geom, value in shapes
-        ]
-        mask = rasterize(
+    height = image_meta['height']
+    width = image_meta['width']
+    target_crs = image_meta['crs']
+    transform = image_meta['transform']
+
+    # Create a label array with 9 bands (8 original + 1 coverage)
+    labels = np.zeros((9, height, width), dtype=np.float32)
+
+    if len(gdf) == 0:
+        return labels.astype(np.uint8)
+
+    # Helper function to transform geometries from EPSG:4326 to image CRS
+    def transform_shapes(shapes_values):
+        """Transform list of (geometry, value) tuples from EPSG:4326 to target CRS."""
+        transformed = []
+        for geom, value in shapes_values:
+            try:
+                transformed_geom = transform_geom(
+                    CRS.from_string("EPSG:4326"),
+                    target_crs,
+                    mapping(geom)
+                )
+                transformed.append((transformed_geom, value))
+            except Exception as e:
+                logging.warning(f"Failed to transform geometry: {e}")
+        return transformed
+
+    # Band 7: Certainty score (all polygons)
+    shapes = [(geom, int(cert)) for geom, cert in zip(gdf.geometry, gdf['certainty']) if cert > 0]
+    if shapes:
+        shapes = transform_shapes(shapes)
+        labels[7] = rasterize(
             shapes=shapes,
-            out_shape=(image_meta['height'], image_meta['width']),
-            transform=image_meta['transform'],
+            out_shape=(height, width),
+            transform=transform,
             fill=0,
             dtype='uint8'
-        ) 
-        labels[i + 2] = mask
+        )
 
-    # Add the actual irrigation bands, but only if the certainty is high enough
-    # Filter out low certainty polygons
-    gdf = gdf[gdf['certainty'] >=  certainty_thresh]  
+    # Bands 2-6: Uncertainty flags
+    for i, uncertainty_type in enumerate(UNCERTAINTY_TYPES):
+        shapes = []
+        for geom, explanation in zip(gdf.geometry, gdf['uncertainty_explanation']):
+            if isinstance(explanation, str) and uncertainty_type in explanation:
+                shapes.append((geom, 1))
+        if shapes:
+            shapes = transform_shapes(shapes)
+            labels[i + 2] = rasterize(
+                shapes=shapes,
+                out_shape=(height, width),
+                transform=transform,
+                fill=0,
+                dtype='uint8'
+            )
 
-    # Retrieve irrigation bands (first and second bands)
-    shapes = []
-    for geom, cat in zip(gdf.geometry, gdf.category):
-        if cat is None or cat == "":
-            cat = "small-scale"  # Default category
-        cat = cat.split(";")[0]
-        if cat not in IRRIGATION_TYPES:
-            raise ValueError(f"Unknown category: '{cat}'")
-        geom = transform_geom(CRS.from_string("EPSG:4326"), image_meta['crs'], mapping(geom)) # Transform geom from ESPG:4326 to image_meta's crs
-        shapes.append((geom, IRRIGATION_TYPES[cat]))
+    # Filter to high-certainty polygons for irrigation bands and coverage
+    high_cert_gdf = gdf[gdf['certainty'] >= certainty_thresh].copy()
 
+    if len(high_cert_gdf) > 0:
+        # Band 0: Categorical irrigation type
+        shapes = []
+        for geom, cat in zip(high_cert_gdf.geometry, high_cert_gdf['category']):
+            if cat is None or cat == "" or (isinstance(cat, float) and np.isnan(cat)):
+                cat = "small-scale"
+            cat = str(cat).split(";")[0]
+            if cat not in IRRIGATION_TYPES:
+                logging.warning(f"Unknown category '{cat}', defaulting to small-scale")
+                cat = "small-scale"
+            shapes.append((geom, IRRIGATION_TYPES[cat]))
 
-    label_array = rasterize(
-        shapes=shapes,
-        out_shape=(image_meta['height'], image_meta['width']),
-        transform=image_meta['transform'],
-        fill=0,
-        dtype='uint8'
-    )
+        if shapes:
+            shapes = transform_shapes(shapes)
+            labels[0] = rasterize(
+                shapes=shapes,
+                out_shape=(height, width),
+                transform=transform,
+                fill=0,
+                dtype='uint8'
+            )
 
-    # Second band is a binary mask of first band
-    labels[0] = label_array
-    labels[1] = np.where(label_array != 0, 1, 0)
+        # Band 1: Binary irrigation mask
+        labels[1] = np.where(labels[0] != 0, 1, 0)
+
+        # Band 8: % polygon coverage (supersampled for accuracy)
+        # Rasterize at higher resolution, then compute mean
+        super_height = height * coverage_supersample
+        super_width = width * coverage_supersample
+
+        # Adjust transform for supersampled resolution
+        super_transform = rasterio.transform.Affine(
+            transform.a / coverage_supersample,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.e / coverage_supersample,
+            transform.f
+        )
+
+        # Create binary mask at supersampled resolution
+        coverage_shapes = [(geom, 1) for geom in high_cert_gdf.geometry]
+        coverage_shapes = transform_shapes(coverage_shapes)
+
+        if coverage_shapes:
+            super_mask = rasterize(
+                shapes=coverage_shapes,
+                out_shape=(super_height, super_width),
+                transform=super_transform,
+                fill=0,
+                dtype='uint8'
+            )
+
+            # Reshape and compute mean for each output pixel
+            # This gives us the fraction of sub-pixels that are covered
+            super_mask = super_mask.reshape(height, coverage_supersample, width, coverage_supersample)
+            coverage_pct = super_mask.mean(axis=(1, 3)) * 100  # Convert to percentage
+            labels[8] = coverage_pct
+
+    # Convert to appropriate dtype (uint8 for all except coverage which stays float)
+    # We'll store coverage as uint8 (0-100)
+    labels = labels.astype(np.uint8)
 
     return labels
+
 
 def save_label_raster(label_array, image_meta, output_label_path, description="Label for irrigation data"):
     """
     Saves the rasterized labels.
 
     Parameters:
-        - label_array (numpy.ndarray): A binary numpy array of the same shape as the input image, with
-        1's representing irrigated pixels, 0's representing unirrigated pixels.
-        -image_meta (dict): Metadata of particular .tif image we are working with.
+        - label_array (numpy.ndarray): Array with shape (9, height, width) containing irrigation labels.
+        - image_meta (dict): Metadata of particular .tif image we are working with.
         - output_label_path (str): The output path of the labelled .tif image.
+        - description (str): Description to save in metadata.
     """
-    label_meta = image_meta.copy()
-    label_meta.update({
-        "count": label_array.shape[0],
-    })
+    # Make sure output directory exists
+    os.makedirs(os.path.dirname(output_label_path) if os.path.dirname(output_label_path) else '.', exist_ok=True)
 
-    data = LabelTif(label_array, label_meta)
-    save_data(data, output_label_path, description=description)
-    
+    # Prepare metadata for saving
+    label_meta = {
+        'driver': 'GTiff',
+        'dtype': 'uint8',
+        'width': image_meta['width'],
+        'height': image_meta['height'],
+        'count': label_array.shape[0],
+        'crs': image_meta['crs'],
+        'transform': image_meta['transform'],
+        'compress': 'lzw'
+    }
+
+    # Save with rasterio
+    with rasterio.open(output_label_path, 'w', **label_meta) as dst:
+        dst.write(label_array)
+        dst.update_tags(DESCRIPTION=description)
+        dst.set_band_description(1, 'Categorical irrigation (1=small-scale, 2=tree_crop, 3=industrial, 4=lawn, 5=covered)')
+        dst.set_band_description(2, 'Binary irrigation mask')
+        dst.set_band_description(3, 'Uncertainty: unclear agriculture')
+        dst.set_band_description(4, 'Uncertainty: only slightly green')
+        dst.set_band_description(5, 'Uncertainty: uneven')
+        dst.set_band_description(6, 'Uncertainty: may be natural')
+        dst.set_band_description(7, 'Uncertainty: may be fishpond')
+        dst.set_band_description(8, 'Certainty score (1-5)')
+        dst.set_band_description(9, 'Polygon coverage % (certainty >= 3)')
+
+
 if __name__ == "__main__":
-    create_labels()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Create label bands for downloaded Sentinel-2 stacks')
+    parser.add_argument('--download_dir', type=str,
+                        default=os.path.join(get_data_root(), 'features'),
+                        help='Directory containing versioned downloads')
+    parser.add_argument('--version', type=str, default=None,
+                        help='Specific version name (default: latest)')
+
+    args = parser.parse_args()
+
+    create_labels(args.download_dir, args.version)

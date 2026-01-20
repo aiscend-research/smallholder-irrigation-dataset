@@ -1,10 +1,14 @@
 """
-Contains tests for helper functions for creating label band
+Tests for the LEGACY create_label_band module (8-band output).
+
+NOTE: These tests are for create_label_band_legacy.py only.
+The new create_label_band.py has a different API with 9 bands and
+separate label files per labeler.
 """
 
 import unittest
 from datetime import datetime, timedelta
-from create_label_band import create_irrigation_table, retrieve_polygons, rasterize_polygons, save_label_raster
+from create_label_band_legacy import create_irrigation_table, retrieve_polygons, rasterize_polygons, save_label_raster
 from utils.utils import get_data_root
 import rasterio
 import os
