@@ -389,74 +389,6 @@ def plot_sentinel2_with_mask(stack_path, label_path=None, operator=None,
     return ax
 
 
-def plot_sentinel2_coverage(stack_path, label_path=None, operator=None,
-                            timestep=None, ax=None, figsize=(10, 10),
-                            title=None):
-    """
-    Plot Sentinel-2 RGB with coverage percentage overlay.
-
-    Parameters:
-        stack_path (str): Path to the stack file
-        label_path (str, optional): Path to the label file
-        operator (str, optional): Operator initials
-        timestep (int, optional): Which timestep for RGB
-        ax: Axes to plot on
-        figsize: Figure size
-        title: Plot title
-
-    Returns:
-        matplotlib.axes.Axes, matplotlib colorbar
-    """
-    # Load RGB
-    rgb, transform, crs = load_rgb_from_stack(stack_path, timestep)
-
-    # Find label file
-    if label_path is None:
-        label_paths = find_labels_for_stack(stack_path, operator)
-        if len(label_paths) == 0:
-            raise ValueError(f"No label file found for {stack_path}")
-        label_path = label_paths[0]
-
-    # Load coverage
-    coverage = load_label_mask(label_path, 'coverage')
-
-    # Create figure
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
-
-    # Plot RGB
-    ax.imshow(rgb)
-
-    # Create coverage overlay (only where coverage > 0)
-    coverage_rgba = np.zeros((*coverage.shape, 4), dtype=np.float32)
-    mask = coverage > 0
-
-    # Color by coverage: yellow (low) to red (high)
-    coverage_rgba[mask, 0] = 1.0  # Red always 1
-    coverage_rgba[mask, 1] = 1.0 - coverage[mask] / 100  # Yellow to red
-    coverage_rgba[mask, 2] = 0.0  # No blue
-    coverage_rgba[mask, 3] = 0.5  # Semi-transparent
-
-    im = ax.imshow(coverage_rgba)
-
-    # Add colorbar
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-    sm = ScalarMappable(cmap='YlOrRd', norm=Normalize(vmin=0, vmax=100))
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, label='Coverage %', shrink=0.8)
-
-    # Title
-    if title is None:
-        stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
-        title = f"{stack_name} - Coverage %"
-    ax.set_title(title)
-
-    return ax, cbar
-
-
 def find_matching_stack_for_screenshot(survey, internal_id, month, day, year,
                                         version='20260107_180813'):
     """
@@ -513,7 +445,6 @@ if __name__ == "__main__":
 
                 fig, axes = plt.subplots(1, 2, figsize=(16, 8))
                 plot_sentinel2_with_mask(stack_path, ax=axes[0])
-                plot_sentinel2_coverage(stack_path, ax=axes[1])
                 plt.tight_layout()
                 plt.show()
                 break

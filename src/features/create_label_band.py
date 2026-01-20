@@ -230,26 +230,29 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample
     if len(gdf) == 0:
         return labels.astype(np.uint8)
 
-    # Helper function to transform geometries from EPSG:4326 to image CRS
-    def transform_shapes(shapes_values):
-        """Transform list of (geometry, value) tuples from EPSG:4326 to target CRS."""
-        transformed = []
-        for geom, value in shapes_values:
-            try:
-                transformed_geom = transform_geom(
-                    CRS.from_string("EPSG:4326"),
-                    target_crs,
-                    mapping(geom)
-                )
-                transformed.append((transformed_geom, value))
-            except Exception as e:
-                logging.warning(f"Failed to transform geometry: {e}")
-        return transformed
+    # Reproject entire GeoDataFrame from EPSG:4326 to image CRS
+    # This is more reliable than transforming individual geometries
+    gdf_projected = gdf.copy()
+    if gdf_projected.crs is None:
+        gdf_projected = gdf_projected.set_crs("EPSG:4326")
+    gdf_projected = gdf_projected.to_crs(target_crs)
 
-    # Band 7: Certainty score (all polygons)
-    shapes = [(geom, int(cert)) for geom, cert in zip(gdf.geometry, gdf['certainty']) if cert > 0]
-    if shapes:
-        shapes = transform_shapes(shapes)
+    def get_shapes(gdf_subset, value_column=None, default_value=1):
+        """Extract (geometry, value) tuples from projected GeoDataFrame."""
+        shapes = []
+        for idx, row in gdf_subset.iterrows():
+            if value_column and value_column in row:
+                value = row[value_column]
+            else:
+                value = default_value
+            shapes.append((mapping(row.geometry), value))
+        return shapes
+
+    # Band 7: Certainty score (all polygons) - use projected geometries
+    cert_mask = gdf_projected['certainty'] > 0
+    if cert_mask.any():
+        shapes = [(mapping(geom), int(cert)) for geom, cert in
+                  zip(gdf_projected.loc[cert_mask, 'geometry'], gdf_projected.loc[cert_mask, 'certainty'])]
         labels[7] = rasterize(
             shapes=shapes,
             out_shape=(height, width),
@@ -258,14 +261,13 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample
             dtype='uint8'
         )
 
-    # Bands 2-6: Uncertainty flags
+    # Bands 2-6: Uncertainty flags - use projected geometries
     for i, uncertainty_type in enumerate(UNCERTAINTY_TYPES):
         shapes = []
-        for geom, explanation in zip(gdf.geometry, gdf['uncertainty_explanation']):
+        for geom, explanation in zip(gdf_projected.geometry, gdf_projected['uncertainty_explanation']):
             if isinstance(explanation, str) and uncertainty_type in explanation:
-                shapes.append((geom, 1))
+                shapes.append((mapping(geom), 1))
         if shapes:
-            shapes = transform_shapes(shapes)
             labels[i + 2] = rasterize(
                 shapes=shapes,
                 out_shape=(height, width),
@@ -275,35 +277,13 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample
             )
 
     # Filter to high-certainty polygons for irrigation bands and coverage
-    high_cert_gdf = gdf[gdf['certainty'] >= certainty_thresh].copy()
+    # Use PROJECTED geometries for rasterization
+    high_cert_mask = gdf_projected['certainty'] >= certainty_thresh
+    high_cert_gdf = gdf_projected[high_cert_mask].copy()
 
     if len(high_cert_gdf) > 0:
-        # Band 0: Categorical irrigation type
-        shapes = []
-        for geom, cat in zip(high_cert_gdf.geometry, high_cert_gdf['category']):
-            if cat is None or cat == "" or (isinstance(cat, float) and np.isnan(cat)):
-                cat = "small-scale"
-            cat = str(cat).split(";")[0]
-            if cat not in IRRIGATION_TYPES:
-                logging.warning(f"Unknown category '{cat}', defaulting to small-scale")
-                cat = "small-scale"
-            shapes.append((geom, IRRIGATION_TYPES[cat]))
-
-        if shapes:
-            shapes = transform_shapes(shapes)
-            labels[0] = rasterize(
-                shapes=shapes,
-                out_shape=(height, width),
-                transform=transform,
-                fill=0,
-                dtype='uint8'
-            )
-
-        # Band 1: Binary irrigation mask
-        labels[1] = np.where(labels[0] != 0, 1, 0)
-
-        # Band 8: % polygon coverage (supersampled for accuracy)
-        # Rasterize at higher resolution, then compute mean
+        # First, calculate coverage percentage using supersampling
+        # This determines which pixels are considered "irrigated" (>= 50% coverage)
         super_height = height * coverage_supersample
         super_width = width * coverage_supersample
 
@@ -317,10 +297,10 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample
             transform.f
         )
 
-        # Create binary mask at supersampled resolution
-        coverage_shapes = [(geom, 1) for geom in high_cert_gdf.geometry]
-        coverage_shapes = transform_shapes(coverage_shapes)
+        # Create binary mask at supersampled resolution using projected geometries
+        coverage_shapes = [(mapping(geom), 1) for geom in high_cert_gdf.geometry]
 
+        coverage_pct = np.zeros((height, width), dtype=np.float32)
         if coverage_shapes:
             super_mask = rasterize(
                 shapes=coverage_shapes,
@@ -334,7 +314,37 @@ def rasterize_polygons(gdf, image_meta, certainty_thresh=3, coverage_supersample
             # This gives us the fraction of sub-pixels that are covered
             super_mask = super_mask.reshape(height, coverage_supersample, width, coverage_supersample)
             coverage_pct = super_mask.mean(axis=(1, 3)) * 100  # Convert to percentage
-            labels[8] = coverage_pct
+
+        # Band 8: Store coverage percentage
+        labels[8] = coverage_pct
+
+        # Create mask for pixels with >= 50% coverage
+        irrigated_mask = coverage_pct >= 50
+
+        # Band 0: Categorical irrigation type (only where coverage >= 50%)
+        shapes = []
+        for geom, cat in zip(high_cert_gdf.geometry, high_cert_gdf['category']):
+            if cat is None or cat == "" or (isinstance(cat, float) and np.isnan(cat)):
+                cat = "small-scale"
+            cat = str(cat).split(";")[0]
+            if cat not in IRRIGATION_TYPES:
+                logging.warning(f"Unknown category '{cat}', defaulting to small-scale")
+                cat = "small-scale"
+            shapes.append((mapping(geom), IRRIGATION_TYPES[cat]))
+
+        if shapes:
+            categorical = rasterize(
+                shapes=shapes,
+                out_shape=(height, width),
+                transform=transform,
+                fill=0,
+                dtype='uint8'
+            )
+            # Apply coverage threshold: only mark as irrigated if >= 50% covered
+            labels[0] = np.where(irrigated_mask, categorical, 0)
+
+        # Band 1: Binary irrigation mask (1 where coverage >= 50%)
+        labels[1] = irrigated_mask.astype(np.uint8)
 
     # Convert to appropriate dtype (uint8 for all except coverage which stays float)
     # We'll store coverage as uint8 (0-100)
