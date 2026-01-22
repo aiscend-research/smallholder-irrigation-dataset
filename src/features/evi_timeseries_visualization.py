@@ -30,6 +30,49 @@ def get_features_dir(version='20260107_180813'):
     return os.path.join(get_data_root(), 'features', version)
 
 
+def get_irrigation_table_path():
+    """Get path to the irrigation table."""
+    return os.path.join(get_data_root(), 'labels/labeled_surveys/random_sample/latest_irrigation_table.csv')
+
+
+def get_survey_info(unique_id):
+    """
+    Look up survey and internal_id for a given unique_id.
+
+    Parameters:
+        unique_id (int or str): The unique_id from the stack filename
+
+    Returns:
+        tuple: (survey, internal_id) or (None, None) if not found
+    """
+    import re
+
+    irrigation_df = pd.read_csv(get_irrigation_table_path())
+    unique_id = int(unique_id)
+
+    matches = irrigation_df[irrigation_df['unique_id'] == unique_id]
+    if len(matches) == 0:
+        return None, None
+
+    row = matches.iloc[0]
+
+    # Extract survey from source_file (e.g., "AB_101-125.zip" -> "101-125")
+    source_file = row.get('source_file', '')
+    survey = None
+    if pd.notna(source_file):
+        match = re.search(r'(\d+-\d+)', str(source_file))
+        if match:
+            survey = match.group(1)
+
+    internal_id = row.get('internal_id', None)
+    if pd.notna(internal_id):
+        internal_id = int(internal_id)
+    else:
+        internal_id = None
+
+    return survey, internal_id
+
+
 # Band indices within each 10-band timestep
 BAND_INDICES = {
     'B2': 0,   # Blue
@@ -50,7 +93,7 @@ N_TIMESTEPS = 42  # 36 windows + 3 buffer on each side
 TIMESTEP_DAYS = 10
 
 
-def compute_evi(nir, red, blue, nodata=-9999, scale=10000.0):
+def compute_evi(nir, red, blue, nodata=0, scale=10000.0):
     """
     Compute Enhanced Vegetation Index (EVI).
 
@@ -89,7 +132,7 @@ def compute_evi(nir, red, blue, nodata=-9999, scale=10000.0):
     return evi
 
 
-def extract_evi_timeseries(stack_path, nodata=-9999):
+def extract_evi_timeseries(stack_path, nodata=0):
     """
     Extract EVI time series for all pixels from a Sentinel-2 stack.
 
@@ -319,9 +362,15 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
         parts = stack_name.split('_')
         if len(parts) >= 3:
+            unique_id = parts[0]
             site = parts[1]
             date = parts[2]
-            title = f'EVI Time Series - Site {site}, {date}'
+            # Look up survey and internal_id
+            survey, internal_id = get_survey_info(unique_id)
+            if survey and internal_id:
+                title = f'EVI Time Series - Survey {survey}, ID {internal_id} (Site {site}, {date})'
+            else:
+                title = f'EVI Time Series - Site {site}, {date}'
 
     ax.set_title(title)
 
