@@ -95,80 +95,70 @@ earthengine:
 
 ## Downloading Features
 
-> **Note:** This module builds dense Sentinel-2 time series for irrigation-labeled sites via Google Earth Engine (GEE). It supports 2016–2025 and applies server-side cloud screening, DOS haze correction, and local NDVI/EVI/NDWI. Each time window uses the single best scene (no pixel-wise mosaic) to avoid seam artifacts.
+> **Note:** This module builds dense Sentinel-2 time series for irrigation-labeled sites via Google Earth Engine (GEE). It supports 2016–2025 and applies server-side cloud screening. Each time window uses the single best scene (no pixel-wise mosaic) to avoid seam artifacts.
 
-To download features, we first load in all the irrigated images and their (lat, lon, date, ID) data from `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`. For each site, we generate a fixed-length time series centered on the labeled date.
+To download features, we first load in all the irrigated images and their (lat, lon, date, ID) data from `data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv`. For each site, we generate a fixed-length time series.
 
 ### Time Window Definition
 
-We create 37 consecutive 10-day windows around the labeled date (±18 windows).
-The middle window contains the labeled date.
+We create **42 consecutive 10-day windows** starting from January 1st of the labeled year (with a 3-window buffer before, so starting in early December of the previous year). The default configuration is:
+- `num_windows=36` core windows (full year coverage)
+- `window_buffer=3` extra windows before and after
+- Total: 42 windows
 
-![time window graphic](./readme_figures/time_window.png)
-
-Each window selects one Sentinel-2 scene with the lowest cloud fraction inside the 100×100 region (no pixel-level mosaic within the window).
-
-Optionally, set `START_JANUARY` to `True` in `download_sentinel2_mosaics.py` so that all time series begin on January 1st of the year of the image.
+Each window selects one Sentinel-2 scene with the most good-quality pixels inside the 100×100 region (no pixel-level mosaic within the window).
 
 ### Sentinel-2 Mosaic Retrieval
 
-We retrieve Sentinel-2 L1C imagery from COPERNICUS/S2_HARMONIZED [Google Earth Engine](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_HARMONIZED) and pair each scene with cloud probabilities from COPERNICUS/S2_CLOUD_PROBABILITY[Google Earth Engine](https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_CLOUD_PROBABILITY). 
+We retrieve Sentinel-2 imagery from either:
+- **L1C**: `COPERNICUS/S2_HARMONIZED` (Top-of-Atmosphere reflectance) - available 2016+
+- **L2A**: `COPERNICUS/S2_SR_HARMONIZED` (Surface Reflectance) - available 2018+
 
-For every 10-day window in the 37-step series, we search for scenes intersecting the site, attach the s2cloudless probabilities by system:index, and build a server-side SCL for that scene. Our SCL uses three states—7 for clear/other, 9 for cloud, and 10 for cirrus—derived from the s2cloudless field with light spectral guards to remove speckles. We then score cloud fraction over the AOI and select a single lowest-cloud scene for that window (no pixel-wise mosaicking), followed by a simple DOS (dark-object subtraction) to stabilize reflectance.
+For every 10-day window in the 42-step series, we search for scenes intersecting the site. Each scene is scored by the number of good-quality pixels after cloud masking, and we select the single best scene for that window (no pixel-wise mosaicking).
 
-For each window we export two rasters to GCS: an unmasked cube (<prefix>.tif) containing the ten reflectance bands (B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12) plus the SCL (11 bands total), and a masked cube (<prefix>_masked.tif) where cloud/cirrus pixels are written as NO_DATA = −9999 in both reflectance and SCL. Locally we load these exports, compute NDVI, EVI, and NDWI, and stack all 37 windows into a consistent time series. The final per-step layout used for modeling and visualization is 14 bands: the 10 reflectance bands, the three indices (scaled by 10,000), and the SCL.
+**Cloud Masking:**
+- **L2A**: Uses the Scene Classification Layer (SCL) band to identify good pixels (vegetation, bare soil, water, unclassified, snow)
+- **L1C**: Uses QA60 band (cloud/cirrus flags) combined with a custom spectral cloud detector that identifies bright, uniform pixels with low SWIR reflectance. A 2km buffer is applied around detected clouds to catch shadows.
 
-#### Atmospheric Correction
+For each window we download two rasters directly from GEE:
+- `<prefix>.tif` - Unmasked: 10 reflectance bands (B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12)
+- `<prefix>_masked.tif` - Masked: Same 10 bands with cloud/bad pixels set to 0
 
-Because we are using Sentinel-2 L1C data, which does not include atmospheric correction (L2A data does include atmospheric correction, but is unavailable for years 2016-2018), we perform the following steps on each Sentinel-2 L1C mosaic to perform our own atmospheric correction:
-
-- Pseudo-Atmospheric Correction (DOS):
-    - Each Sentinel-2 L1C mosaic is first corrected using a simple Dark Object Subtraction (DOS) algorithm on B2/B3/B4/B8. This reduces atmospheric haze and brings the reflectance values closer to L2A surface reflectance.
-
-- Custom Scene Classification Layer (SCL):
-    - After atmospheric correction, a custom SCL (Scene Classification Layer) band is generated based on NDVI, NDWI, NDSI, and brightness thresholds. This SCL simulates the L2A official product, enabling masking of clouds, shadows, water, snow/ice, vegetation, and more, and allows downstream analysis to use L2A-like quality masks for each time step.
+These per-window images are then stacked locally into the final time series.
 
 #### Retrieved Bands
 
-We then take the original Sentinel-2 bands and use them to create 3 vegetation bands. The final .tif image per window contains the following bands:
+The final `.tif` files contain only the **10 original Sentinel-2 reflectance bands**:
 
-- **10 Original Sentinel-2 Bands**: B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12
-- **NDVI: Normalized Difference Vegetation Index**: Measures green vegetation density, computed from NIR and Red bands (B8, B4). We store this value scaled by 10000 for storage efficiency.
+| Band | Name | Resolution | Description |
+|------|------|------------|-------------|
+| B2 | Blue | 10m | Blue visible |
+| B3 | Green | 10m | Green visible |
+| B4 | Red | 10m | Red visible |
+| B5 | Red Edge 1 | 20m* | Vegetation red edge |
+| B6 | Red Edge 2 | 20m* | Vegetation red edge |
+| B7 | Red Edge 3 | 20m* | Vegetation red edge |
+| B8 | NIR | 10m | Near infrared |
+| B8A | NIR Narrow | 20m* | Near infrared narrow |
+| B11 | SWIR 1 | 20m* | Short-wave infrared |
+| B12 | SWIR 2 | 20m* | Short-wave infrared |
 
-$$
-\text{NDVI} = 10000 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}} \in [-10000, 10000]
-$$
+*20m bands are resampled to 10m resolution during download.
 
-- **EVI: Enhanced Vegetation Index**: Similar to NDVI, but slightly better in areas with dense canopy or haze. Computed from NIR, Red, and Blue bands (B8, B4, B2). We store this value scaled by 10000 for storage efficiency.
-
-$$
-\text{EVI} = 10000 \times 2.5 \times \frac{\text{NIR} - \text{Red}}{\text{NIR} + 6 \times \text{Red} - 7.5 \times \text{Blue} + 1} \in [-10000, 10000]
-$$
-
-- **NDWI: Normalized Difference Water Index**: Detects moisture changes in vegetation and soil. Computed from NIR and SWIR1 bands (B8, B11). We store this value scaled by 10000 for storage efficiency.
-
-$$
-\text{NDWI} = 10000 \times \frac{\text{NIR} - \text{SWIR}}{\text{NIR} + \text{SWIR}} \in [-10000, 10000]
-$$
-
-- **SCL(Scene Classification) Band**: Scene classification for cloud, shadow, water, vegetation, etc. The SCL band contains integer values between 1 and 11, representing different scene classes. Note that pixels with no data or data that has been masked due to clouds or cloud shadows (as determined by `s2cloudless`) are set to NO_DATA = -9999.
-  - 0 - No Data
-  - 1 - Saturated/Defective
-  - 3 - Cloud Shadow
-  - 7 - Clear/other
-  - 9 - Cloud High Probability
-  - 10 - Thin Cirrus
-  - 11 - Snow/Ice
+**Note:** Vegetation indices (NDVI, EVI, NDWI) are **not** pre-computed in the downloaded data. If needed for modeling, compute them from the raw bands:
+- NDVI = (B8 - B4) / (B8 + B4)
+- EVI = 2.5 × (B8 - B4) / (B8 + 6×B4 - 7.5×B2 + 10000)
+- NDWI = (B8 - B11) / (B8 + B11)
 
 #### Handling Missing and Invalid Data
 
-For a particular window, data may be missing (if there is no satellite imagery within that timeframe) or invalid (if there are clouds covering the image)
+For a particular window, data may be missing (if there is no satellite imagery within that timeframe) or invalid (if there are clouds covering the image).
 
-- **Cloud/cirrus** The server-masked product sets reflectance and SCL to −9999 where SCL∈{9,10}. Locally we also enforce consistency when reading the masked file (reflectance forced to −9999 wherever SCL is −9999) to eliminate residual.
+- **Cloud/cirrus pixels**: In the masked stack (`*_stack_masked.tif`), cloud and bad pixels are set to **0** (nodata value).
 
-- **Missing Images** In rare cases, a time window may have no available satellite imagery. When this occurs, we write an all-NO_DATA slice and record cloud_fraction = 1.0 in JSON.
+- **Missing Images**: When no satellite imagery is available for a time window, an all-zero slice is written and `file_exists: false` is recorded in the metadata JSON.
 
-- **Soft Drop** If a step has a very large NO_DATA fraction (e.g., ≥80%), we keep the T=37 timeline but write that slice as all −9999 and flag it in JSON. This preserves temporal alignment for modeling while avoiding most-empty slices.
+- **Masked fraction tracking**: The metadata JSON records `masked_fraction` for each window, indicating what percentage of pixels were masked due to clouds or other quality issues.
 
 ### Data Quality Assessment and Visualization
 
