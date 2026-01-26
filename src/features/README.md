@@ -162,68 +162,75 @@ For a particular window, data may be missing (if there is no satellite imagery w
 
 ### Data Quality Assessment and Visualization
 
-The downloaded time series data can be visualized and analyzed for quality assessment using the provided visualization tools. These tools help researchers understand temporal patterns, data coverage, and seasonal variations in the satellite imagery.
+The downloaded time series data can be visualized using the built-in visualization function in `download_sentinel2.py`:
 
-`visualize_tif.py` is used to visualize an image of a specific ID. After downloading that image to the data root, to visualize it:
+```python
+from src.features.download_sentinel2 import visualize_time_series_stack
 
-```shell
-python3 visualize_tif.py {uid_of_image_to_visualize}
+visualize_time_series_stack(out_dir='path/to/features/version', file_id='10_5130509_2016.09.09')
 ```
 
-Visualizations of RGB/NDVI before and after masking are downloaded to the data root, under `features/visualization`.  
+This displays RGB composites (B4=Red, B3=Green, B2=Blue) for both unmasked and masked stacks across the first 15 timesteps.
 
-#### RGB Images Before Cloud Masking
-Shows the raw Sentinel-2 RGB composite (B4=Red, B3=Green, B2=Blue) before cloud masking is applied:
-
-![RGB Before Cloud Masking](./readme_figures/uid1_rgb_before_masked.png)
-
-#### RGB Images After Cloud Masking
-Demonstrates the improvement in image quality after cloud masking, with cloudy pixels set to transparent:
-
-![RGB After Cloud Masking](./readme_figures/uid1_rgb_after_masked.png)
-
-#### NDVI Before Cloud Masking
-Shows NDVI values across all time steps without cloud masking, revealing temporal patterns in vegetation:
-
-![NDVI Before Cloud Masking](./readme_figures/uid1_ndvi_before_masked.png)
-
-#### NDVI After Cloud Masking
-Displays clean NDVI time series with cloud-masked pixels removed, providing clear vegetation dynamics:
-
-![NDVI After Cloud Masking](./readme_figures/uid1_ndvi_after_masked.png)
-
-These visualizations help researchers:
-- Assess data quality for machine learning training
-- Identify optimal time periods for irrigation detection
-- Understand seasonal patterns in satellite data coverage
-- Validate the effectiveness of cloud masking algorithms
+Additional visualization tools are available in:
+- `visualize_tif.py` - General TIF visualization
+- `sentinel2_visualization.py` - Detailed analysis with mask overlays
+- `image_label_visualization.py` - Overlay irrigation labels on imagery
 
 ### Stacking and Output
 
-The per-window GeoTIFFs live in GCS; we then build fixed-length local stacks:
+The per-window GeoTIFFs are downloaded to a temporary directory, then stacked into final outputs:
 
-- Per step layout (local): 10 reflectance + 3 indices + 1 SCL = 14 bands
+- **Per-window layout**: 10 reflectance bands
+- **Stack shape**: (T, B, H, W) = (42, 10, 100, 100) → saved as (B, T, H, W) flattened to **(420, 100, 100)** in the final GeoTIFF
 
-- Stack shape: (T, B, H, W) = (37, 14, 100, 100) → flattened to (37×14=518, 100, 100) in the final GeoTIFF.
+**Files Stored**: For each labeled image, we save three files:
 
-**Files Stored**: For each labeled image, we save four files to our data folder:
+- `{uid}_{site}_{YYYY.MM.DD}_stack.tif` – Unmasked stack (all pixels)
+- `{uid}_{site}_{YYYY.MM.DD}_stack_masked.tif` – Masked stack (cloud pixels = 0)
+- `{uid}_{site}_{YYYY.MM.DD}_metadata.json` – Per-window metadata (date ranges, file_exists, masked_fraction)
 
-- `data/features/{uid}_{site}_{YYYY.MM.DD}_image.tif` – BEFORE stack (unmasked scene + indices)
-- `data/features/{uid}_{site}_{YYYY.MM.DD}_label.tif` – AFTER stack (masked scene + indices)
-- `data/features/{uid}_{site}_{YYYY.MM.DD}_image.json` – metadata per step (cloud fraction, mean NDVI/EVI/NDWI, etc.)
-- `data/features/{uid}_{site}_{YYYY.MM.DD}_label.json` – same fields for AFTER
+**Reading the stacks**:
+```python
+import rasterio
+import numpy as np
 
-### Running the Download
-Using a single CPU, the dataset takes a little over a day to download. To run this on the HPC, create a `.sh` file in `src/features` with your desired headers & the commands below:
+with rasterio.open('path/to/stack.tif') as src:
+    data = src.read()  # Shape: (420, 100, 100)
 
-```shell
-source ../../env/bin/activate
-
-## run python 
-python3 download_sentinel2_mosaics.py
+# Reshape to (T, B, H, W)
+num_bands = 10
+num_windows = 42
+data = data.reshape(num_bands, num_windows, 100, 100).transpose(1, 0, 2, 3)
+# Now shape is (42, 10, 100, 100)
 ```
 
-Then use the [Slurm job scheduler](https://slurm.schedmd.com/sbatch.html) to schedule the download.
+### Running the Download
+
+To run the download:
+
+```python
+from src.features.download_sentinel2 import dataset_download
+
+dataset_download(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features',
+    collection='L1C',      # or 'L2A' for surface reflectance (2018+)
+    start_month=1,         # Start from January
+    num_windows=36,        # 36 core windows
+    timestep=10,           # 10 days per window
+    window_buffer=3,       # 3 extra windows before/after
+    target_size=100,       # 100x100 pixels (1km x 1km at 10m)
+    subset=False           # Set True to test with 10 rows
+)
+```
+
+Or run directly:
+```shell
+python src/features/download_sentinel2.py
+```
+
+Downloads are saved to a timestamped version folder (e.g., `data/features/20260107_180813/`).
 
 ### Dataset Location
 The dataset is located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/`. There are three versions: 
