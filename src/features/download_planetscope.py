@@ -52,8 +52,7 @@ from src.utils.utils import find_project_root, get_data_root
 from src.utils.geometries import bounding_box
 from src.features.download_sentinel2 import trim_or_pad_image, get_stats
 
-# PlanetScope band configuration
-# PSScene 4-band: Blue, Green, Red, NIR
+# PlanetScope 4-band configuration (using analytic_sr_udm2 bundle)
 PS_BANDS = ['blue', 'green', 'red', 'nir']
 PS_BAND_INDICES = {'blue': 0, 'green': 1, 'red': 2, 'nir': 3}
 
@@ -197,8 +196,9 @@ async def search_scenes(
                         scene_shape = shape(scene_geom)
                         intersection = aoi_shape.intersection(scene_shape)
                         footprint_coverage = (intersection.area / aoi_shape.area) * 100
+                        logging.debug("Footprint coverage for item %s: %.2f", item['id'], footprint_coverage)
                     else:
-                        print("No geometry found for item:", item['id'], " . Assuming full coverage.")
+                        logging.warning("No geometry found for item: %s . Assuming full coverage.", item['id'])
                         footprint_coverage = 100.0  # Assume full coverage if geometry not available
 
                     # Get cloud/clear coverage within AOI using Planet's get_item_coverage
@@ -248,15 +248,32 @@ def search_scenes_sync(lat: float, lon: float, start_date: str, end_date: str,
 # Download a single scene
 #############################
 
+def get_utm_epsg(lat: float, lon: float) -> str:
+    """Get the appropriate UTM EPSG code for a lat/lon coordinate."""
+    zone = int((lon + 180) / 6) + 1
+    if lat >= 0:
+        return f"EPSG:326{zone:02d}"  # Northern hemisphere
+    else:
+        return f"EPSG:327{zone:02d}"  # Southern hemisphere
+
+
 async def order_and_download_batch(
     item_ids: list,
     lat: float,
     lon: float,
     output_dir: str,
-    order_name: str
+    order_name: str,
+    anchor_id: str = None
 ) -> dict:
     """
     Order multiple PlanetScope scenes in a single batch, wait, and download all.
+
+    Applies three processing tools (in this order):
+    1. reproject - Puts all images on same north-aligned UTM grid at exactly 3m resolution
+                   (uses "near" kernel to minimize blurring)
+    2. coregister - Fine sub-pixel alignment to anchor (works better after reproject
+                    since images are already on same grid)
+    3. clip - Clips to AOI
 
     Args:
         item_ids: List of Planet scene IDs
@@ -264,6 +281,7 @@ async def order_and_download_batch(
         lon: Longitude for clipping AOI
         output_dir: Directory to save files
         order_name: Name for the order
+        anchor_id: Scene ID to use as coregistration anchor (default: first in list)
 
     Returns:
         dict: Mapping of item_id -> (unmasked_path, masked_path) for successful downloads
@@ -271,23 +289,40 @@ async def order_and_download_batch(
     os.makedirs(output_dir, exist_ok=True)
     aoi = point_to_aoi(lon, lat)
 
+    # Use first scene as anchor if not specified
+    if anchor_id is None:
+        anchor_id = item_ids[0]
+
     async with Session() as sess:
         client = OrdersClient(sess)
 
-        # Build batch order request
+        # Build batch order request with reproject, coregister, and clip tools
+        # Order:
+        #   1. reproject - get all images on same north-aligned UTM grid at 3m
+        #   2. coregister - fine sub-pixel alignment (works better when images already on same grid)
+        #   3. clip - cut to AOI
+        utm_epsg = get_utm_epsg(lat, lon)
         order_request = {
             "name": order_name,
             "products": [
                 {
                     "item_ids": item_ids,
                     "item_type": "PSScene",
-                    "product_bundle": "analytic_sr_udm2" # Surface Reflectance + UDM2 cloud mask
+                    "product_bundle": "analytic_sr_udm2"  # Surface Reflectance + UDM2 cloud mask
                 }
             ],
             "tools": [
+                {"reproject": {
+                    "projection": utm_epsg,
+                    "resolution": 3,  # Consistent 3m pixel size
+                    "kernel": "near"  # Nearest neighbor to minimize blurring
+                }},
+                {"coregister": {"anchor_item": anchor_id}},
                 {"clip": {"aoi": aoi}}
             ]
         }
+
+        logging.info(f"Order tools: reproject to {utm_epsg} at 3m, coregister to {anchor_id}, clip to AOI")
 
         try:
             # Create order
@@ -464,17 +499,19 @@ async def search_best_scenes_for_windows(
         items = await search_scenes(lat, lon, start_str, end_str, max_cloud_cover)
 
         if items:
-            best = items[0]
+            best = items[0]  # Already sorted by effective_coverage
             results[i] = {
                 "item_id": best['id'],
                 "cloud_cover": best['properties'].get('cloud_cover', 0),
+                "effective_coverage": best.get('effective_coverage', 100),
                 "date_range": [start_str, end_str]
             }
-            logging.info(f"Window {i}: found {len(items)} scenes, best cloud_cover={results[i]['cloud_cover']:.2f}")
+            logging.info(f"Window {i}: found {len(items)} scenes, best effective_coverage={results[i]['effective_coverage']:.1f}%")
         else:
             results[i] = {
                 "item_id": None,
                 "cloud_cover": None,
+                "effective_coverage": 0,
                 "date_range": [start_str, end_str]
             }
             logging.warning(f"Window {i}: no scenes found for {start_str} to {end_str}")
@@ -482,7 +519,7 @@ async def search_best_scenes_for_windows(
     return results
 
 
-def retrieve_time_series_stack(
+async def retrieve_time_series_stack(
     file_id: str,
     lat: float,
     lon: float,
@@ -496,7 +533,10 @@ def retrieve_time_series_stack(
     max_cloud_cover: float = 0.5
 ):
     """
-    Download and stack PlanetScope images over a time series using batch ordering.
+    Download and stack PlanetScope images over a time series (async).
+
+    Use this in Jupyter notebooks with: await retrieve_time_series_stack(...)
+    For CLI/scripts, use the sync wrapper: retrieve_time_series_stack_sync(...)
 
     Flow:
     1. Search for best scene for each time window
@@ -538,26 +578,34 @@ def retrieve_time_series_stack(
 
     # Step 1: Search for best scene for each window
     logging.info(f"Searching for scenes across {num_windows_buffered} windows...")
-    window_scenes = asyncio.run(
-        search_best_scenes_for_windows(lat, lon, time_windows, max_cloud_cover)
-    )
+    window_scenes = await search_best_scenes_for_windows(lat, lon, time_windows, max_cloud_cover)
 
-    # Collect all scene IDs that were found
+    # Collect all scene IDs that were found and find best anchor
     item_ids = []
     window_to_item = {}  # Map window index -> item_id
+    best_anchor = None
+    best_coverage = 0
+
     for i, info in window_scenes.items():
         if info["item_id"]:
             item_ids.append(info["item_id"])
             window_to_item[i] = info["item_id"]
+            # Track best scene for coregistration anchor
+            if info.get("effective_coverage", 0) > best_coverage:
+                best_coverage = info["effective_coverage"]
+                best_anchor = info["item_id"]
 
     logging.info(f"Found scenes for {len(item_ids)}/{num_windows_buffered} windows")
+    if best_anchor:
+        logging.info(f"Using {best_anchor} as coregistration anchor ({best_coverage:.1f}% coverage)")
 
     # Step 2 & 3: Submit batch order and download
     downloaded = {}
     if item_ids:
         logging.info(f"Submitting batch order for {len(item_ids)} scenes...")
-        downloaded = asyncio.run(
-            order_and_download_batch(item_ids, lat, lon, temp_dir, f"batch_{file_id}")
+        downloaded = await order_and_download_batch(
+            item_ids, lat, lon, temp_dir, f"batch_{file_id}",
+            anchor_id=best_anchor
         )
         logging.info(f"Downloaded {len(downloaded)} scenes")
 
@@ -704,6 +752,32 @@ def retrieve_time_series_stack(
     logging.info(f"Final shape: {stacked_masked.shape}")
 
 
+def retrieve_time_series_stack_sync(
+    file_id: str,
+    lat: float,
+    lon: float,
+    date: datetime,
+    out_dir: str,
+    start_month: int = 1,
+    num_windows: int = 36,
+    timestep: int = 10,
+    window_buffer: int = 3,
+    target_size: int = 333,
+    max_cloud_cover: float = 0.5
+):
+    """
+    Sync wrapper for retrieve_time_series_stack.
+
+    Use this for CLI/scripts. For Jupyter notebooks, use the async version directly:
+        await retrieve_time_series_stack(...)
+    """
+    return asyncio.run(retrieve_time_series_stack(
+        file_id, lat, lon, date, out_dir,
+        start_month, num_windows, timestep, window_buffer,
+        target_size, max_cloud_cover
+    ))
+
+
 #############################
 # Dataset download
 #############################
@@ -784,7 +858,7 @@ def dataset_download(
         logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
 
         try:
-            retrieve_time_series_stack(
+            retrieve_time_series_stack_sync(
                 file_id=file_id,
                 lat=lat,
                 lon=lon,
@@ -886,15 +960,26 @@ async def process_sites_parallel(
                     window_scenes = await search_best_scenes_for_windows(
                         lat, lon, time_windows, max_cloud_cover
                     )
-                    item_ids = [info["item_id"] for info in window_scenes.values() if info["item_id"]]
+
+                    # Collect item IDs and find best anchor
+                    item_ids = []
+                    best_anchor = None
+                    best_coverage = 0
+                    for info in window_scenes.values():
+                        if info["item_id"]:
+                            item_ids.append(info["item_id"])
+                            if info.get("effective_coverage", 0) > best_coverage:
+                                best_coverage = info["effective_coverage"]
+                                best_anchor = info["item_id"]
 
                     if not item_ids:
                         logging.warning(f"{file_id}: No scenes found")
                         results[file_id] = "no_scenes"
                         continue
 
-                    # Submit order
+                    # Submit order with reproject, coregister, and clip tools
                     aoi = point_to_aoi(lon, lat)
+                    utm_epsg = get_utm_epsg(lat, lon)
                     order_request = {
                         "name": f"batch_{file_id}",
                         "products": [{
@@ -902,7 +987,15 @@ async def process_sites_parallel(
                             "item_type": "PSScene",
                             "product_bundle": "analytic_sr_udm2"
                         }],
-                        "tools": [{"clip": {"aoi": aoi}}]
+                        "tools": [
+                            {"reproject": {
+                                "projection": utm_epsg,
+                                "resolution": 3,
+                                "kernel": "near"
+                            }},
+                            {"coregister": {"anchor_item": best_anchor or item_ids[0]}},
+                            {"clip": {"aoi": aoi}}
+                        ]
                     }
 
                     order = await orders_client.create_order(order_request)

@@ -215,3 +215,6 @@ notebooks/find_vis_images.py
 src/features/visualize_tif.py
 data/labels/GEE_screenshots/*
 secrets/*
+
+src/features/tests/planet_download_visualizations/test_planet_downloads/*
+src/features/tests/planet_download_visualizations/test_planet_stack/*
