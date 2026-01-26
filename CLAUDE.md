@@ -99,29 +99,21 @@ This also outputs `latest_irrigation_table.csv` and a GeoJSON with bounding boxe
 
 ### 2. Feature Download (Google Earth Engine)
 
-Download Sentinel-2 time series data for labeled sites. Each site gets 37 consecutive 10-day windows centered on the labeled date.
+Download Sentinel-2 time series data for labeled sites. Each site gets **42 consecutive 10-day windows** (36 core + 3 buffer each side) starting from January 1st.
 
 **Prerequisites**:
-- Google Cloud Platform project with Earth Engine API and Cloud Storage enabled
+- Google Cloud Platform project with Earth Engine API enabled
 - Service account key stored at `secrets/earthengine-key.json`
-- Bucket name specified in `config.yaml`
 
-**Run download** (typically on HPC with Slurm):
+**Run download**:
 ```bash
-source ../../env/bin/activate
-python3 src/features/download_sentinel2_mosaics.py
+python src/features/download_sentinel2.py
 ```
 
-**Output Files** (per labeled image):
-- `{uid}_{site}_{YYYY.MM.DD}_image.tif` – unmasked 37-window stack
-- `{uid}_{site}_{YYYY.MM.DD}_label.tif` – cloud-masked stack
-- `{uid}_{site}_{YYYY.MM.DD}_image.json` – metadata (cloud fraction, mean NDVI/EVI/NDWI per step)
-- `{uid}_{site}_{YYYY.MM.DD}_label.json` – metadata for masked version
-
-**Visualize downloaded data**:
-```bash
-python3 src/features/visualize_tif.py {uid_of_image}
-```
+**Output Files** (per labeled image, saved to timestamped version folder):
+- `{uid}_{site}_{YYYY.MM.DD}_stack.tif` – unmasked 42-window stack (10 bands × 42 windows = 420 bands)
+- `{uid}_{site}_{YYYY.MM.DD}_stack_masked.tif` – cloud-masked stack (bad pixels = 0)
+- `{uid}_{site}_{YYYY.MM.DD}_metadata.json` – per-window metadata (date_range, file_exists, masked_fraction)
 
 **Create pixel-level labels** (9-band labels with per-labeler files):
 ```bash
@@ -232,9 +224,9 @@ python src/modeling/run_experiment.py
 - Copy of experiment config
 
 **Dataset Structure**:
-- **Images**: 10 spectral bands × 42 time steps = 420 bands per `*_stack.tif`
-- **Masks**: 9-band `*_labels.tif` with irrigation labels (type, presence, uncertainty flags, certainty, coverage %)
-- **Metadata**: `*_metadata.json` with location and temporal info
+- **Images**: 10 spectral bands (B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12) × 42 time steps = 420 bands per `*_stack.tif`
+- **Labels**: 9-band `*_labels.tif` with irrigation labels (type, presence, uncertainty flags, certainty, coverage %)
+- **Metadata**: `*_metadata.json` with location and per-window info (date_range, file_exists, masked_fraction)
 
 ## Architecture Notes
 
@@ -243,7 +235,7 @@ python src/modeling/run_experiment.py
 2. **Label Generation** (`src/labels/`): Use `surveys_with_locations.py` to create Earth Collect surveys from sampling locations → Manual labeling in Google Earth Pro/Earth Collect
 3. **Processing** (`src/processing/`): Convert `.zip` surveys and `.kml` polygons to CSV/GeoJSON → Merge and validate → Pool into `latest_irrigation_table.csv`
 4. **Quality Control** (`src/labels/label_comparison.py`): Compare labels across labelers → Compute inter-rater metrics → Generate summary tables and visualizations
-5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply DOS atmospheric correction and cloud masking → Create 37-step stacks with 14 bands each
+5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply cloud masking → Create 42-step stacks with 10 reflectance bands each
 6. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 9-band label `.tif` files per labeler (includes coverage % for mixed pixel analysis)
 7. **Modeling** (`src/modeling/`): Spatial-aware data splitting → Flatten multi-temporal data → Train ML models (Random Forest, Gradient Boosting) → Evaluate and visualize
 
@@ -259,15 +251,14 @@ python src/modeling/run_experiment.py
 **Important**: Never hardcode file paths. Always use `get_data_root()` and path helpers.
 
 ### Multi-Temporal Sentinel-2 Data Structure
-- **Time Series**: 37 windows × 10 days each, centered on labeled date
-- **Bands per window** (14 total):
+- **Time Series**: 42 windows × 10 days each (36 core + 3 buffer each side), starting from January 1st
+- **Bands per window** (10 total):
   - 10 Sentinel-2 reflectance bands: B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12
-  - 3 vegetation indices (scaled by 10,000): NDVI, EVI, NDWI
-  - 1 Scene Classification Layer (SCL): cloud, shadow, vegetation, etc.
+  - Note: Vegetation indices (NDVI, EVI, NDWI) are NOT pre-computed; compute from raw bands if needed
 - **Missing Data Handling**:
-  - Cloud/cirrus pixels: Set to NO_DATA (-9999) based on s2cloudless probabilities
-  - Missing imagery: All-NO_DATA slice with cloud_fraction = 1.0 in metadata
-  - Soft drop: Windows with ≥80% NO_DATA flagged in JSON but kept for temporal alignment
+  - Cloud/bad pixels: Set to 0 in masked stack
+  - Missing imagery: All-zero slice with `file_exists: false` in metadata
+  - `masked_fraction`: Tracked per window in metadata JSON
 
 ### Cross-Validation for ML
 The modeling pipeline uses file-list based organization (no file duplication). Each experiment can define its own CV structure via `cv_structure_name` in `experiment.yaml`.
