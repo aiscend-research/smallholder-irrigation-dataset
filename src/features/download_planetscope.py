@@ -5,9 +5,12 @@ Download PlanetScope imagery time series for labeled irrigation sites.
 This module mirrors the structure of download_sentinel2.py but uses the Planet
 Data and Orders API instead of Google Earth Engine. Key differences:
 - 4 bands (Blue, Green, Red, NIR) instead of 10
-- ~3m resolution instead of 10m (so 333x333 pixels for 1km²)
+- 3m resolution instead of 10m
 - Uses UDM2 for cloud masking instead of QA60/SCL
 - Async API requires order submission then polling for completion
+
+Grid configuration is defined by PS_TARGET_SIZE (334 pixels) and PS_RESOLUTION (3m).
+This gives a ~1km² area with slight padding for grid alignment safety.
 
 Usage:
     from src.features.download_planetscope import dataset_download
@@ -19,7 +22,6 @@ Usage:
         num_windows=36,
         timestep=10,
         window_buffer=3,
-        target_size=333,  # ~1km at 3m resolution
     )
 """
 
@@ -50,11 +52,15 @@ if project_root not in sys.path:
 
 from src.utils.utils import find_project_root, get_data_root
 from src.utils.geometries import bounding_box
-from src.features.download_sentinel2 import trim_or_pad_image, get_stats
+from src.features.download_sentinel2 import get_stats
 
 # PlanetScope 4-band configuration (using analytic_sr_udm2 bundle)
 PS_BANDS = ['blue', 'green', 'red', 'nir']
 PS_BAND_INDICES = {'blue': 0, 'green': 1, 'red': 2, 'nir': 3}
+
+# Grid configuration
+PS_RESOLUTION = 3.0  # meters per pixel
+PS_TARGET_SIZE = 334  # pixels per side (334 * 3m = 1002m, slightly over 1km for safety)
 
 # Configure logging
 logging.basicConfig(
@@ -257,6 +263,140 @@ def get_utm_epsg(lat: float, lon: float) -> str:
         return f"EPSG:327{zone:02d}"  # Southern hemisphere
 
 
+def _build_order_request(
+    item_ids: list,
+    lat: float,
+    lon: float,
+    anchor_id: str,
+    order_name: str,
+    aoi_buffer_m: float = 20.0
+) -> dict:
+    """
+    Build a Planet order request with reproject, coregister, and clip tools.
+
+    NOTE: Planet applies tools in a FIXED order regardless of request order:
+    1. clip - Clips to AOI (in native projection)
+    2. reproject - Reprojects to UTM at 3m resolution
+    3. coregister - Sub-pixel alignment to anchor
+
+    Because clip happens before reproject, each scene may end up on a slightly
+    different UTM grid. We add a buffer to the AOI to ensure we have enough
+    pixels, then align to a common grid during stacking.
+
+    Args:
+        item_ids: List of Planet scene IDs
+        lat: Latitude for clipping AOI
+        lon: Longitude for clipping AOI
+        anchor_id: Scene ID to use as coregistration anchor
+        order_name: Name for the order
+        aoi_buffer_m: Extra buffer in meters to add around AOI (default 20m)
+
+    Returns:
+        dict: Order request ready for Planet Orders API
+    """
+    # Add buffer to AOI to account for grid misalignment after clip->reproject
+    half_side_km = 0.5 + (aoi_buffer_m / 1000.0)
+    aoi = point_to_aoi(lon, lat, half_side_km=half_side_km)
+    utm_epsg = get_utm_epsg(lat, lon)
+
+    order_request = {
+        "name": order_name,
+        "products": [
+            {
+                "item_ids": item_ids,
+                "item_type": "PSScene",
+                "product_bundle": "analytic_sr_udm2"  # Surface Reflectance + UDM2 cloud mask
+            }
+        ],
+        "tools": [
+            {"reproject": {
+                "projection": utm_epsg,
+                "resolution": 3,  # Consistent 3m pixel size
+                "kernel": "near"  # Nearest neighbor to minimize blurring
+            }},
+            {"coregister": {"anchor_item": anchor_id}},
+            {"clip": {"aoi": aoi}}
+        ]
+    }
+
+    logging.info(f"Order tools: reproject to {utm_epsg} at 3m, coregister to {anchor_id}, clip to AOI")
+    return order_request
+
+
+async def _download_and_process_order(
+    order_info: dict,
+    output_dir: str
+) -> dict:
+    """
+    Download files from a completed Planet order and apply UDM2 masks.
+
+    Args:
+        order_info: Order info dict from Planet API (must have 'success' state)
+        output_dir: Directory to save downloaded files
+
+    Returns:
+        dict: Mapping of scene_id -> (sr_path, masked_path) for downloaded scenes
+    """
+    import aiohttp
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Download all TIF files
+    downloaded_files = []
+    async with aiohttp.ClientSession() as session:
+        for result in order_info.get('_links', {}).get('results', []):
+            name = result.get('name', '')
+            url = result.get('location', '')
+
+            if name.endswith('.tif'):
+                # Planet returns nested paths like "{order_id}/PSScene/{file}.tif"
+                # Just use the filename to save flat in output_dir
+                filename = os.path.basename(name)
+                local_path = os.path.join(output_dir, filename)
+
+                async with session.get(url) as resp:
+                    with open(local_path, 'wb') as f:
+                        async for chunk in resp.content.iter_chunked(8192):
+                            f.write(chunk)
+                downloaded_files.append((filename, local_path))
+
+    # Match up SR images with their UDM2 masks
+    # Filenames look like: 20230607_072630_16_2439_3B_AnalyticMS_SR_clip.tif
+    #                      20230607_072630_16_2439_3B_udm2_clip.tif
+    # Scene ID is the part before "_3B_": 20230607_072630_16_2439
+    sr_files = {}
+    udm2_files = {}
+
+    for filename, path in downloaded_files:
+        # Extract scene ID (everything before _3B_)
+        if '_3B_' in filename:
+            scene_id = filename.split('_3B_')[0]
+        else:
+            # Fallback: use filename without extension
+            scene_id = filename.replace('.tif', '')
+
+        if 'AnalyticMS_SR' in filename or 'analytic_sr' in filename.lower():
+            sr_files[scene_id] = path
+        elif 'udm2' in filename.lower():
+            udm2_files[scene_id] = path
+
+    # Apply masks and build results
+    results = {}
+    for scene_id in sr_files:
+        sr_path = sr_files[scene_id]
+        udm2_path = udm2_files.get(scene_id)
+
+        if udm2_path and os.path.exists(udm2_path):
+            masked_path = sr_path.replace('.tif', '_masked.tif')
+            apply_udm2_mask(sr_path, udm2_path, masked_path)
+            os.remove(udm2_path)
+            results[scene_id] = (sr_path, masked_path)
+        else:
+            results[scene_id] = (sr_path, None)
+
+    return results
+
+
 async def order_and_download_batch(
     item_ids: list,
     lat: float,
@@ -287,42 +427,16 @@ async def order_and_download_batch(
         dict: Mapping of item_id -> (unmasked_path, masked_path) for successful downloads
     """
     os.makedirs(output_dir, exist_ok=True)
-    aoi = point_to_aoi(lon, lat)
 
     # Use first scene as anchor if not specified
     if anchor_id is None:
         anchor_id = item_ids[0]
 
+    # Build order request using helper
+    order_request = _build_order_request(item_ids, lat, lon, anchor_id, order_name)
+
     async with Session() as sess:
         client = OrdersClient(sess)
-
-        # Build batch order request with reproject, coregister, and clip tools
-        # Order:
-        #   1. reproject - get all images on same north-aligned UTM grid at 3m
-        #   2. coregister - fine sub-pixel alignment (works better when images already on same grid)
-        #   3. clip - cut to AOI
-        utm_epsg = get_utm_epsg(lat, lon)
-        order_request = {
-            "name": order_name,
-            "products": [
-                {
-                    "item_ids": item_ids,
-                    "item_type": "PSScene",
-                    "product_bundle": "analytic_sr_udm2"  # Surface Reflectance + UDM2 cloud mask
-                }
-            ],
-            "tools": [
-                {"reproject": {
-                    "projection": utm_epsg,
-                    "resolution": 3,  # Consistent 3m pixel size
-                    "kernel": "near"  # Nearest neighbor to minimize blurring
-                }},
-                {"coregister": {"anchor_item": anchor_id}},
-                {"clip": {"aoi": aoi}}
-            ]
-        }
-
-        logging.info(f"Order tools: reproject to {utm_epsg} at 3m, coregister to {anchor_id}, clip to AOI")
 
         try:
             # Create order
@@ -347,56 +461,8 @@ async def order_and_download_batch(
                 logging.info(f"Order {order_id} state: {state}, waiting...")
                 await asyncio.sleep(30)
 
-            # Download all results
-            results = {}
-            downloaded_files = []
-
-            for result in order_info.get('_links', {}).get('results', []):
-                name = result.get('name', '')
-                url = result.get('location', '')
-
-                if name.endswith('.tif'):
-                    # Planet returns nested paths like "{order_id}/PSScene/{file}.tif"
-                    # Just use the filename to save flat in output_dir
-                    filename = os.path.basename(name)
-                    local_path = os.path.join(output_dir, filename)
-                    await download_file(url, local_path)
-                    downloaded_files.append((filename, local_path))
-
-            # Match up SR images with their UDM2 masks
-            # Filenames look like: 20230607_072630_16_2439_3B_AnalyticMS_SR_clip.tif
-            #                      20230607_072630_16_2439_3B_udm2_clip.tif
-            # Scene ID is the part before "_3B_": 20230607_072630_16_2439
-            sr_files = {}
-            udm2_files = {}
-
-            for filename, path in downloaded_files:
-                # Extract scene ID (everything before _3B_)
-                if '_3B_' in filename:
-                    scene_id = filename.split('_3B_')[0]
-                else:
-                    # Fallback: use filename without extension
-                    scene_id = filename.replace('.tif', '')
-
-                if 'AnalyticMS_SR' in filename or 'SR_clip' in filename:
-                    sr_files[scene_id] = path
-                elif 'udm2' in filename.lower():
-                    udm2_files[scene_id] = path
-
-            # Apply masks and build results
-            for scene_id in sr_files:
-                sr_path = sr_files[scene_id]
-                udm2_path = udm2_files.get(scene_id)
-
-                if udm2_path and os.path.exists(udm2_path):
-                    masked_path = sr_path.replace('.tif', '_masked.tif')
-                    apply_udm2_mask(sr_path, udm2_path, masked_path)
-                    os.remove(udm2_path)
-                    results[scene_id] = (sr_path, masked_path)
-                else:
-                    results[scene_id] = (sr_path, None)
-
-            return results
+            # Download and process using helper
+            return await _download_and_process_order(order_info, output_dir)
 
         except APIError as e:
             logging.error(f"Planet API error: {e}")
@@ -464,9 +530,85 @@ def apply_udm2_mask(image_path: str, udm2_path: str, output_path: str, nodata: i
     logging.info(f"Created masked image: {output_path}")
 
 
-#############################
-# Single window download (sync wrapper)
-#############################
+def align_to_common_grid(
+    image: np.ndarray,
+    src_transform: rasterio.Affine,
+    src_crs,
+    target_transform: rasterio.Affine,
+    target_crs,
+    target_shape: tuple,
+    nodata: int = 0
+) -> np.ndarray:
+    """
+    Resample an image to align with a target grid.
+
+    Used to align images that were clipped before reprojection and ended up
+    on slightly different UTM grids.
+
+    Args:
+        image: Source image array (bands, height, width)
+        src_transform: Affine transform of source image
+        src_crs: CRS of source image
+        target_transform: Affine transform of target grid
+        target_crs: CRS of target grid
+        target_shape: (height, width) of target grid
+        nodata: Nodata value (default 0)
+
+    Returns:
+        np.ndarray: Resampled image aligned to target grid
+    """
+    from rasterio.warp import reproject, Resampling
+
+    dst_shape = (image.shape[0], target_shape[0], target_shape[1])
+    dst_image = np.full(dst_shape, nodata, dtype=image.dtype)
+
+    reproject(
+        source=image,
+        destination=dst_image,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=target_transform,
+        dst_crs=target_crs,
+        resampling=Resampling.nearest,
+        src_nodata=nodata,
+        dst_nodata=nodata
+    )
+
+    return dst_image
+
+
+def compute_centered_grid(lat: float, lon: float, crs, target_size: int = PS_TARGET_SIZE, resolution: float = PS_RESOLUTION):
+    """
+    Compute a reference grid centered on the target lat/lon.
+
+    Args:
+        lat: Center latitude
+        lon: Center longitude
+        crs: Target CRS (from a downloaded image)
+        target_size: Size in pixels (default PS_TARGET_SIZE)
+        resolution: Pixel size in meters (default PS_RESOLUTION)
+
+    Returns:
+        rasterio.Affine: Transform centered on the target location
+    """
+    from pyproj import Transformer
+
+    # Transform lat/lon to the target CRS
+    transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    center_x, center_y = transformer.transform(lon, lat)
+
+    # Compute top-left corner (origin)
+    half_size_m = (target_size * resolution) / 2.0
+    origin_x = center_x - half_size_m
+    origin_y = center_y + half_size_m  # Y increases downward in image coords
+
+    # Create transform: (resolution, 0, origin_x, 0, -resolution, origin_y)
+    transform = rasterio.Affine(resolution, 0, origin_x, 0, -resolution, origin_y)
+
+    logging.info(f"Centered grid: center ({center_x:.1f}, {center_y:.1f}), origin ({origin_x:.1f}, {origin_y:.1f})")
+
+    return transform
+
 
 #############################
 # Time series stack download
@@ -529,8 +671,9 @@ async def retrieve_time_series_stack(
     num_windows: int = 36,
     timestep: int = 10,
     window_buffer: int = 3,
-    target_size: int = 333,
-    max_cloud_cover: float = 0.5
+    target_size: int = PS_TARGET_SIZE,
+    max_cloud_cover: float = 0.5,
+    center_on_date: bool = False
 ):
     """
     Download and stack PlanetScope images over a time series (async).
@@ -548,14 +691,16 @@ async def retrieve_time_series_stack(
     Args:
         file_id: Unique identifier for this site
         lat, lon: Coordinates (WGS84 decimal degrees)
-        date: Reference date (year used for time series)
+        date: Reference date (year used for time series, or center date if center_on_date=True)
         out_dir: Directory to save final outputs
-        start_month: Month to start downloading (1=January, excluding buffer)
+        start_month: Month to start downloading (1=January, excluding buffer). Ignored if center_on_date=True.
         num_windows: Number of timesteps to download (excluding buffer)
         timestep: Days per timestep
         window_buffer: Extra timesteps before/after
-        target_size: Size in pixels for all images (default 333 for ~1km at 3m)
+        target_size: Size in pixels for all images (default PS_TARGET_SIZE)
         max_cloud_cover: Maximum cloud cover for scene selection
+        center_on_date: If True, center time windows on `date` instead of using `start_month`.
+            This matches Sentinel-2's behavior with 36 windows centered on the labeled date.
 
     Returns:
         None. Saves files to:
@@ -563,10 +708,19 @@ async def retrieve_time_series_stack(
             - {out_dir}/{file_id}_stack_masked.tif
             - {out_dir}/{file_id}_metadata.json
     """
-    # Create time windows (same logic as S2)
+    # Create time windows
     step_size = timedelta(days=timestep)
     num_windows_buffered = num_windows + (window_buffer * 2)
-    start_date_dt = datetime(date.year, start_month, 1) - (step_size * window_buffer)
+
+    if center_on_date:
+        # Center the time windows on the labeled date
+        # The labeled date should fall in window (num_windows // 2) of the core windows
+        # With buffer, that becomes window (window_buffer + num_windows // 2)
+        center_window = num_windows // 2
+        start_date_dt = date - (center_window + window_buffer) * step_size
+    else:
+        # Legacy behavior: start from beginning of start_month
+        start_date_dt = datetime(date.year, start_month, 1) - (step_size * window_buffer)
     time_windows = [
         (start_date_dt + i * step_size, start_date_dt + (i + 1) * step_size)
         for i in range(num_windows_buffered)
@@ -609,15 +763,18 @@ async def retrieve_time_series_stack(
         )
         logging.info(f"Downloaded {len(downloaded)} scenes")
 
-    # Step 4: Build stacks
+    # Step 4: Build stacks with grid alignment
+    # Compute a reference grid CENTERED on the target lat/lon
     num_bands = len(PS_BANDS)
     empty_template = np.zeros((num_bands, target_size, target_size), dtype=np.uint16)
+
+    ref_transform = None
+    ref_crs = None
+    ref_shape = (target_size, target_size)
 
     images_unmasked = []
     images_masked = []
     metadata_windows = []
-    template_crs = None
-    template_transform = None
 
     for i, (start, end) in enumerate(time_windows):
         start_str = start.strftime('%Y-%m-%d')
@@ -629,19 +786,33 @@ async def retrieve_time_series_stack(
         if paths and paths[0] and os.path.exists(paths[0]):
             unmasked_path, masked_path = paths
             try:
-                # Load unmasked
                 with rasterio.open(unmasked_path) as src:
-                    unmasked_img = src.read()
-                    if template_crs is None:
-                        template_crs = src.crs
-                        template_transform = src.transform
-                    unmasked_img = trim_or_pad_image(unmasked_img, target_size, nodata=0)
+                    unmasked_raw = src.read()
+                    src_transform = src.transform
+                    src_crs = src.crs
 
-                # Load masked (or use unmasked if no mask)
+                    # First valid image: use its CRS but compute a CENTERED grid
+                    if ref_transform is None:
+                        ref_crs = src_crs
+                        ref_transform = compute_centered_grid(lat, lon, ref_crs, target_size)
+
+                # Align to reference grid (handles slight grid offsets between scenes)
+                unmasked_img = align_to_common_grid(
+                    unmasked_raw, src_transform, src_crs,
+                    ref_transform, ref_crs, ref_shape, nodata=0
+                )
+
+                # Load and align masked image
                 if masked_path and os.path.exists(masked_path):
                     with rasterio.open(masked_path) as src:
-                        masked_img = src.read()
-                        masked_img = trim_or_pad_image(masked_img, target_size, nodata=0)
+                        masked_raw = src.read()
+                        masked_src_transform = src.transform
+                        masked_src_crs = src.crs
+
+                    masked_img = align_to_common_grid(
+                        masked_raw, masked_src_transform, masked_src_crs,
+                        ref_transform, ref_crs, ref_shape, nodata=0
+                    )
                 else:
                     masked_img = unmasked_img.copy()
 
@@ -680,8 +851,17 @@ async def retrieve_time_series_stack(
                 'masked_fraction': 1.0
             })
 
+    # Use reference CRS and transform for output
+    template_crs = ref_crs
+    template_transform = ref_transform
+
     if template_crs is None:
-        raise ValueError(f"No valid images found for site {file_id}")
+        logging.warning(f"No valid images found for site {file_id}, skipping stack creation")
+        # Clean up temp files
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        return
 
     # Stack everything
     stacked_unmasked = np.stack(images_unmasked, axis=0)
@@ -762,8 +942,9 @@ def retrieve_time_series_stack_sync(
     num_windows: int = 36,
     timestep: int = 10,
     window_buffer: int = 3,
-    target_size: int = 333,
-    max_cloud_cover: float = 0.5
+    target_size: int = PS_TARGET_SIZE,
+    max_cloud_cover: float = 0.5,
+    center_on_date: bool = False
 ):
     """
     Sync wrapper for retrieve_time_series_stack.
@@ -774,7 +955,7 @@ def retrieve_time_series_stack_sync(
     return asyncio.run(retrieve_time_series_stack(
         file_id, lat, lon, date, out_dir,
         start_month, num_windows, timestep, window_buffer,
-        target_size, max_cloud_cover
+        target_size, max_cloud_cover, center_on_date
     ))
 
 
@@ -789,7 +970,7 @@ def dataset_download(
     num_windows: int = 36,
     timestep: int = 10,
     window_buffer: int = 3,
-    target_size: int = 333,
+    target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
     subset: bool = False
 ):
@@ -805,7 +986,7 @@ def dataset_download(
         num_windows: Number of timesteps (excluding buffer)
         timestep: Days per timestep
         window_buffer: Extra timesteps before/after
-        target_size: Size in pixels (default 333 for ~1km at 3m)
+        target_size: Size in pixels (default PS_TARGET_SIZE)
         max_cloud_cover: Maximum cloud cover for scene selection
         subset: If True, only process first 10 rows (for testing)
 
@@ -872,18 +1053,21 @@ def dataset_download(
                 max_cloud_cover=max_cloud_cover
             )
 
-            # Add unique_id to metadata
+            # Add unique_id to metadata (only if stack was created)
             metadata_file = os.path.join(out_dir, f"{file_id}_metadata.json")
-            with open(metadata_file, 'r') as f:
-                metadata = json.load(f)
+            if os.path.exists(metadata_file):
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
 
-            metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
-            metadata['original_site_id'] = sid_raw
+                metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
+                metadata['original_site_id'] = sid_raw
 
-            with open(metadata_file, 'w') as f:
-                json.dump(metadata, f, indent=2)
+                with open(metadata_file, 'w') as f:
+                    json.dump(metadata, f, indent=2)
 
-            logging.info(f"Completed {file_id}")
+                logging.info(f"Completed {file_id}")
+            else:
+                logging.warning(f"No stack created for {file_id}")
 
         except Exception as e:
             logging.error(f"Failed to process {file_id}: {e}")
@@ -906,7 +1090,7 @@ async def process_sites_parallel(
     num_windows: int = 36,
     timestep: int = 10,
     window_buffer: int = 3,
-    target_size: int = 333,
+    target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
     max_concurrent_orders: int = 20,
     poll_interval: int = 60
@@ -977,26 +1161,11 @@ async def process_sites_parallel(
                         results[file_id] = "no_scenes"
                         continue
 
-                    # Submit order with reproject, coregister, and clip tools
-                    aoi = point_to_aoi(lon, lat)
-                    utm_epsg = get_utm_epsg(lat, lon)
-                    order_request = {
-                        "name": f"batch_{file_id}",
-                        "products": [{
-                            "item_ids": item_ids,
-                            "item_type": "PSScene",
-                            "product_bundle": "analytic_sr_udm2"
-                        }],
-                        "tools": [
-                            {"reproject": {
-                                "projection": utm_epsg,
-                                "resolution": 3,
-                                "kernel": "near"
-                            }},
-                            {"coregister": {"anchor_item": best_anchor or item_ids[0]}},
-                            {"clip": {"aoi": aoi}}
-                        ]
-                    }
+                    # Build order request using shared helper
+                    anchor_id = best_anchor or item_ids[0]
+                    order_request = _build_order_request(
+                        item_ids, lat, lon, anchor_id, f"batch_{file_id}"
+                    )
 
                     order = await orders_client.create_order(order_request)
                     order_id = order['id']
@@ -1028,10 +1197,13 @@ async def process_sites_parallel(
 
                         if state == 'success':
                             logging.info(f"{site_info['file_id']}: Order complete, downloading...")
-                            await _download_and_stack_order(
+                            stack_created = await _download_and_stack_order(
                                 order_info, site_info, out_dir, target_size
                             )
-                            results[site_info['file_id']] = "success"
+                            if stack_created:
+                                results[site_info['file_id']] = "success"
+                            else:
+                                results[site_info['file_id']] = "no_valid_images"
                             completed.append(order_id)
 
                         elif state in ['failed', 'partial']:
@@ -1055,70 +1227,35 @@ async def process_sites_parallel(
 
 
 async def _download_and_stack_order(order_info, site_info, out_dir, target_size):
-    """Download order results and create stacked outputs."""
-    import aiohttp
+    """Download order results and create stacked outputs.
 
+    Returns:
+        bool: True if stack was created, None if no valid images found.
+    """
     file_id = site_info['file_id']
     temp_dir = os.path.join(out_dir, "_tmp", file_id)
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Download all files
-    downloaded_files = []
-    async with aiohttp.ClientSession() as session:
-        for result in order_info.get('_links', {}).get('results', []):
-            name = result.get('name', '')
-            url = result.get('location', '')
+    # Download and process using shared helper
+    processed = await _download_and_process_order(order_info, temp_dir)
 
-            if name.endswith('.tif'):
-                local_path = os.path.join(temp_dir, name)
-                async with session.get(url) as resp:
-                    with open(local_path, 'wb') as f:
-                        async for chunk in resp.content.iter_chunked(8192):
-                            f.write(chunk)
-                downloaded_files.append((name, local_path))
-
-    # Match SR images with UDM2 masks and apply masking
-    sr_files = {}
-    udm2_files = {}
-
-    for name, path in downloaded_files:
-        # Extract scene ID from filename
-        for part in name.split('_'):
-            if len(part) > 20:
-                scene_id = part
-                break
-        else:
-            continue
-
-        if 'AnalyticMS_SR' in name or 'analytic_sr' in name.lower():
-            sr_files[scene_id] = path
-        elif 'udm2' in name.lower():
-            udm2_files[scene_id] = path
-
-    # Apply masks
-    processed = {}
-    for scene_id, sr_path in sr_files.items():
-        udm2_path = udm2_files.get(scene_id)
-        if udm2_path and os.path.exists(udm2_path):
-            masked_path = sr_path.replace('.tif', '_masked.tif')
-            apply_udm2_mask(sr_path, udm2_path, masked_path)
-            os.remove(udm2_path)
-            processed[scene_id] = (sr_path, masked_path)
-        else:
-            processed[scene_id] = (sr_path, None)
-
-    # Build stack (reuse logic from retrieve_time_series_stack)
+    # Build stack with grid alignment
+    # Compute a reference grid CENTERED on the target lat/lon
     window_scenes = site_info['window_scenes']
     time_windows = site_info['time_windows']
+    lat = site_info['lat']
+    lon = site_info['lon']
 
     num_bands = len(PS_BANDS)
     empty_template = np.zeros((num_bands, target_size, target_size), dtype=np.uint16)
 
+    ref_transform = None
+    ref_crs = None
+    ref_shape = (target_size, target_size)
+
     images_unmasked = []
     images_masked = []
     metadata_windows = []
-    template_crs = None
-    template_transform = None
 
     for i, (start, end) in enumerate(time_windows):
         start_str = start.strftime('%Y-%m-%d')
@@ -1130,16 +1267,32 @@ async def _download_and_stack_order(order_info, site_info, out_dir, target_size)
         if paths and paths[0] and os.path.exists(paths[0]):
             try:
                 with rasterio.open(paths[0]) as src:
-                    unmasked_img = src.read()
-                    if template_crs is None:
-                        template_crs = src.crs
-                        template_transform = src.transform
-                    unmasked_img = trim_or_pad_image(unmasked_img, target_size, nodata=0)
+                    unmasked_raw = src.read()
+                    src_transform = src.transform
+                    src_crs = src.crs
 
+                    # First valid image: use its CRS but compute a CENTERED grid
+                    if ref_transform is None:
+                        ref_crs = src_crs
+                        ref_transform = compute_centered_grid(lat, lon, ref_crs, target_size)
+
+                # Align to reference grid (handles slight grid offsets between scenes)
+                unmasked_img = align_to_common_grid(
+                    unmasked_raw, src_transform, src_crs,
+                    ref_transform, ref_crs, ref_shape, nodata=0
+                )
+
+                # Load and align masked image
                 if paths[1] and os.path.exists(paths[1]):
                     with rasterio.open(paths[1]) as src:
-                        masked_img = src.read()
-                        masked_img = trim_or_pad_image(masked_img, target_size, nodata=0)
+                        masked_raw = src.read()
+                        masked_src_transform = src.transform
+                        masked_src_crs = src.crs
+
+                    masked_img = align_to_common_grid(
+                        masked_raw, masked_src_transform, masked_src_crs,
+                        ref_transform, ref_crs, ref_shape, nodata=0
+                    )
                 else:
                     masked_img = unmasked_img.copy()
 
@@ -1174,8 +1327,17 @@ async def _download_and_stack_order(order_info, site_info, out_dir, target_size)
                 'masked_fraction': 1.0
             })
 
+    # Use reference CRS and transform for output
+    template_crs = ref_crs
+    template_transform = ref_transform
+
     if template_crs is None:
-        raise ValueError(f"No valid images for {file_id}")
+        logging.warning(f"No valid images for {file_id}, skipping stack creation")
+        # Clean up temp files
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        return
 
     # Stack and save
     stacked_unmasked = np.stack(images_unmasked, axis=0)
@@ -1223,6 +1385,7 @@ async def _download_and_stack_order(order_info, site_info, out_dir, target_size)
     shutil.rmtree(temp_dir)
 
     logging.info(f"{file_id}: Saved stacks ({T} windows, {B} bands)")
+    return True
 
 
 def dataset_download_parallel(
@@ -1310,6 +1473,6 @@ if __name__ == '__main__':
         num_windows=36,
         timestep=10,
         window_buffer=3,
-        target_size=333,
         max_cloud_cover=0.5
+        # target_size defaults to PS_TARGET_SIZE (334 pixels)
     )

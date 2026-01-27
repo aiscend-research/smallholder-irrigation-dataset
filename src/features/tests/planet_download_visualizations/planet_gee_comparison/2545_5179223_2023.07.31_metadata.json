@@ -1,0 +1,445 @@
+{
+  "file_id": "2545_5179223_2023.07.31",
+  "lat": -15.296546,
+  "lon": 28.661519,
+  "year": 2023,
+  "sensor": "PlanetScope",
+  "bands": [
+    "blue",
+    "green",
+    "red",
+    "nir"
+  ],
+  "shape": [
+    42,
+    4,
+    334,
+    334
+  ],
+  "target_size": 334,
+  "num_windows": 36,
+  "num_windows_buffered": 42,
+  "timestep_days": 10,
+  "start_month_unbuffered": 1,
+  "window_buffer": 3,
+  "windows": [
+    {
+      "date_range": [
+        "2022-12-02",
+        "2022-12-12"
+      ],
+      "item_id": "20221204_072212_15_241a",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2022-12-12",
+        "2022-12-22"
+      ],
+      "item_id": "20221212_081233_65_2413",
+      "file_exists": true,
+      "masked_fraction": 0.6706228262038797,
+      "cloud_cover": 0.33
+    },
+    {
+      "date_range": [
+        "2022-12-22",
+        "2023-01-01"
+      ],
+      "item_id": "20221226_072448_14_2421",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.05
+    },
+    {
+      "date_range": [
+        "2023-01-01",
+        "2023-01-11"
+      ],
+      "item_id": null,
+      "file_exists": false,
+      "masked_fraction": 1.0
+    },
+    {
+      "date_range": [
+        "2023-01-11",
+        "2023-01-21"
+      ],
+      "item_id": null,
+      "file_exists": false,
+      "masked_fraction": 1.0
+    },
+    {
+      "date_range": [
+        "2023-01-21",
+        "2023-01-31"
+      ],
+      "item_id": "20230130_072110_05_2449",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.11
+    },
+    {
+      "date_range": [
+        "2023-01-31",
+        "2023-02-10"
+      ],
+      "item_id": "20230207_072210_69_2448",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.12
+    },
+    {
+      "date_range": [
+        "2023-02-10",
+        "2023-02-20"
+      ],
+      "item_id": "20230211_075637_75_247d",
+      "file_exists": true,
+      "masked_fraction": 0.3845512567679013,
+      "cloud_cover": 0.17
+    },
+    {
+      "date_range": [
+        "2023-02-20",
+        "2023-03-02"
+      ],
+      "item_id": "20230222_072400_17_2421",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2023-03-02",
+        "2023-03-12"
+      ],
+      "item_id": "20230310_075906_14_2483",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-03-12",
+        "2023-03-22"
+      ],
+      "item_id": "20230312_072917_39_24c4",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2023-03-22",
+        "2023-04-01"
+      ],
+      "item_id": "20230327_072621_24_24c5",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-04-01",
+        "2023-04-11"
+      ],
+      "item_id": "20230409_072859_50_24a7",
+      "file_exists": true,
+      "masked_fraction": 0.05453763132417799,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2023-04-11",
+        "2023-04-21"
+      ],
+      "item_id": "20230419_081243_48_2414",
+      "file_exists": true,
+      "masked_fraction": 0.05157051167126824,
+      "cloud_cover": 0.1
+    },
+    {
+      "date_range": [
+        "2023-04-21",
+        "2023-05-01"
+      ],
+      "item_id": "20230428_072917_10_24a7",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2023-05-01",
+        "2023-05-11"
+      ],
+      "item_id": "20230510_080346_21_247b",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-05-11",
+        "2023-05-21"
+      ],
+      "item_id": "20230517_081759_87_2402",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-05-21",
+        "2023-05-31"
+      ],
+      "item_id": "20230530_080209_86_248e",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-05-31",
+        "2023-06-10"
+      ],
+      "item_id": "20230607_072743_90_24a8",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-06-10",
+        "2023-06-20"
+      ],
+      "item_id": "20230619_080137_39_2488",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-06-20",
+        "2023-06-30"
+      ],
+      "item_id": "20230628_080415_81_248c",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-06-30",
+        "2023-07-10"
+      ],
+      "item_id": "20230705_073003_79_24b3",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-07-10",
+        "2023-07-20"
+      ],
+      "item_id": "20230716_080526_19_2475",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-07-20",
+        "2023-07-30"
+      ],
+      "item_id": "20230723_072313_07_2455",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-07-30",
+        "2023-08-09"
+      ],
+      "item_id": "20230730_080331_17_2478",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-08-09",
+        "2023-08-19"
+      ],
+      "item_id": "20230809_072921_84_2429",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-08-19",
+        "2023-08-29"
+      ],
+      "item_id": "20230824_073105_96_24a7",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-08-29",
+        "2023-09-08"
+      ],
+      "item_id": "20230902_080656_54_2461",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-09-08",
+        "2023-09-18"
+      ],
+      "item_id": "20230915_081035_33_247b",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-09-18",
+        "2023-09-28"
+      ],
+      "item_id": "20230925_080918_61_247b",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-09-28",
+        "2023-10-08"
+      ],
+      "item_id": "20231004_081141_03_248f",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-10-08",
+        "2023-10-18"
+      ],
+      "item_id": "20231010_072813_52_2420",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-10-18",
+        "2023-10-28"
+      ],
+      "item_id": "20231025_073138_41_24b3",
+      "file_exists": true,
+      "masked_fraction": 0.002151385851052386,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-10-28",
+        "2023-11-07"
+      ],
+      "item_id": "20231104_073244_72_24b0",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-11-07",
+        "2023-11-17"
+      ],
+      "item_id": "20231116_072845_70_2460",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-11-17",
+        "2023-11-27"
+      ],
+      "item_id": "20231126_073150_40_24b6",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2023-11-27",
+        "2023-12-07"
+      ],
+      "item_id": "20231206_073227_96_24d0",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-12-07",
+        "2023-12-17"
+      ],
+      "item_id": "20231209_081534_77_2475",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0
+    },
+    {
+      "date_range": [
+        "2023-12-17",
+        "2023-12-27"
+      ],
+      "item_id": "20231225_073229_88_24c1",
+      "file_exists": true,
+      "masked_fraction": 0.346283480942307,
+      "cloud_cover": 0.42
+    },
+    {
+      "date_range": [
+        "2023-12-27",
+        "2024-01-06"
+      ],
+      "item_id": "20240105_081820_88_2482",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.38
+    },
+    {
+      "date_range": [
+        "2024-01-06",
+        "2024-01-16"
+      ],
+      "item_id": "20240107_081813_94_2438",
+      "file_exists": true,
+      "masked_fraction": 0.0,
+      "cloud_cover": 0.01
+    },
+    {
+      "date_range": [
+        "2024-01-16",
+        "2024-01-26"
+      ],
+      "item_id": "20240123_081747_19_249c",
+      "file_exists": true,
+      "masked_fraction": 0.9629244505001973,
+      "cloud_cover": 0.44
+    }
+  ]
+}
