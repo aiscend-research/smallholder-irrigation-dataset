@@ -54,9 +54,25 @@ from src.utils.utils import find_project_root, get_data_root
 from src.utils.geometries import bounding_box
 from src.features.download_sentinel2 import get_stats
 
-# PlanetScope 4-band configuration (using analytic_sr_udm2 bundle)
+# PlanetScope 4-band configuration
 PS_BANDS = ['blue', 'green', 'red', 'nir']
 PS_BAND_INDICES = {'blue': 0, 'green': 1, 'red': 2, 'nir': 3}
+
+# Product type configuration (similar to Sentinel-2's L1C/L2A)
+# SR = Surface Reflectance (atmospherically corrected, fewer scenes available)
+# TOA = Top of Atmosphere (raw reflectance, more scenes available)
+PRODUCT_TYPES = {
+    'SR': {
+        'bundle': 'analytic_sr_udm2',
+        'asset': 'ortho_analytic_4b_sr',
+        'description': 'Surface Reflectance (atmospherically corrected)'
+    },
+    'TOA': {
+        'bundle': 'analytic_udm2',
+        'asset': 'ortho_analytic_4b',
+        'description': 'Top of Atmosphere (uncorrected)'
+    }
+}
 
 # Grid configuration
 PS_RESOLUTION = 3.0  # meters per pixel
@@ -142,7 +158,8 @@ async def search_scenes(
     start_date: str,
     end_date: str,
     max_cloud_cover: float = 0.5,
-    check_aoi_coverage: bool = True
+    check_aoi_coverage: bool = True,
+    product_type: str = 'SR'
 ) -> list:
     """
     Search for PlanetScope scenes in a time window.
@@ -154,11 +171,14 @@ async def search_scenes(
         end_date: End date as 'YYYY-MM-DD'
         max_cloud_cover: Maximum cloud cover fraction (0-1)
         check_aoi_coverage: If True, query Planet for actual AOI coverage (slower but accurate)
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         list: List of scene items sorted by AOI coverage (highest first).
               Each item has 'aoi_clear_percent' and 'footprint_coverage' added.
     """
+    if product_type not in PRODUCT_TYPES:
+        raise ValueError(f"Invalid product_type '{product_type}'. Must be one of: {list(PRODUCT_TYPES.keys())}")
     from planet import data_filter
 
     aoi = point_to_aoi(lon, lat)
@@ -184,6 +204,26 @@ async def search_scenes(
             item_types=["PSScene"]
         ):
             items.append(item)
+
+        if not items:
+            return []
+
+        # Filter to only include scenes with the required asset available
+        # The '_permissions' field lists assets the user has access to download
+        required_asset = PRODUCT_TYPES[product_type]['asset']
+        items_with_access = []
+        for item in items:
+            permissions = item.get('_permissions', [])
+            # Check if we have download access to the required asset
+            if any(required_asset in str(p) for p in permissions):
+                items_with_access.append(item)
+            else:
+                logging.debug(f"Skipping {item['id']}: no access to {required_asset}")
+
+        if len(items_with_access) < len(items):
+            logging.info(f"Filtered {len(items) - len(items_with_access)}/{len(items)} scenes without {product_type} access")
+
+        items = items_with_access
 
         if not items:
             return []
@@ -245,9 +285,10 @@ async def search_scenes(
 
 
 def search_scenes_sync(lat: float, lon: float, start_date: str, end_date: str,
-                       max_cloud_cover: float = 0.5, check_aoi_coverage: bool = True) -> list:
+                       max_cloud_cover: float = 0.5, check_aoi_coverage: bool = True,
+                       product_type: str = 'SR') -> list:
     """Synchronous wrapper for search_scenes."""
-    return asyncio.run(search_scenes(lat, lon, start_date, end_date, max_cloud_cover, check_aoi_coverage))
+    return asyncio.run(search_scenes(lat, lon, start_date, end_date, max_cloud_cover, check_aoi_coverage, product_type))
 
 
 #############################
@@ -269,7 +310,8 @@ def _build_order_request(
     lon: float,
     anchor_id: str,
     order_name: str,
-    aoi_buffer_m: float = 20.0
+    aoi_buffer_m: float = 20.0,
+    product_type: str = 'SR'
 ) -> dict:
     """
     Build a Planet order request with reproject, coregister, and clip tools.
@@ -290,14 +332,20 @@ def _build_order_request(
         anchor_id: Scene ID to use as coregistration anchor
         order_name: Name for the order
         aoi_buffer_m: Extra buffer in meters to add around AOI (default 20m)
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         dict: Order request ready for Planet Orders API
     """
+    if product_type not in PRODUCT_TYPES:
+        raise ValueError(f"Invalid product_type '{product_type}'. Must be one of: {list(PRODUCT_TYPES.keys())}")
+
     # Add buffer to AOI to account for grid misalignment after clip->reproject
     half_side_km = 0.5 + (aoi_buffer_m / 1000.0)
     aoi = point_to_aoi(lon, lat, half_side_km=half_side_km)
     utm_epsg = get_utm_epsg(lat, lon)
+
+    product_bundle = PRODUCT_TYPES[product_type]['bundle']
 
     order_request = {
         "name": order_name,
@@ -305,7 +353,7 @@ def _build_order_request(
             {
                 "item_ids": item_ids,
                 "item_type": "PSScene",
-                "product_bundle": "analytic_sr_udm2"  # Surface Reflectance + UDM2 cloud mask
+                "product_bundle": product_bundle
             }
         ],
         "tools": [
@@ -319,7 +367,7 @@ def _build_order_request(
         ]
     }
 
-    logging.info(f"Order tools: reproject to {utm_epsg} at 3m, coregister to {anchor_id}, clip to AOI")
+    logging.info(f"Order [{product_type}]: reproject to {utm_epsg} at 3m, coregister to {anchor_id}, clip to AOI")
     return order_request
 
 
@@ -360,11 +408,12 @@ async def _download_and_process_order(
                             f.write(chunk)
                 downloaded_files.append((filename, local_path))
 
-    # Match up SR images with their UDM2 masks
-    # Filenames look like: 20230607_072630_16_2439_3B_AnalyticMS_SR_clip.tif
-    #                      20230607_072630_16_2439_3B_udm2_clip.tif
+    # Match up analytic images with their UDM2 masks
+    # SR filenames look like: 20230607_072630_16_2439_3B_AnalyticMS_SR_clip.tif
+    # TOA filenames look like: 20230607_072630_16_2439_3B_AnalyticMS_clip.tif
+    # UDM2 filenames:          20230607_072630_16_2439_3B_udm2_clip.tif
     # Scene ID is the part before "_3B_": 20230607_072630_16_2439
-    sr_files = {}
+    analytic_files = {}
     udm2_files = {}
 
     for filename, path in downloaded_files:
@@ -375,24 +424,26 @@ async def _download_and_process_order(
             # Fallback: use filename without extension
             scene_id = filename.replace('.tif', '')
 
-        if 'AnalyticMS_SR' in filename or 'analytic_sr' in filename.lower():
-            sr_files[scene_id] = path
+        # Match analytic images (both SR and TOA)
+        if 'AnalyticMS' in filename or 'analytic' in filename.lower():
+            if 'udm2' not in filename.lower():
+                analytic_files[scene_id] = path
         elif 'udm2' in filename.lower():
             udm2_files[scene_id] = path
 
     # Apply masks and build results
     results = {}
-    for scene_id in sr_files:
-        sr_path = sr_files[scene_id]
+    for scene_id in analytic_files:
+        analytic_path = analytic_files[scene_id]
         udm2_path = udm2_files.get(scene_id)
 
         if udm2_path and os.path.exists(udm2_path):
-            masked_path = sr_path.replace('.tif', '_masked.tif')
-            apply_udm2_mask(sr_path, udm2_path, masked_path)
+            masked_path = analytic_path.replace('.tif', '_masked.tif')
+            apply_udm2_mask(analytic_path, udm2_path, masked_path)
             os.remove(udm2_path)
-            results[scene_id] = (sr_path, masked_path)
+            results[scene_id] = (analytic_path, masked_path)
         else:
-            results[scene_id] = (sr_path, None)
+            results[scene_id] = (analytic_path, None)
 
     return results
 
@@ -403,7 +454,8 @@ async def order_and_download_batch(
     lon: float,
     output_dir: str,
     order_name: str,
-    anchor_id: str = None
+    anchor_id: str = None,
+    product_type: str = 'SR'
 ) -> dict:
     """
     Order multiple PlanetScope scenes in a single batch, wait, and download all.
@@ -422,6 +474,7 @@ async def order_and_download_batch(
         output_dir: Directory to save files
         order_name: Name for the order
         anchor_id: Scene ID to use as coregistration anchor (default: first in list)
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         dict: Mapping of item_id -> (unmasked_path, masked_path) for successful downloads
@@ -433,7 +486,7 @@ async def order_and_download_batch(
         anchor_id = item_ids[0]
 
     # Build order request using helper
-    order_request = _build_order_request(item_ids, lat, lon, anchor_id, order_name)
+    order_request = _build_order_request(item_ids, lat, lon, anchor_id, order_name, product_type=product_type)
 
     async with Session() as sess:
         client = OrdersClient(sess)
@@ -618,7 +671,8 @@ async def search_best_scenes_for_windows(
     lat: float,
     lon: float,
     time_windows: list,
-    max_cloud_cover: float = 0.5
+    max_cloud_cover: float = 0.5,
+    product_type: str = 'SR'
 ) -> dict:
     """
     Search for the best scene for each time window.
@@ -628,6 +682,7 @@ async def search_best_scenes_for_windows(
         lon: Longitude
         time_windows: List of (start_date, end_date) tuples
         max_cloud_cover: Maximum cloud cover
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         dict: {window_index: {"item_id": str, "cloud_cover": float, "date_range": [str, str]}}
@@ -638,7 +693,7 @@ async def search_best_scenes_for_windows(
         start_str = start.strftime('%Y-%m-%d')
         end_str = end.strftime('%Y-%m-%d')
 
-        items = await search_scenes(lat, lon, start_str, end_str, max_cloud_cover)
+        items = await search_scenes(lat, lon, start_str, end_str, max_cloud_cover, product_type=product_type)
 
         if items:
             best = items[0]  # Already sorted by effective_coverage
@@ -673,7 +728,8 @@ async def retrieve_time_series_stack(
     window_buffer: int = 3,
     target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
-    center_on_date: bool = False
+    center_on_date: bool = False,
+    product_type: str = 'SR'
 ):
     """
     Download and stack PlanetScope images over a time series (async).
@@ -701,6 +757,7 @@ async def retrieve_time_series_stack(
         max_cloud_cover: Maximum cloud cover for scene selection
         center_on_date: If True, center time windows on `date` instead of using `start_month`.
             This matches Sentinel-2's behavior with 36 windows centered on the labeled date.
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         None. Saves files to:
@@ -731,8 +788,8 @@ async def retrieve_time_series_stack(
     os.makedirs(temp_dir, exist_ok=True)
 
     # Step 1: Search for best scene for each window
-    logging.info(f"Searching for scenes across {num_windows_buffered} windows...")
-    window_scenes = await search_best_scenes_for_windows(lat, lon, time_windows, max_cloud_cover)
+    logging.info(f"Searching for {product_type} scenes across {num_windows_buffered} windows...")
+    window_scenes = await search_best_scenes_for_windows(lat, lon, time_windows, max_cloud_cover, product_type=product_type)
 
     # Collect all scene IDs that were found and find best anchor
     item_ids = []
@@ -756,10 +813,10 @@ async def retrieve_time_series_stack(
     # Step 2 & 3: Submit batch order and download
     downloaded = {}
     if item_ids:
-        logging.info(f"Submitting batch order for {len(item_ids)} scenes...")
+        logging.info(f"Submitting {product_type} batch order for {len(item_ids)} scenes...")
         downloaded = await order_and_download_batch(
             item_ids, lat, lon, temp_dir, f"batch_{file_id}",
-            anchor_id=best_anchor
+            anchor_id=best_anchor, product_type=product_type
         )
         logging.info(f"Downloaded {len(downloaded)} scenes")
 
@@ -907,6 +964,8 @@ async def retrieve_time_series_stack(
         'lon': float(lon),
         'year': int(date.year),
         'sensor': 'PlanetScope',
+        'product_type': product_type,
+        'product_bundle': PRODUCT_TYPES[product_type]['bundle'],
         'bands': PS_BANDS,
         'shape': list(stacked_masked.shape),
         'target_size': target_size,
@@ -944,7 +1003,8 @@ def retrieve_time_series_stack_sync(
     window_buffer: int = 3,
     target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
-    center_on_date: bool = False
+    center_on_date: bool = False,
+    product_type: str = 'SR'
 ):
     """
     Sync wrapper for retrieve_time_series_stack.
@@ -955,7 +1015,7 @@ def retrieve_time_series_stack_sync(
     return asyncio.run(retrieve_time_series_stack(
         file_id, lat, lon, date, out_dir,
         start_month, num_windows, timestep, window_buffer,
-        target_size, max_cloud_cover, center_on_date
+        target_size, max_cloud_cover, center_on_date, product_type
     ))
 
 
@@ -972,7 +1032,8 @@ def dataset_download(
     window_buffer: int = 3,
     target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
-    subset: bool = False
+    subset: bool = False,
+    product_type: str = 'SR'
 ):
     """
     Download and stack PlanetScope images for each site in a CSV.
@@ -989,14 +1050,15 @@ def dataset_download(
         target_size: Size in pixels (default PS_TARGET_SIZE)
         max_cloud_cover: Maximum cloud cover for scene selection
         subset: If True, only process first 10 rows (for testing)
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
 
     Returns:
         str: Success message
     """
     initialize_planet()
 
-    # Create version folder
-    version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Create version folder with product type suffix
+    version_name = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{product_type}"
     out_dir = os.path.join(download_dir, version_name)
     os.makedirs(out_dir, exist_ok=False)
 
@@ -1011,7 +1073,9 @@ def dataset_download(
         'target_size': target_size,
         'max_cloud_cover': max_cloud_cover,
         'subset': subset,
-        'sensor': 'PlanetScope'
+        'sensor': 'PlanetScope',
+        'product_type': product_type,
+        'product_bundle': PRODUCT_TYPES[product_type]['bundle']
     }
     metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
     with open(metadata_path, 'w') as f:
@@ -1050,7 +1114,8 @@ def dataset_download(
                 timestep=timestep,
                 window_buffer=window_buffer,
                 target_size=target_size,
-                max_cloud_cover=max_cloud_cover
+                max_cloud_cover=max_cloud_cover,
+                product_type=product_type
             )
 
             # Add unique_id to metadata (only if stack was created)
@@ -1093,7 +1158,8 @@ async def process_sites_parallel(
     target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
     max_concurrent_orders: int = 20,
-    poll_interval: int = 60
+    poll_interval: int = 60,
+    product_type: str = 'SR'
 ):
     """
     Process multiple sites with parallel order submission.
@@ -1106,6 +1172,7 @@ async def process_sites_parallel(
         out_dir: Output directory
         max_concurrent_orders: Max orders to have pending at once
         poll_interval: Seconds between polling for order status
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
         (other args same as retrieve_time_series_stack)
 
     Returns:
@@ -1142,7 +1209,7 @@ async def process_sites_parallel(
                 # Search for scenes
                 try:
                     window_scenes = await search_best_scenes_for_windows(
-                        lat, lon, time_windows, max_cloud_cover
+                        lat, lon, time_windows, max_cloud_cover, product_type=product_type
                     )
 
                     # Collect item IDs and find best anchor
@@ -1164,7 +1231,8 @@ async def process_sites_parallel(
                     # Build order request using shared helper
                     anchor_id = best_anchor or item_ids[0]
                     order_request = _build_order_request(
-                        item_ids, lat, lon, anchor_id, f"batch_{file_id}"
+                        item_ids, lat, lon, anchor_id, f"batch_{file_id}",
+                        product_type=product_type
                     )
 
                     order = await orders_client.create_order(order_request)
@@ -1198,7 +1266,7 @@ async def process_sites_parallel(
                         if state == 'success':
                             logging.info(f"{site_info['file_id']}: Order complete, downloading...")
                             stack_created = await _download_and_stack_order(
-                                order_info, site_info, out_dir, target_size
+                                order_info, site_info, out_dir, target_size, product_type
                             )
                             if stack_created:
                                 results[site_info['file_id']] = "success"
@@ -1226,7 +1294,7 @@ async def process_sites_parallel(
     return results
 
 
-async def _download_and_stack_order(order_info, site_info, out_dir, target_size):
+async def _download_and_stack_order(order_info, site_info, out_dir, target_size, product_type='SR'):
     """Download order results and create stacked outputs.
 
     Returns:
@@ -1371,6 +1439,8 @@ async def _download_and_stack_order(order_info, site_info, out_dir, target_size)
         'lat': float(site_info['lat']),
         'lon': float(site_info['lon']),
         'sensor': 'PlanetScope',
+        'product_type': product_type,
+        'product_bundle': PRODUCT_TYPES[product_type]['bundle'],
         'bands': PS_BANDS,
         'shape': list(stacked_masked.shape),
         'target_size': target_size,
@@ -1392,6 +1462,7 @@ def dataset_download_parallel(
     csv: str,
     download_dir: str,
     max_concurrent_orders: int = 20,
+    product_type: str = 'SR',
     **kwargs
 ) -> dict:
     """
@@ -1401,6 +1472,7 @@ def dataset_download_parallel(
         csv: Path to CSV with columns: x, y, unique_id, site_id, year, month, day
         download_dir: Output directory
         max_concurrent_orders: How many orders to have pending at once (default 20)
+        product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
         **kwargs: Passed to process_sites_parallel
 
     Returns:
@@ -1408,8 +1480,8 @@ def dataset_download_parallel(
     """
     initialize_planet()
 
-    # Create version folder
-    version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Create version folder with product type suffix
+    version_name = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{product_type}"
     out_dir = os.path.join(download_dir, version_name)
     os.makedirs(out_dir, exist_ok=False)
 
@@ -1427,11 +1499,12 @@ def dataset_download_parallel(
             'date': datetime(int(row['year']), int(row['month']), int(row['day']))
         })
 
-    logging.info(f"Processing {len(sites)} sites with max {max_concurrent_orders} concurrent orders")
+    logging.info(f"Processing {len(sites)} sites with max {max_concurrent_orders} concurrent orders ({product_type})")
 
     # Run parallel processing
     results = asyncio.run(
-        process_sites_parallel(sites, out_dir, max_concurrent_orders=max_concurrent_orders, **kwargs)
+        process_sites_parallel(sites, out_dir, max_concurrent_orders=max_concurrent_orders,
+                               product_type=product_type, **kwargs)
     )
 
     # Save results summary
@@ -1465,14 +1538,29 @@ if __name__ == '__main__':
     # 2500 sites ≈ 125 batches × 30 min = ~63 hours
     # With 50 concurrent orders: ~25 hours
 
+    # Download Surface Reflectance (SR) - atmospherically corrected, fewer scenes
+    # This is the default and preferred for most applications
     dataset_download_parallel(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        max_concurrent_orders=20,  # Adjust based on Planet's limits
+        max_concurrent_orders=50,
+        product_type='SR',
         start_month=1,
         num_windows=36,
         timestep=10,
         window_buffer=3,
         max_cloud_cover=0.5
-        # target_size defaults to PS_TARGET_SIZE (334 pixels)
     )
+
+    # Uncomment to also download TOA (Top of Atmosphere) - more scenes available
+    # dataset_download_parallel(
+    #     csv=LABEL_CSV,
+    #     download_dir=DOWNLOAD_DIR,
+    #     max_concurrent_orders=50,
+    #     product_type='TOA',
+    #     start_month=1,
+    #     num_windows=36,
+    #     timestep=10,
+    #     window_buffer=3,
+    #     max_cloud_cover=0.5
+    # )
