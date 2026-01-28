@@ -1320,6 +1320,35 @@ async def process_sites_parallel(
                     # Small delay between order submissions to avoid rate limits
                     await asyncio.sleep(0.1)
 
+                # Quick poll after each batch to download any completed orders
+                if pending_orders:
+                    logging.info(f"Quick poll: checking {len(pending_orders)} pending orders...")
+                    completed = []
+                    for order_id, site_info in pending_orders.items():
+                        try:
+                            order_info = await orders_client.get_order(order_id)
+                            state = order_info['state']
+                            if state == 'success':
+                                logging.info(f"{site_info['file_id']}: Order complete, downloading...")
+                                stack_created = await _download_and_stack_order(
+                                    order_info, site_info, out_dir, target_size, product_type
+                                )
+                                if stack_created:
+                                    results[site_info['file_id']] = "success"
+                                else:
+                                    results[site_info['file_id']] = "no_valid_images"
+                                completed.append(order_id)
+                            elif state in ['failed', 'partial']:
+                                logging.error(f"{site_info['file_id']}: Order {state}")
+                                results[site_info['file_id']] = state
+                                completed.append(order_id)
+                        except Exception as e:
+                            logging.error(f"Error polling {order_id}: {e}")
+                    for order_id in completed:
+                        del pending_orders[order_id]
+                    if completed:
+                        logging.info(f"Quick poll: downloaded {len(completed)} stacks, {len(pending_orders)} still pending")
+
             # Poll pending orders
             if pending_orders:
                 logging.info(f"Polling {len(pending_orders)} pending orders...")
