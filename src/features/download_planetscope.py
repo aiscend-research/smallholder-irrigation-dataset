@@ -1171,9 +1171,10 @@ async def process_sites_parallel(
     window_buffer: int = 3,
     target_size: int = PS_TARGET_SIZE,
     max_cloud_cover: float = 0.5,
-    max_concurrent_orders: int = 20,
+    max_concurrent_orders: int = 100,
     poll_interval: int = 60,
-    product_type: str = 'SR'
+    product_type: str = 'SR',
+    concurrent_scene_searches: int = 10
 ):
     """
     Process multiple sites with parallel order submission.
@@ -1187,6 +1188,7 @@ async def process_sites_parallel(
         max_concurrent_orders: Max orders to have pending at once
         poll_interval: Seconds between polling for order status
         product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
+        concurrent_scene_searches: Number of sites to search scenes for in parallel (default 5)
         (other args same as retrieve_time_series_stack)
 
     Returns:
@@ -1197,6 +1199,28 @@ async def process_sites_parallel(
 
     step_size = timedelta(days=timestep)
     num_windows_buffered = num_windows + (window_buffer * 2)
+
+    async def search_site_scenes(site):
+        """Search scenes for a single site. Returns (site, window_scenes, time_windows) or (site, None, error)."""
+        file_id = site['file_id']
+        lat, lon = site['lat'], site['lon']
+        date = site['date']
+
+        # Create time windows
+        start_date_dt = datetime(date.year, start_month, 1) - (step_size * window_buffer)
+        time_windows = [
+            (start_date_dt + i * step_size, start_date_dt + (i + 1) * step_size)
+            for i in range(num_windows_buffered)
+        ]
+
+        try:
+            window_scenes = await search_best_scenes_for_windows(
+                lat, lon, time_windows, max_cloud_cover, product_type=product_type
+            )
+            return (site, window_scenes, time_windows, None)
+        except Exception as e:
+            logging.error(f"{file_id}: Scene search failed: {e}")
+            return (site, None, None, str(e))
 
     # Check for existing stacks (resume info)
     existing_count = sum(1 for s in sites if os.path.exists(os.path.join(out_dir, f"{s['file_id']}_stack.tif")))
@@ -1221,32 +1245,38 @@ async def process_sites_parallel(
         orders_client = OrdersClient(sess)
 
         while sites_queue or pending_orders:
-            # Submit new orders up to limit
+            # Submit new orders up to limit, with parallel scene searching
             while sites_queue and len(pending_orders) < max_concurrent_orders:
-                site = sites_queue.popleft()
-                file_id = site['file_id']
-                lat, lon = site['lat'], site['lon']
-                date = site['date']
+                # Collect batch of sites to search in parallel
+                batch = []
+                while sites_queue and len(batch) < concurrent_scene_searches and len(pending_orders) + len(batch) < max_concurrent_orders:
+                    site = sites_queue.popleft()
+                    file_id = site['file_id']
 
-                # Skip if stack already exists (resume capability)
-                stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
-                if os.path.exists(stack_path):
-                    logging.info(f"{file_id}: Stack already exists, skipping")
-                    results[file_id] = "skipped_exists"
-                    continue
+                    # Skip if stack already exists (resume capability)
+                    stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
+                    if os.path.exists(stack_path):
+                        logging.info(f"{file_id}: Stack already exists, skipping")
+                        results[file_id] = "skipped_exists"
+                        continue
 
-                # Create time windows
-                start_date_dt = datetime(date.year, start_month, 1) - (step_size * window_buffer)
-                time_windows = [
-                    (start_date_dt + i * step_size, start_date_dt + (i + 1) * step_size)
-                    for i in range(num_windows_buffered)
-                ]
+                    batch.append(site)
 
-                # Search for scenes
-                try:
-                    window_scenes = await search_best_scenes_for_windows(
-                        lat, lon, time_windows, max_cloud_cover, product_type=product_type
-                    )
+                if not batch:
+                    break
+
+                # Search scenes for all sites in batch in parallel
+                logging.info(f"Searching scenes for {len(batch)} sites in parallel...")
+                search_results = await asyncio.gather(*[search_site_scenes(site) for site in batch])
+
+                # Process results and submit orders
+                for site, window_scenes, time_windows, error in search_results:
+                    file_id = site['file_id']
+                    lat, lon = site['lat'], site['lon']
+
+                    if error:
+                        results[file_id] = f"search_error: {error}"
+                        continue
 
                     # Collect item IDs and find best anchor
                     item_ids = []
@@ -1265,29 +1295,30 @@ async def process_sites_parallel(
                         continue
 
                     # Build order request using shared helper
-                    anchor_id = best_anchor or item_ids[0]
-                    order_request = _build_order_request(
-                        item_ids, lat, lon, anchor_id, f"batch_{file_id}",
-                        product_type=product_type
-                    )
+                    try:
+                        anchor_id = best_anchor or item_ids[0]
+                        order_request = _build_order_request(
+                            item_ids, lat, lon, anchor_id, f"batch_{file_id}",
+                            product_type=product_type
+                        )
 
-                    order = await orders_client.create_order(order_request)
-                    order_id = order['id']
-                    pending_orders[order_id] = {
-                        'file_id': file_id,
-                        'lat': lat,
-                        'lon': lon,
-                        'window_scenes': window_scenes,
-                        'time_windows': time_windows
-                    }
-                    logging.info(f"{file_id}: Submitted order {order_id} with {len(item_ids)} scenes")
+                        order = await orders_client.create_order(order_request)
+                        order_id = order['id']
+                        pending_orders[order_id] = {
+                            'file_id': file_id,
+                            'lat': lat,
+                            'lon': lon,
+                            'window_scenes': window_scenes,
+                            'time_windows': time_windows
+                        }
+                        logging.info(f"{file_id}: Submitted order {order_id} with {len(item_ids)} scenes")
 
-                except Exception as e:
-                    logging.error(f"{file_id}: Failed to submit order: {e}")
-                    results[file_id] = f"submit_error: {e}"
+                    except Exception as e:
+                        logging.error(f"{file_id}: Failed to submit order: {e}")
+                        results[file_id] = f"submit_error: {e}"
 
-                # Rate limit: small delay between submissions
-                await asyncio.sleep(0.25)
+                    # Small delay between order submissions to avoid rate limits
+                    await asyncio.sleep(0.1)
 
             # Poll pending orders
             if pending_orders:
@@ -1497,9 +1528,10 @@ async def _download_and_stack_order(order_info, site_info, out_dir, target_size,
 def dataset_download_parallel(
     csv: str,
     download_dir: str,
-    max_concurrent_orders: int = 20,
+    max_concurrent_orders: int = 100,
     product_type: str = 'SR',
     resume_dir: str = None,
+    concurrent_scene_searches: int = 10,
     **kwargs
 ) -> dict:
     """
@@ -1512,6 +1544,8 @@ def dataset_download_parallel(
         product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
         resume_dir: If provided, resume downloading into this existing directory
                     (e.g., '20260127_120000_SR'). Skips sites with existing stacks.
+        concurrent_scene_searches: Number of sites to search scenes for in parallel (default 5).
+                                   Higher values speed up scene searching but may hit API rate limits.
         **kwargs: Passed to process_sites_parallel
 
     Returns:
@@ -1563,7 +1597,8 @@ def dataset_download_parallel(
     # Run parallel processing
     results = asyncio.run(
         process_sites_parallel(sites, out_dir, max_concurrent_orders=max_concurrent_orders,
-                               product_type=product_type, **kwargs)
+                               product_type=product_type,
+                               concurrent_scene_searches=concurrent_scene_searches, **kwargs)
     )
 
     # Save results summary
