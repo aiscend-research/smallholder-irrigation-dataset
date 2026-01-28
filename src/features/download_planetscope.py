@@ -28,6 +28,7 @@ Usage:
 import sys
 import os
 import json
+import time
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -1192,15 +1193,34 @@ async def process_sites_parallel(
     Returns:
         dict: {file_id: "success" | "failed" | error_message}
     """
+    import shutil
     from collections import deque
 
     step_size = timedelta(days=timestep)
     num_windows_buffered = num_windows + (window_buffer * 2)
 
+    # Check for existing stacks (resume info)
+    existing_count = sum(1 for s in sites if os.path.exists(os.path.join(out_dir, f"{s['file_id']}_stack.tif")))
+    if existing_count > 0:
+        logging.info(f"Resume mode: {existing_count}/{len(sites)} stacks already exist, will skip those")
+
+    # Clean up stale _tmp folders from interrupted runs
+    tmp_dir = os.path.join(out_dir, "_tmp")
+    if os.path.exists(tmp_dir):
+        stale_folders = os.listdir(tmp_dir)
+        if stale_folders:
+            logging.info(f"Cleaning up {len(stale_folders)} stale _tmp folders from interrupted run")
+            shutil.rmtree(tmp_dir)
+            os.makedirs(tmp_dir, exist_ok=True)
+
     # Track state
     pending_orders = {}  # order_id -> site_info
     results = {}
     sites_queue = deque(sites)
+    last_poll_time = time.time()
+    poll_every_n_sites = 5  # Poll after every N site submissions
+    poll_every_seconds = 120  # Or poll every N seconds, whichever comes first
+    sites_since_poll = 0
 
     async with Session() as sess:
         orders_client = OrdersClient(sess)
@@ -1208,6 +1228,36 @@ async def process_sites_parallel(
         while sites_queue or pending_orders:
             # Submit new orders up to limit
             while sites_queue and len(pending_orders) < max_concurrent_orders:
+                # Check if we should poll mid-submission (keep downloads flowing)
+                time_since_poll = time.time() - last_poll_time
+                if pending_orders and (sites_since_poll >= poll_every_n_sites or time_since_poll >= poll_every_seconds):
+                    logging.info(f"Mid-submission poll: checking {len(pending_orders)} pending orders...")
+                    completed = []
+                    for order_id, site_info in pending_orders.items():
+                        try:
+                            order_info = await orders_client.get_order(order_id)
+                            state = order_info['state']
+                            if state == 'success':
+                                logging.info(f"{site_info['file_id']}: Order complete, downloading...")
+                                stack_created = await _download_and_stack_order(
+                                    order_info, site_info, out_dir, target_size, product_type
+                                )
+                                if stack_created:
+                                    results[site_info['file_id']] = "success"
+                                else:
+                                    results[site_info['file_id']] = "no_valid_images"
+                                completed.append(order_id)
+                            elif state in ['failed', 'partial']:
+                                logging.error(f"{site_info['file_id']}: Order {state}")
+                                results[site_info['file_id']] = state
+                                completed.append(order_id)
+                        except Exception as e:
+                            logging.error(f"Error polling {order_id}: {e}")
+                    for order_id in completed:
+                        del pending_orders[order_id]
+                    last_poll_time = time.time()
+                    sites_since_poll = 0
+
                 site = sites_queue.popleft()
                 file_id = site['file_id']
                 lat, lon = site['lat'], site['lon']
@@ -1266,6 +1316,7 @@ async def process_sites_parallel(
                         'time_windows': time_windows
                     }
                     logging.info(f"{file_id}: Submitted order {order_id} with {len(item_ids)} scenes")
+                    sites_since_poll += 1
 
                 except Exception as e:
                     logging.error(f"{file_id}: Failed to submit order: {e}")
@@ -1306,6 +1357,10 @@ async def process_sites_parallel(
                 # Remove completed orders
                 for order_id in completed:
                     del pending_orders[order_id]
+
+                # Reset poll timer
+                last_poll_time = time.time()
+                sites_since_poll = 0
 
                 # Wait before next poll
                 if pending_orders:
@@ -1484,6 +1539,7 @@ def dataset_download_parallel(
     download_dir: str,
     max_concurrent_orders: int = 20,
     product_type: str = 'SR',
+    resume_dir: str = None,
     **kwargs
 ) -> dict:
     """
@@ -1494,6 +1550,8 @@ def dataset_download_parallel(
         download_dir: Output directory
         max_concurrent_orders: How many orders to have pending at once (default 20)
         product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
+        resume_dir: If provided, resume downloading into this existing directory
+                    (e.g., '20260127_120000_SR'). Skips sites with existing stacks.
         **kwargs: Passed to process_sites_parallel
 
     Returns:
@@ -1501,10 +1559,16 @@ def dataset_download_parallel(
     """
     initialize_planet()
 
-    # Create version folder with product type suffix
-    version_name = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{product_type}"
-    out_dir = os.path.join(download_dir, version_name)
-    os.makedirs(out_dir, exist_ok=False)
+    # Create or resume into version folder
+    if resume_dir:
+        out_dir = os.path.join(download_dir, resume_dir)
+        if not os.path.exists(out_dir):
+            raise ValueError(f"Resume directory does not exist: {out_dir}")
+        logging.info(f"Resuming download into: {out_dir}")
+    else:
+        version_name = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{product_type}"
+        out_dir = os.path.join(download_dir, version_name)
+        os.makedirs(out_dir, exist_ok=False)
 
     # Read sites
     data = pd.read_csv(csv)
