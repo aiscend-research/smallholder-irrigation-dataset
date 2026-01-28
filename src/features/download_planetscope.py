@@ -1083,6 +1083,20 @@ def dataset_download(
 
     # Read input data
     data = pd.read_csv(csv)
+    original_count = len(data)
+
+    # Deduplicate by (site_id, year, month, day) to avoid downloading the same stack twice
+    # This happens when multiple labelers labeled the same image
+    data['_dedup_key'] = (data['site_id'].astype(str) + '_' +
+                          data['year'].astype(str) + '_' +
+                          data['month'].astype(str) + '_' +
+                          data['day'].astype(str))
+    data = data.drop_duplicates(subset='_dedup_key', keep='first')
+    data = data.drop(columns=['_dedup_key'])
+
+    if len(data) < original_count:
+        logging.info(f"Deduplicated: {original_count} rows -> {len(data)} unique site+date combinations "
+                     f"(removed {original_count - len(data)} duplicates)")
 
     if subset:
         data = data.head(10)
@@ -1487,6 +1501,20 @@ def dataset_download_parallel(
 
     # Read sites
     data = pd.read_csv(csv)
+    original_count = len(data)
+
+    # Deduplicate by (site_id, year, month, day) to avoid downloading the same stack twice
+    # This happens when multiple labelers labeled the same image
+    data['_dedup_key'] = (data['site_id'].astype(str) + '_' +
+                          data['year'].astype(str) + '_' +
+                          data['month'].astype(str) + '_' +
+                          data['day'].astype(str))
+    data = data.drop_duplicates(subset='_dedup_key', keep='first')
+    data = data.drop(columns=['_dedup_key'])
+
+    if len(data) < original_count:
+        logging.info(f"Deduplicated: {original_count} rows -> {len(data)} unique site+date combinations "
+                     f"(removed {original_count - len(data)} duplicates)")
 
     sites = []
     for _, row in data.iterrows():
