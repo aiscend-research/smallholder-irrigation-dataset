@@ -1,34 +1,40 @@
-# Feature Downloading with Google Earth Engine
+# Feature Downloading
+
+This module downloads satellite imagery time series for irrigation-labeled sites. Two data sources are supported:
+
+1. **Sentinel-2** (via Google Earth Engine) - 10m resolution, 10 spectral bands, free
+2. **PlanetScope** (via Planet Orders API) - 3m resolution, 4 bands, requires license
 
 ## Table of Contents
-- [Feature Downloading with Google Earth Engine](#feature-downloading-with-google-earth-engine)
+- [Feature Downloading](#feature-downloading)
   - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Prerequisites](#prerequisites)
-  - [Google Cloud Setup](#google-cloud-setup)
-    - [1. Create a GCP Project](#1-create-a-gcp-project)
-    - [2. Create a GCS Bucket](#2-create-a-gcs-bucket)
-    - [3. Create a Service Account](#3-create-a-service-account)
-  - [Service account and GCS configuration](#service-account-and-gcs-configuration)
-  - [Downloading Features](#downloading-features)
-    - [Time Window Definition](#time-window-definition)
-    - [Sentinel-2 Mosaic Retrieval](#sentinel-2-mosaic-retrieval)
-      - [Atmospheric Correction](#atmospheric-correction)
-      - [Retrieved Bands](#retrieved-bands)
-      - [Handling Missing and Invalid Data](#handling-missing-and-invalid-data)
+  - [Sentinel-2 (Google Earth Engine)](#sentinel-2-google-earth-engine)
+    - [Overview](#overview)
+    - [Prerequisites](#prerequisites)
+    - [Google Cloud Setup](#google-cloud-setup)
+    - [Service account and GCS configuration](#service-account-and-gcs-configuration)
+    - [Downloading Features](#downloading-features)
     - [Data Quality Assessment and Visualization](#data-quality-assessment-and-visualization)
-      - [RGB Images Before Cloud Masking](#rgb-images-before-cloud-masking)
-      - [RGB Images After Cloud Masking](#rgb-images-after-cloud-masking)
-      - [NDVI Before Cloud Masking](#ndvi-before-cloud-masking)
-      - [NDVI After Cloud Masking](#ndvi-after-cloud-masking)
     - [Stacking and Output](#stacking-and-output)
     - [Running the Download](#running-the-download)
     - [Dataset Location](#dataset-location)
+  - [PlanetScope (Planet Orders API)](#planetscope-planet-orders-api)
+    - [Overview](#overview-1)
+    - [Prerequisites](#prerequisites-1)
+    - [Comparison: Sentinel-2 vs PlanetScope](#comparison-sentinel-2-vs-planetscope)
+    - [How the Download Works](#how-the-download-works)
+    - [Running the Download](#running-the-download-1)
+    - [Key Parameters](#key-parameters)
+    - [Output Files](#output-files)
+    - [Monitoring Progress](#monitoring-progress)
+    - [Troubleshooting](#troubleshooting)
   - [Creating Pixel-Level Labels](#creating-pixel-level-labels)
 
 ---
 
-## Overview
+## Sentinel-2 (Google Earth Engine)
+
+### Overview
 
 The labels generated using Earth Collect do not include any features that can be used to train a model. We use Google Earth Engine (EE) to download features for model training, leveraging Google Cloud Storage (GCS) for storage and transfer.
 
@@ -247,6 +253,300 @@ A note on the differences between versions:
   - Modifications were made to `latest_irrigation_table.csv` between downloads, so the IDs in `features` do not match with those in `features_v2`
 - `features` has some issues with the cloud masking in which a lot of images were mostly blank, save a few small patches of colored pixels. Some updates to improve the cloud masking in `features_v2`. Also, images more than 80% blank are dropped in `features_v2`, whereas they were kept in `features`
 - `features_v3` uses the same download logic as `features_v2`, except all time windows begin on January 1st.
+
+---
+
+## PlanetScope (Planet Orders API)
+
+### Overview
+
+PlanetScope provides higher resolution (3m) imagery than Sentinel-2, which can be valuable for detecting small-scale irrigation features. The download uses Planet's asynchronous Orders API with parallel processing for efficiency.
+
+**Key characteristics:**
+- **Resolution**: 3m (vs Sentinel-2's 10m)
+- **Bands**: 4 (Blue, Green, Red, NIR)
+- **Time series**: Same 42-window structure as Sentinel-2
+- **Processing**: Surface Reflectance (SR) or Top of Atmosphere (TOA)
+- **Coregistration**: All scenes aligned to best anchor for sub-pixel accuracy
+
+### Prerequisites
+
+1. **Planet Account**: Requires an active Planet license with Data API access
+2. **API Key**: Store your Planet API key in `secrets/planet-api-key.txt` (single line, no trailing newline)
+3. **Python Package**: Install the Planet SDK: `pip install planet`
+
+To get your API key:
+1. Log into [Planet Explorer](https://www.planet.com/explorer/)
+2. Go to Account Settings → API Key
+3. Copy the key and save to `secrets/planet-api-key.txt`
+
+### Comparison: Sentinel-2 vs PlanetScope
+
+| Feature | Sentinel-2 | PlanetScope |
+|---------|------------|-------------|
+| Resolution | 10m | 3m |
+| Spectral bands | 10 | 4 (BGRNIR) |
+| Stack size | 420 bands (10×42) | 168 bands (4×42) |
+| Grid size | 100×100 pixels (~1km²) | 334×334 pixels (~1km²) |
+| Cloud masking | SCL/QA60 | UDM2 |
+| API | Google Earth Engine (sync) | Planet Orders API (async) |
+| Cost | Free | Requires license |
+| Availability | Global, 5-day revisit | Global, daily revisit |
+
+### How the Download Works
+
+The PlanetScope download uses an asynchronous parallel pipeline optimized for throughput:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        PARALLEL DOWNLOAD PIPELINE                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│  │   Site 1     │    │   Site 2     │    │   Site 3     │   ...    │
+│  │ Scene Search │    │ Scene Search │    │ Scene Search │          │
+│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘          │
+│         │                   │                   │                   │
+│         └─────────┬─────────┴─────────┬─────────┘                   │
+│                   ▼                   ▼                             │
+│         ┌─────────────────────────────────────┐                     │
+│         │     Submit Orders to Planet API      │                    │
+│         │   (up to max_concurrent_orders)      │                    │
+│         └─────────────────┬───────────────────┘                     │
+│                           │                                         │
+│                           ▼                                         │
+│         ┌─────────────────────────────────────┐                     │
+│         │   Quick Poll: Check for completed    │◄──────┐            │
+│         │   orders after each search batch     │       │            │
+│         └─────────────────┬───────────────────┘       │            │
+│                           │                           │            │
+│              ┌────────────┴────────────┐              │            │
+│              ▼                         ▼              │            │
+│     ┌────────────────┐        ┌────────────────┐     │            │
+│     │ Order Ready?   │        │ Still Pending  │─────┘            │
+│     │ Download &     │        │ Continue...    │                   │
+│     │ Stack          │        └────────────────┘                   │
+│     └────────────────┘                                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Step-by-step process:**
+
+1. **Scene Search** (parallel):
+   - For each site, search Planet's catalog for scenes in each 10-day window
+   - `concurrent_scene_searches` sites are searched in parallel (default: 10)
+   - Each scene is scored by `effective_coverage = footprint_coverage × clear_percent`
+   - The best scene per window is selected
+
+2. **Order Submission**:
+   - A batch order is submitted to Planet containing all 42 scenes for one site
+   - Orders include processing tools: clip to AOI, reproject to UTM 3m, coregister
+   - Up to `max_concurrent_orders` can be pending at Planet simultaneously
+
+3. **Quick Poll** (after each search batch):
+   - Check all pending orders for completion
+   - Download and stack any completed orders immediately
+   - This keeps the pipeline flowing without waiting
+
+4. **Download & Stack**:
+   - Downloaded scenes are aligned to a common grid centered on the site
+   - Scenes are coregistered to the clearest anchor scene
+   - Final stacks are saved as GeoTIFFs
+
+5. **Resume Capability**:
+   - If interrupted, use `resume_dir` to continue where you left off
+   - Sites with existing `*_stack.tif` files are skipped
+
+### Running the Download
+
+**Recommended: Parallel mode with quick polling**
+
+```python
+from src.features.download_planetscope import dataset_download_parallel
+
+results = dataset_download_parallel(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    max_concurrent_orders=100,      # Orders pending at Planet at once
+    concurrent_scene_searches=10,   # Sites to search in parallel
+    product_type='SR',              # 'SR' (Surface Reflectance) or 'TOA'
+    max_cloud_cover=1.0,            # 0-1, use 1.0 for maximum coverage
+    start_month=1,                  # Start from January
+    num_windows=36,                 # 36 core windows
+    timestep=10,                    # 10 days per window
+    window_buffer=3,                # 3 extra windows before/after (total: 42)
+)
+```
+
+**Command line with caffeinate (macOS)**:
+
+```bash
+caffeinate -i -s python3 -c "
+from src.features.download_planetscope import dataset_download_parallel
+
+results = dataset_download_parallel(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    max_concurrent_orders=100,
+    concurrent_scene_searches=10,
+    product_type='SR',
+    max_cloud_cover=1.0
+)
+print(f'Completed: {sum(1 for v in results.values() if v == \"success\")} successful')
+"
+```
+
+**Resume an interrupted download**:
+
+```python
+results = dataset_download_parallel(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    resume_dir='20260127_161535_SR',  # Existing folder to resume into
+    max_concurrent_orders=100,
+    concurrent_scene_searches=10,
+    product_type='SR',
+    max_cloud_cover=1.0
+)
+```
+
+**Sequential mode** (slower, but simpler for debugging):
+
+```python
+from src.features.download_planetscope import dataset_download
+
+dataset_download(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    product_type='SR',
+    max_cloud_cover=0.5,
+    subset=True  # Only process first 10 rows for testing
+)
+```
+
+### Key Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_concurrent_orders` | 100 | Maximum orders pending at Planet at once. Higher = faster but may hit quotas. |
+| `concurrent_scene_searches` | 10 | Sites to search in parallel. Higher = faster scene searching but more API calls. |
+| `product_type` | 'SR' | 'SR' (Surface Reflectance, atmospherically corrected) or 'TOA' (Top of Atmosphere, more scenes available) |
+| `max_cloud_cover` | 0.5 | Maximum cloud cover fraction (0-1). Use 1.0 to maximize scene availability; clouds are masked in the stack. |
+| `start_month` | 1 | Month to start the time series (1=January) |
+| `num_windows` | 36 | Number of core 10-day windows |
+| `window_buffer` | 3 | Extra windows before and after (total windows = num_windows + 2×buffer) |
+| `resume_dir` | None | Existing version folder to resume into. Sites with existing stacks are skipped. |
+
+### Output Files
+
+For each labeled site, the following files are created in the version folder:
+
+```
+data/features_planet/20260127_161535_SR/
+├── 1_5130509_2016.09.09_stack.tif        # Unmasked stack (168 bands)
+├── 1_5130509_2016.09.09_stack_masked.tif # Cloud-masked stack (bad pixels = 0)
+├── 1_5130509_2016.09.09_metadata.json    # Per-window metadata
+├── 2_5130509_2017.07.15_stack.tif
+├── ...
+├── download_results.json                  # Summary of all download results
+└── metadata_20260127_161535_SR.json       # Run configuration
+```
+
+**Stack structure**:
+- Shape: `(168, 334, 334)` = 4 bands × 42 windows × 334×334 pixels
+- Bands are interleaved: [B_t0, G_t0, R_t0, NIR_t0, B_t1, G_t1, ...]
+- Data type: uint16 (surface reflectance scaled by 10,000)
+- NoData value: 0
+
+**Reading the stacks**:
+```python
+import rasterio
+import numpy as np
+
+with rasterio.open('path/to/stack.tif') as src:
+    data = src.read()  # Shape: (168, 334, 334)
+
+# Reshape to (T, B, H, W)
+num_bands = 4
+num_windows = 42
+data = data.reshape(num_bands, num_windows, 334, 334).transpose(1, 0, 2, 3)
+# Now shape is (42, 4, 334, 334)
+```
+
+**Metadata JSON structure**:
+```json
+{
+  "file_id": "1_5130509_2016.09.09",
+  "lat": -15.4567,
+  "lon": 28.1234,
+  "product_type": "SR",
+  "num_windows": 42,
+  "windows": [
+    {
+      "window_index": 0,
+      "date_range": ["2015-12-12", "2015-12-22"],
+      "item_id": "20151215_073012_0c43",
+      "cloud_cover": 0.02,
+      "effective_coverage": 98.5
+    },
+    ...
+  ]
+}
+```
+
+### Monitoring Progress
+
+**Watch the log in real-time**:
+```bash
+tail -f data/features_planet/download_*.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
+```
+
+**Check progress summary**:
+```bash
+# Count orders and completions
+echo "Orders submitted:" && grep -c "Submitted order" data/features_planet/*.log
+echo "Orders completed:" && grep -c "Order complete" data/features_planet/*.log
+echo "Total stacks:" && ls data/features_planet/*_SR/*_stack.tif 2>/dev/null | wc -l
+```
+
+**Progress messages to look for**:
+- `Searching scenes for X sites in parallel...` - Scene search batch starting
+- `Submitted order <uuid> with N scenes` - Order sent to Planet
+- `Quick poll: checking N pending orders...` - Checking for completed orders
+- `Order complete, downloading...` - Downloading a ready order
+- `Quick poll: downloaded N stacks, M still pending` - Batch download summary
+
+### Troubleshooting
+
+**Rate Limits (429 errors)**:
+```
+Retrying: caught <class 'planet.exceptions.TooManyRequests'>: max rate reached: retry-in 200ms
+```
+This is normal. The Planet SDK handles rate limits automatically with exponential backoff. The download will continue after a brief pause.
+
+**No scenes found for window**:
+```
+WARNING - Window 5: no scenes found for 2016-02-01 to 2016-02-11
+```
+Some time windows may have no available imagery. These windows will be all-zeros in the stack with `item_id: null` in metadata.
+
+**Coverage check failures**:
+```
+WARNING - Coverage check failed for <scene_id>: failed to get thumbnail preview
+```
+Occasional coverage check failures are normal. The download continues and falls back to scene-level cloud statistics.
+
+**Order failed/partial**:
+```
+ERROR - <file_id>: Order failed
+```
+Planet may reject orders if scenes are unavailable. The site will be marked as failed in `download_results.json`. Consider retrying with `product_type='TOA'` for better scene availability.
+
+**Resume after interruption**:
+If the download is interrupted, restart with the `resume_dir` parameter pointing to the existing version folder. Sites with existing `*_stack.tif` files will be skipped.
+
+---
 
 ## Creating Pixel-Level Labels
 

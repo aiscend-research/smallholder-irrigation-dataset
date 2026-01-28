@@ -22,8 +22,10 @@ Generating this dataset requires five main steps. First, the area of interest an
    - See `notebooks/labeler_comparison.ipynb` for interactive analysis.
 
 4. **Feature Extraction:**
-   - Download publicly available satellite data from Google Earth Engine.
-   - Ensure alignment with sampling locations and configurations.
+   - Download satellite data from Google Earth Engine (Sentinel-2) and Planet (PlanetScope).
+   - Sentinel-2: 10m resolution, 10 spectral bands, free via GEE.
+   - PlanetScope: 3m resolution, 4 bands (Blue, Green, Red, NIR), requires Planet license.
+   - Both create time series stacks aligned with sampling locations.
 
 5. **Data Processing:**
    - Clean and integrate labels with satellite features.

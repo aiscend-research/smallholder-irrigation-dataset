@@ -42,6 +42,11 @@ All project paths and settings are in `config.yaml`. The utility function `get_d
 
 **Important**: The cluster data folder is NOT synchronized with the GitHub `data/` folder. Manual syncing is required.
 
+### API Keys (secrets/)
+Store API credentials in the `secrets/` folder (gitignored):
+- `secrets/earthengine-key.json` - Google Earth Engine service account key
+- `secrets/planet-api-key.txt` - Planet API key (single line, no newline)
+
 ## Running Tests
 
 ```bash
@@ -131,6 +136,101 @@ Output: `{uid}_{site}_{YYYY.MM.DD}_{operator}_labels.tif` with 9 bands:
 - Bands 3-7: Uncertainty flags
 - Band 8: Certainty score (1-5)
 - Band 9: Polygon coverage % (0-100, for mixed pixel analysis)
+
+### 2b. Feature Download (PlanetScope)
+
+Download PlanetScope time series data for labeled sites. Higher resolution (3m vs 10m) but requires a Planet license.
+
+**Prerequisites**:
+- Planet account with Data API access
+- API key stored at `secrets/planet-api-key.txt`
+- Python package: `pip install planet`
+
+**Key Differences from Sentinel-2**:
+| Feature | Sentinel-2 | PlanetScope |
+|---------|------------|-------------|
+| Resolution | 10m | 3m |
+| Bands | 10 (B2-B12) | 4 (Blue, Green, Red, NIR) |
+| Time windows | 42 × 10 days | 42 × 10 days |
+| Cloud masking | QA60/SCL | UDM2 |
+| API | Google Earth Engine | Planet Orders API (async) |
+| Cost | Free | Requires license |
+
+**Run download** (recommended: parallel mode):
+```python
+from src.features.download_planetscope import dataset_download_parallel
+
+results = dataset_download_parallel(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    max_concurrent_orders=100,      # Orders pending at Planet at once
+    concurrent_scene_searches=10,   # Sites to search in parallel
+    product_type='SR',              # 'SR' (Surface Reflectance) or 'TOA'
+    max_cloud_cover=1.0,            # 0-1, use 1.0 for maximum coverage
+    resume_dir='20260127_161535_SR' # Optional: resume into existing folder
+)
+```
+
+**Or from command line**:
+```bash
+# With caffeinate to prevent sleep (macOS)
+caffeinate -i -s python -c "
+from src.features.download_planetscope import dataset_download_parallel
+dataset_download_parallel(
+    csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
+    download_dir='data/features_planet',
+    max_concurrent_orders=100,
+    concurrent_scene_searches=10,
+    product_type='SR',
+    max_cloud_cover=1.0
+)
+"
+```
+
+**Output Files** (per labeled image, saved to timestamped version folder):
+- `{uid}_{site}_{YYYY.MM.DD}_stack.tif` – unmasked 42-window stack (4 bands × 42 windows = 168 bands)
+- `{uid}_{site}_{YYYY.MM.DD}_stack_masked.tif` – cloud-masked stack (bad pixels = 0)
+- `{uid}_{site}_{YYYY.MM.DD}_metadata.json` – per-window metadata (date_range, item_id, cloud_cover, effective_coverage)
+
+**How the Parallel Download Works**:
+
+1. **Scene Search Phase**: For each site, search Planet's catalog for the best scene in each 10-day window
+   - Searches `concurrent_scene_searches` sites in parallel (default 10)
+   - Ranks scenes by `effective_coverage` = footprint_coverage × clear_percent
+   - Filters to scenes with Surface Reflectance (SR) asset available
+
+2. **Order Submission**: Submit batch orders to Planet's Orders API
+   - Each order requests all 42 scenes for one site
+   - Orders include: clip to AOI, reproject to UTM 3m, coregister to best anchor scene
+   - Up to `max_concurrent_orders` orders can be pending at once
+
+3. **Polling & Download**: Poll Planet for completed orders and download results
+   - Quick poll after each batch of scene searches (downloads ready orders immediately)
+   - Full poll when `max_concurrent_orders` is reached
+   - Downloads are processed and stacked into final outputs
+
+4. **Resume Capability**: If interrupted, restart with `resume_dir` parameter
+   - Skips sites where `*_stack.tif` already exists
+   - Orphaned orders at Planet are abandoned (will expire)
+
+**Key Parameters**:
+- `max_concurrent_orders`: Higher = more parallelism but may hit Planet quotas (default 100)
+- `concurrent_scene_searches`: Higher = faster searching but more API calls (default 10)
+- `max_cloud_cover`: Set to 1.0 to get maximum scene availability; cloud masking happens in stack
+- `product_type`: 'SR' (atmospherically corrected, fewer scenes) or 'TOA' (more scenes available)
+
+**Rate Limits**: Planet API has rate limits. The SDK handles 429 "Too Many Requests" errors automatically with exponential backoff. You'll see retry messages in the log - this is normal.
+
+**Monitoring Progress**:
+```bash
+# Watch the log in real-time
+tail -f data/features_planet/download_YYYYMMDD_quickpoll.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
+
+# Count progress
+echo "Orders submitted:" && grep -c "Submitted order" data/features_planet/*.log
+echo "Orders completed:" && grep -c "Order complete" data/features_planet/*.log
+echo "Total stacks:" && ls data/features_planet/*/\*_stack.tif | wc -l
+```
 
 ### 3. Label Quality Control (Inter-Rater Comparison)
 
@@ -224,9 +324,10 @@ python src/modeling/run_experiment.py
 - Copy of experiment config
 
 **Dataset Structure**:
-- **Images**: 10 spectral bands (B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12) × 42 time steps = 420 bands per `*_stack.tif`
+- **Sentinel-2 Images**: 10 spectral bands × 42 time steps = 420 bands per `*_stack.tif` (10m resolution)
+- **PlanetScope Images**: 4 bands (BGRNIR) × 42 time steps = 168 bands per `*_stack.tif` (3m resolution)
 - **Labels**: 9-band `*_labels.tif` with irrigation labels (type, presence, uncertainty flags, certainty, coverage %)
-- **Metadata**: `*_metadata.json` with location and per-window info (date_range, file_exists, masked_fraction)
+- **Metadata**: `*_metadata.json` with location and per-window info (date_range, coverage metrics)
 
 ## Architecture Notes
 
@@ -235,7 +336,9 @@ python src/modeling/run_experiment.py
 2. **Label Generation** (`src/labels/`): Use `surveys_with_locations.py` to create Earth Collect surveys from sampling locations → Manual labeling in Google Earth Pro/Earth Collect
 3. **Processing** (`src/processing/`): Convert `.zip` surveys and `.kml` polygons to CSV/GeoJSON → Merge and validate → Pool into `latest_irrigation_table.csv`
 4. **Quality Control** (`src/labels/label_comparison.py`): Compare labels across labelers → Compute inter-rater metrics → Generate summary tables and visualizations
-5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download Sentinel-2 time series from GEE → Apply cloud masking → Create 42-step stacks with 10 reflectance bands each
+5. **Feature Download** (`src/features/`): Read `latest_irrigation_table.csv` → Download satellite time series:
+   - **Sentinel-2** (`download_sentinel2.py`): Via GEE → Apply cloud masking → Create 42-step stacks with 10 bands each
+   - **PlanetScope** (`download_planetscope.py`): Via Planet Orders API → Parallel async processing → Create 42-step stacks with 4 bands each
 6. **Pixel Labeling** (`src/features/create_label_band.py`): Overlay labeled polygons on downloaded features → Create 9-band label `.tif` files per labeler (includes coverage % for mixed pixel analysis)
 7. **Modeling** (`src/modeling/`): Spatial-aware data splitting → Flatten multi-temporal data → Train ML models (Random Forest, Gradient Boosting) → Evaluate and visualize
 
@@ -259,6 +362,20 @@ python src/modeling/run_experiment.py
   - Cloud/bad pixels: Set to 0 in masked stack
   - Missing imagery: All-zero slice with `file_exists: false` in metadata
   - `masked_fraction`: Tracked per window in metadata JSON
+
+### Multi-Temporal PlanetScope Data Structure
+- **Time Series**: 42 windows × 10 days each (36 core + 3 buffer each side), starting from January 1st
+- **Bands per window** (4 total): Blue, Green, Red, NIR
+- **Resolution**: 3m (vs Sentinel-2's 10m)
+- **Grid Size**: 334 × 334 pixels = ~1km² per site
+- **Product Types**:
+  - `SR` (Surface Reflectance): Atmospherically corrected, preferred for analysis
+  - `TOA` (Top of Atmosphere): More scenes available, useful when SR coverage is poor
+- **Missing Data Handling**:
+  - Cloud/bad pixels: Set to 0 in masked stack (uses UDM2 cloud mask)
+  - Missing imagery: All-zero slice with `item_id: null` in metadata
+  - `effective_coverage`: Tracked per window (footprint × clear percent)
+- **Coregistration**: All scenes in a stack are coregistered to the clearest anchor scene for sub-pixel alignment
 
 ### Cross-Validation for ML
 The modeling pipeline uses file-list based organization (no file duplication). Each experiment can define its own CV structure via `cv_structure_name` in `experiment.yaml`.
@@ -304,4 +421,5 @@ Spatial-aware splitting prevents data leakage by grouping at the site level.
 - Core: geopandas, rasterio, numpy, pandas, PyYAML
 - ML: torch, scikit-learn, joblib
 - Visualization: matplotlib, seaborn
-- Other: geopy, tqdm, rapidfuzz
+- Satellite APIs: earthengine-api (Sentinel-2), planet (PlanetScope)
+- Other: geopy, tqdm, rapidfuzz, shapely
