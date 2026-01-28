@@ -1213,6 +1213,13 @@ async def process_sites_parallel(
                 lat, lon = site['lat'], site['lon']
                 date = site['date']
 
+                # Skip if stack already exists (resume capability)
+                stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
+                if os.path.exists(stack_path):
+                    logging.info(f"{file_id}: Stack already exists, skipping")
+                    results[file_id] = "skipped_exists"
+                    continue
+
                 # Create time windows
                 start_date_dt = datetime(date.year, start_month, 1) - (step_size * window_buffer)
                 time_windows = [
@@ -1577,7 +1584,7 @@ if __name__ == '__main__':
         num_windows=36,
         timestep=10,
         window_buffer=3,
-        max_cloud_cover=0.5
+        max_cloud_cover=1.0  # Don't filter by scene-level clouds; rely on AOI effective_coverage
     )
 
     # Uncomment to also download TOA (Top of Atmosphere) - more scenes available
