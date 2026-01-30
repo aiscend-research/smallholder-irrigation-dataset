@@ -554,6 +554,8 @@ def apply_udm2_mask(image_path: str, udm2_path: str, output_path: str, nodata: i
         output_path: Path for masked output
         nodata: Value to use for masked pixels (default 0)
     """
+    from scipy.ndimage import zoom
+
     with rasterio.open(image_path) as src:
         image = src.read()
         profile = src.profile.copy()
@@ -568,6 +570,16 @@ def apply_udm2_mask(image_path: str, udm2_path: str, output_path: str, nodata: i
     else:
         # Fallback: assume all clear
         clear_mask = np.ones(image.shape[1:], dtype=bool)
+
+    # Handle dimension mismatch between image and UDM2 mask
+    # Planet sometimes delivers them with slightly different pixel dimensions
+    img_h, img_w = image.shape[1], image.shape[2]
+    mask_h, mask_w = clear_mask.shape
+    if (mask_h, mask_w) != (img_h, img_w):
+        logging.debug(f"Resizing UDM2 mask from ({mask_h}, {mask_w}) to ({img_h}, {img_w})")
+        # Use nearest-neighbor interpolation to preserve binary mask values
+        zoom_factors = (img_h / mask_h, img_w / mask_w)
+        clear_mask = zoom(clear_mask.astype(np.float32), zoom_factors, order=0) > 0.5
 
     # Apply mask to all bands
     masked_image = image.copy()
