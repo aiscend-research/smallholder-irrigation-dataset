@@ -757,7 +757,7 @@ async def retrieve_time_series_stack(
     5. Stack into final output
 
     Args:
-        file_id: Unique identifier for this site
+        file_id: Identifier for output files (format: {site_id}_{YYYY.MM.DD})
         lat, lon: Coordinates (WGS84 decimal degrees)
         date: Reference date (year used for time series, or center date if center_on_date=True)
         out_dir: Directory to save final outputs
@@ -1053,7 +1053,7 @@ def dataset_download(
     Mirrors dataset_download() from download_sentinel2.py.
 
     Args:
-        csv: Path to CSV with columns: x, y, unique_id, site_id, year, month, day
+        csv: Path to CSV with columns: x, y, site_id, year, month, day
         download_dir: Output directory for all files
         start_month: Month to start time series (1=January)
         num_windows: Number of timesteps (excluding buffer)
@@ -1117,14 +1117,13 @@ def dataset_download(
 
     for _, row in data.iterrows():
         lat, lon = row['y'], row['x']
-        uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))
 
-        # Create file naming (same convention as S2)
+        # Create file naming: site_id + date
         date_str = f"{date.year}.{date.month:02d}.{date.day:02d}"
         sid_raw = str(row['site_id'])
         sid_for_name = sid_raw.replace('id_', '')
-        file_id = f"{uid}_{sid_for_name}_{date_str}"
+        file_id = f"{sid_for_name}_{date_str}"
 
         logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
 
@@ -1144,18 +1143,9 @@ def dataset_download(
                 product_type=product_type
             )
 
-            # Add unique_id to metadata (only if stack was created)
+            # Check if stack was created
             metadata_file = os.path.join(out_dir, f"{file_id}_metadata.json")
             if os.path.exists(metadata_file):
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-
-                metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
-                metadata['original_site_id'] = sid_raw
-
-                with open(metadata_file, 'w') as f:
-                    json.dump(metadata, f, indent=2)
-
                 logging.info(f"Completed {file_id}")
             else:
                 logging.warning(f"No stack created for {file_id}")
@@ -1578,8 +1568,10 @@ def dataset_download_parallel(
     """
     Download PlanetScope imagery for all sites in CSV using parallel ordering.
 
+    Output files are named {site_id}_{YYYY.MM.DD}_stack.tif (site_id + date).
+
     Args:
-        csv: Path to CSV with columns: x, y, unique_id, site_id, year, month, day
+        csv: Path to CSV with columns: x, y, site_id, year, month, day
         download_dir: Output directory
         max_concurrent_orders: How many orders to have pending at once (default 20)
         product_type: 'SR' (Surface Reflectance) or 'TOA' (Top of Atmosphere)
@@ -1627,7 +1619,7 @@ def dataset_download_parallel(
         date_str = f"{int(row['year'])}.{int(row['month']):02d}.{int(row['day']):02d}"
         sid = str(row['site_id']).replace('id_', '')
         sites.append({
-            'file_id': f"{row['unique_id']}_{sid}_{date_str}",
+            'file_id': f"{sid}_{date_str}",  # No UID prefix - site_id + date is unique
             'lat': row['y'],
             'lon': row['x'],
             'date': datetime(int(row['year']), int(row['month']), int(row['day']))
