@@ -2,9 +2,11 @@
 EVI time series visualization for irrigation analysis.
 
 This module provides functions to:
-1. Extract EVI time series from Sentinel-2 stacks
+1. Extract EVI time series from satellite stacks (Sentinel-2 or PlanetScope)
 2. Group pixels by irrigation status
 3. Create smoothed time series plots showing irrigation patterns
+
+Supports both Sentinel-2 (10 bands) and PlanetScope (4 bands) via sensor parameter.
 """
 
 import os
@@ -17,22 +19,14 @@ from glob import glob
 from scipy.ndimage import uniform_filter1d
 
 from ...utils.utils import find_project_root, get_data_root
-from .sentinel2_visualization import get_labeled_timestep
+from .satellite_visualization import (
+    get_labeled_timestep, SENSOR_CONFIG, get_features_dir, get_irrigation_table_path
+)
 
 
 def _get_project_root():
     """Get the project root directory."""
     return find_project_root(os.path.dirname(__file__))
-
-
-def get_features_dir(version='20260107_180813'):
-    """Get the features directory for a specific version."""
-    return os.path.join(get_data_root(), 'features', version)
-
-
-def get_irrigation_table_path():
-    """Get path to the irrigation table."""
-    return os.path.join(get_data_root(), 'labels/labeled_surveys/random_sample/latest_irrigation_table.csv')
 
 
 def get_survey_info(unique_id):
@@ -71,26 +65,6 @@ def get_survey_info(unique_id):
         internal_id = None
 
     return survey, internal_id
-
-
-# Band indices within each 10-band timestep
-BAND_INDICES = {
-    'B2': 0,   # Blue
-    'B3': 1,   # Green
-    'B4': 2,   # Red
-    'B5': 3,   # Red Edge 1
-    'B6': 4,   # Red Edge 2
-    'B7': 5,   # Red Edge 3
-    'B8': 6,   # NIR
-    'B8A': 7,  # NIR Narrow
-    'B11': 8,  # SWIR 1
-    'B12': 9,  # SWIR 2
-}
-
-# Time series structure
-N_BANDS = 10
-N_TIMESTEPS = 42  # 36 windows + 3 buffer on each side
-TIMESTEP_DAYS = 10
 
 
 def compute_evi(nir, red, blue, nodata=0, scale=10000.0):
@@ -132,17 +106,17 @@ def compute_evi(nir, red, blue, nodata=0, scale=10000.0):
     return evi
 
 
-def extract_evi_timeseries(stack_path, nodata=0):
+def extract_evi_timeseries(stack_path, sensor='sentinel2', nodata=0):
     """
-    Extract EVI time series for all pixels from a Sentinel-2 stack.
+    Extract EVI time series for all pixels from a satellite stack.
 
     The stack is stored with shape (num_bands * T, H, W) where bands are grouped:
-    - Bands 1 to T: B2 (Blue) for all timesteps
-    - Bands T+1 to 2T: B3 (Green) for all timesteps
-    - etc.
+    - For Sentinel-2: Bands 1 to T: B2 (Blue), T+1 to 2T: B3 (Green), etc.
+    - For PlanetScope: Bands 1 to T: Blue, T+1 to 2T: Green, 2T+1 to 3T: Red, 3T+1 to 4T: NIR
 
     Parameters:
         stack_path: Path to the stack file
+        sensor (str): Sensor type ('sentinel2' or 'planetscope')
         nodata: Nodata value in the stack
 
     Returns:
@@ -150,9 +124,13 @@ def extract_evi_timeseries(stack_path, nodata=0):
             - evi_array: shape (n_timesteps, height, width)
             - valid_mask: shape (n_timesteps, height, width) - True where data is valid
     """
+    config = SENSOR_CONFIG[sensor]
+    n_bands = config['n_bands']
+    band_indices = config['band_indices']
+
     with rasterio.open(stack_path) as src:
         total_bands = src.count
-        n_timesteps = total_bands // N_BANDS
+        n_timesteps = total_bands // n_bands
 
         height, width = src.height, src.width
         evi_array = np.full((n_timesteps, height, width), np.nan, dtype=np.float32)
@@ -161,9 +139,9 @@ def extract_evi_timeseries(stack_path, nodata=0):
         for t in range(n_timesteps):
             # Stack layout: all timesteps for band 0, then all for band 1, etc.
             # Band index in file = band_type * n_timesteps + timestep
-            nir_idx = BAND_INDICES['B8'] * n_timesteps + t   # NIR
-            red_idx = BAND_INDICES['B4'] * n_timesteps + t   # Red
-            blue_idx = BAND_INDICES['B2'] * n_timesteps + t  # Blue
+            nir_idx = band_indices['nir'] * n_timesteps + t
+            red_idx = band_indices['red'] * n_timesteps + t
+            blue_idx = band_indices['blue'] * n_timesteps + t
 
             # Read bands (1-indexed in rasterio)
             nir = src.read(nir_idx + 1).astype(np.float32)
@@ -272,12 +250,12 @@ def smooth_timeseries(ts, window=3):
 
 def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
                         n_samples=30, smooth_window=3, show_individual=True,
-                        title=None, start_day_of_year=None):
+                        title=None, start_day_of_year=None, sensor='sentinel2'):
     """
     Plot EVI time series for irrigated vs non-irrigated pixels.
 
     Parameters:
-        stack_path: Path to the Sentinel-2 stack
+        stack_path: Path to the satellite stack
         label_path: Path to the label file. If None, shows all pixels.
         ax: Matplotlib axes to plot on
         figsize: Figure size if creating new figure
@@ -286,12 +264,16 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         show_individual: Whether to show individual pixel traces
         title: Plot title
         start_day_of_year: Starting day of year for x-axis (inferred from filename if None)
+        sensor (str): Sensor type ('sentinel2' or 'planetscope')
 
     Returns:
         matplotlib.axes.Axes: The axes with the plot
     """
+    config = SENSOR_CONFIG[sensor]
+    timestep_days = 10  # Both sensors use 10-day windows
+
     # Extract EVI time series
-    evi_array, valid_mask = extract_evi_timeseries(stack_path)
+    evi_array, valid_mask = extract_evi_timeseries(stack_path, sensor)
     n_timesteps = evi_array.shape[0]
 
     # Create figure if needed
@@ -300,8 +282,8 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
 
     # Create x-axis (days relative to labeled date)
     # The labeled date corresponds to a specific timestep, not necessarily the middle
-    labeled_timestep = get_labeled_timestep(stack_path)
-    days = (np.arange(n_timesteps) - labeled_timestep) * TIMESTEP_DAYS
+    labeled_timestep = get_labeled_timestep(stack_path, sensor)
+    days = (np.arange(n_timesteps) - labeled_timestep) * timestep_days
 
     # Colors
     irr_color = '#2ca02c'  # Green for irrigated
@@ -361,6 +343,7 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
     if title is None:
         stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
         parts = stack_name.split('_')
+        sensor_name = 'PlanetScope' if sensor == 'planetscope' else 'Sentinel-2'
         if len(parts) >= 3:
             unique_id = parts[0]
             site = parts[1]
@@ -368,9 +351,9 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
             # Look up survey and internal_id
             survey, internal_id = get_survey_info(unique_id)
             if survey and internal_id:
-                title = f'EVI Time Series - Survey {survey}, ID {internal_id} (Site {site}, {date})'
+                title = f'{sensor_name} EVI - Survey {survey}, ID {internal_id} (Site {site}, {date})'
             else:
-                title = f'EVI Time Series - Site {site}, {date}'
+                title = f'{sensor_name} EVI - Site {site}, {date}'
 
     ax.set_title(title)
 
@@ -378,28 +361,31 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
 
 
 def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
-                               n_clusters=4, smooth_window=3, title=None):
+                               n_clusters=4, smooth_window=3, title=None, sensor='sentinel2'):
     """
     Plot EVI time series with automatic clustering of temporal patterns.
 
     This is useful for exploring the data without relying on labels.
 
     Parameters:
-        stack_path: Path to the Sentinel-2 stack
+        stack_path: Path to the satellite stack
         label_path: Path to the label file (for coloring clusters by irrigation status)
         ax: Matplotlib axes to plot on
         figsize: Figure size if creating new figure
         n_clusters: Number of clusters to identify
         smooth_window: Window size for time series smoothing
         title: Plot title
+        sensor (str): Sensor type ('sentinel2' or 'planetscope')
 
     Returns:
         matplotlib.axes.Axes: The axes with the plot
     """
     from sklearn.cluster import KMeans
 
+    timestep_days = 10  # Both sensors use 10-day windows
+
     # Extract EVI time series
-    evi_array, valid_mask = extract_evi_timeseries(stack_path)
+    evi_array, valid_mask = extract_evi_timeseries(stack_path, sensor)
     n_timesteps = evi_array.shape[0]
     height, width = evi_array.shape[1], evi_array.shape[2]
 
@@ -408,8 +394,8 @@ def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12,
         fig, ax = plt.subplots(figsize=figsize)
 
     # Create x-axis (days relative to labeled date)
-    labeled_timestep = get_labeled_timestep(stack_path)
-    days = (np.arange(n_timesteps) - labeled_timestep) * TIMESTEP_DAYS
+    labeled_timestep = get_labeled_timestep(stack_path, sensor)
+    days = (np.arange(n_timesteps) - labeled_timestep) * timestep_days
 
     # Flatten pixels and filter valid ones
     pixel_ts = evi_array.reshape(n_timesteps, -1).T  # (n_pixels, n_timesteps)
@@ -485,7 +471,8 @@ def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12,
     # Title
     if title is None:
         stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
-        title = f'EVI Clusters - {stack_name}'
+        sensor_name = 'PlanetScope' if sensor == 'planetscope' else 'Sentinel-2'
+        title = f'{sensor_name} EVI Clusters - {stack_name}'
 
     ax.set_title(title)
 
@@ -494,9 +481,11 @@ def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12,
 
 if __name__ == "__main__":
     # Test the visualization
-    from features.visualization.sentinel2_visualization import find_labels_for_stack, load_label_mask
+    from .satellite_visualization import find_labels_for_stack, load_label_mask
 
-    features_dir = get_features_dir()
+    # Test Sentinel-2
+    print("Testing Sentinel-2 EVI visualization...")
+    features_dir = get_features_dir(sensor='sentinel2')
     stack_files = glob(os.path.join(features_dir, '*_stack.tif'))
 
     # Find a stack with irrigation labels
@@ -509,8 +498,28 @@ if __name__ == "__main__":
                 print(f"Testing with: {os.path.basename(stack_path)}")
 
                 fig, axes = plt.subplots(1, 2, figsize=(18, 6))
-                plot_evi_timeseries(stack_path, label_path, ax=axes[0])
-                plot_clustered_timeseries(stack_path, label_path, ax=axes[1])
+                plot_evi_timeseries(stack_path, label_path, ax=axes[0], sensor='sentinel2')
+                plot_clustered_timeseries(stack_path, label_path, ax=axes[1], sensor='sentinel2')
                 plt.tight_layout()
                 plt.show()
                 break
+
+    # Test PlanetScope if available
+    print("\nTesting PlanetScope EVI visualization...")
+    planet_dir = get_features_dir(sensor='planetscope')
+    if os.path.exists(planet_dir):
+        planet_files = glob(os.path.join(planet_dir, '*_stack.tif'))
+        for stack_path in planet_files[:50]:
+            labels = find_labels_for_stack(stack_path)
+            if labels:
+                label_path = labels[0]
+                mask = load_label_mask(label_path, 'binary')
+                if mask.sum() > 10:
+                    print(f"Testing with: {os.path.basename(stack_path)}")
+
+                    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+                    plot_evi_timeseries(stack_path, label_path, ax=axes[0], sensor='planetscope')
+                    plot_clustered_timeseries(stack_path, label_path, ax=axes[1], sensor='planetscope')
+                    plt.tight_layout()
+                    plt.show()
+                    break

@@ -1,16 +1,14 @@
 '''
-create_label_band_new.py
+create_label_band.py
 Functions to apply labels to all .tif images with corresponding labelled polygons.
 
 Output:
     For each stack .tif and each labeler who annotated that location-date:
     A label .tif with 9 bands at the same resolution as the original image.
 
-Changes from original create_label_band.py:
-    - Flexible directory paths (not hardcoded)
-    - Creates separate label files for EACH labeler
-    - Properly transforms coordinates from EPSG:4326 to image CRS
-    - Adds band 8: % polygon coverage for mixed pixel analysis
+Supports both Sentinel-2 and PlanetScope via the 'sensor' parameter:
+    - sentinel2: Uses data/features/ directory
+    - planetscope: Uses data/features_planet/ directory
 '''
 
 import os
@@ -34,19 +32,43 @@ from utils.utils import get_data_root
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Sensor configurations (matches satellite_visualization.py)
+SENSOR_CONFIG = {
+    'sentinel2': {
+        'default_version': '20260107_180813',
+        'data_dir': 'features',
+    },
+    'planetscope': {
+        'default_version': '20260127_161535_SR',
+        'data_dir': 'features_planet',
+    }
+}
 
-def create_labels(download_dir, version_name=None):
+
+def create_labels(download_dir=None, version_name=None, sensor='sentinel2'):
     """
     Creates labels for all downloaded .tif stacks with perfect spatial alignment.
     Creates SEPARATE label files for EACH labeler who annotated each location-date.
 
+    Works for both Sentinel-2 and PlanetScope data - the label format is identical.
+
     Parameters:
-        - download_dir (str): Root directory containing versioned downloads
+        - download_dir (str, optional): Root directory containing versioned downloads.
+            If None, uses the default for the sensor type.
         - version_name (str, optional): Specific version folder name. If None, uses latest.
+        - sensor (str): Sensor type ('sentinel2' or 'planetscope'). Default 'sentinel2'.
 
     Returns:
         - None. Creates {file_id}_{operator}_labels.tif for each stack file and labeler.
     """
+    if sensor not in SENSOR_CONFIG:
+        raise ValueError(f"Unknown sensor type: {sensor}. Must be one of {list(SENSOR_CONFIG.keys())}")
+
+    config = SENSOR_CONFIG[sensor]
+
+    # Set default download directory based on sensor
+    if download_dir is None:
+        download_dir = os.path.join(get_data_root(), config['data_dir'])
 
     # Get the version directory
     if version_name is None:
@@ -60,6 +82,8 @@ def create_labels(download_dir, version_name=None):
     version_dir = os.path.join(download_dir, version_name)
     if not os.path.exists(version_dir):
         raise RuntimeError(f"Version directory not found: {version_dir}")
+
+    logging.info(f"Creating labels for {sensor} data in {version_dir}")
 
     # Load the combined polygons file (contains all labelers)
     polygons_path = os.path.join(get_data_root(), 'labels/labeled_surveys/random_sample/latest_polygons.geojson')
@@ -396,13 +420,15 @@ def save_label_raster(label_array, image_meta, output_label_path, description="L
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Create label bands for downloaded Sentinel-2 stacks')
-    parser.add_argument('--download_dir', type=str,
-                        default=os.path.join(get_data_root(), 'features'),
-                        help='Directory containing versioned downloads')
+    parser = argparse.ArgumentParser(description='Create label bands for downloaded satellite stacks')
+    parser.add_argument('--download_dir', type=str, default=None,
+                        help='Directory containing versioned downloads (default: auto from sensor)')
     parser.add_argument('--version', type=str, default=None,
                         help='Specific version name (default: latest)')
+    parser.add_argument('--sensor', type=str, default='sentinel2',
+                        choices=['sentinel2', 'planetscope'],
+                        help='Sensor type (default: sentinel2)')
 
     args = parser.parse_args()
 
-    create_labels(args.download_dir, args.version)
+    create_labels(args.download_dir, args.version, args.sensor)

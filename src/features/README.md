@@ -603,17 +603,25 @@ For example, if site `5133803` on `2018-10-03` was labeled by KL, AB, and JL:
 ### Running the Script
 
 ```bash
-# From project root
+# Sentinel-2 (default)
 python src/features/create_label_band.py --download_dir data/features --version 20260107_180813
 
-# Or use defaults (latest version)
+# PlanetScope
+python src/features/create_label_band.py --sensor planetscope --version 20260127_161535_SR
+
+# Or use defaults (latest version, Sentinel-2)
 python src/features/create_label_band.py
 ```
 
 **From Python:**
 ```python
 from src.features.create_label_band import create_labels
-create_labels('data/features', '20260107_180813')
+
+# Sentinel-2
+create_labels('data/features', '20260107_180813', sensor='sentinel2')
+
+# PlanetScope
+create_labels('data/features_planet', '20260127_161535_SR', sensor='planetscope')
 ```
 
 ### Current Dataset
@@ -627,12 +635,90 @@ Labels for the `20260107_180813` feature download are stored alongside the stack
 
 ## Visualization Tools
 
-### GEE Screenshot Visualization
+The visualization module (`src/features/visualization/`) provides publication-quality figures for satellite data, labels, and time series. **All functions support both Sentinel-2 and PlanetScope** via a unified `sensor` parameter.
 
-`gee_screenshot_visualization.py` provides functions to overlay labeled polygons on Google Earth Pro screenshots for publication-quality figures.
+### Satellite Visualization (Both Sensors)
+
+`satellite_visualization.py` provides functions to visualize RGB imagery with irrigation mask overlays. Use `sensor='sentinel2'` (default) or `sensor='planetscope'`.
 
 ```python
-from src.features.gee_screenshot_visualization import (
+from src.features.visualization.satellite_visualization import (
+    SENSOR_CONFIG,           # Sensor configuration dictionary
+    get_features_dir,        # Get data directory
+    find_stack_for_site,     # Find stack for site/date
+    find_labels_for_stack,   # Find label files
+    load_rgb_from_stack,     # Load RGB image
+    load_label_mask,         # Load label band
+    plot_satellite_with_mask # Plot RGB with mask overlay
+)
+
+# Plot Sentinel-2 with irrigation mask
+plot_satellite_with_mask(stack_path, label_path, sensor='sentinel2')
+
+# Plot PlanetScope with irrigation mask
+plot_satellite_with_mask(stack_path, label_path, sensor='planetscope')
+
+# Get data directory for each sensor
+s2_dir = get_features_dir(sensor='sentinel2')   # data/features/20260107_180813
+ps_dir = get_features_dir(sensor='planetscope') # data/features_planet/20260127_161535_SR
+```
+
+### EVI Time Series Visualization
+
+`evi_timeseries_visualization.py` extracts and plots EVI time series showing irrigation patterns.
+
+```python
+from src.features.visualization.evi_timeseries_visualization import (
+    extract_evi_timeseries,   # Extract EVI for all pixels
+    plot_evi_timeseries,      # Plot irrigated vs non-irrigated
+    plot_clustered_timeseries # Auto-cluster temporal patterns
+)
+
+# Sentinel-2 EVI time series
+plot_evi_timeseries(stack_path, label_path, sensor='sentinel2')
+
+# PlanetScope EVI time series
+plot_evi_timeseries(stack_path, label_path, sensor='planetscope')
+
+# Cluster-based exploration (no labels needed)
+plot_clustered_timeseries(stack_path, sensor='sentinel2', n_clusters=4)
+```
+
+### Combined Multi-Source Visualization
+
+`combined_visualization.py` orchestrates comparisons across data sources.
+
+```python
+from src.features.visualization.combined_visualization import (
+    find_all_available_sources,   # Check data availability
+    plot_combined_comparison,     # Full multi-panel figure
+    plot_sensor_comparison,       # Side-by-side S2 vs PS
+    find_sites_with_both_sensors  # Sites with both sensors
+)
+
+# Find sites with both Sentinel-2 and PlanetScope
+common_sites = find_sites_with_both_sensors(limit=10)
+
+# Create combined comparison figure
+fig = plot_combined_comparison(
+    site_id='id_5119273',
+    year=2021, month=9, day=16,
+    show_evi=True  # Include EVI panels
+)
+
+# Side-by-side sensor comparison only
+fig = plot_sensor_comparison(
+    site_id='id_5119273',
+    year=2021, month=9, day=16
+)
+```
+
+### GEE Screenshot Visualization
+
+`gee_screenshot_visualization.py` overlays labeled polygons on Google Earth Pro screenshots.
+
+```python
+from src.features.visualization.gee_screenshot_visualization import (
     list_available_screenshots,
     plot_screenshot_with_polygons,
     plot_random_screenshot
@@ -654,3 +740,30 @@ plot_random_screenshot()
 
 Screenshots should be placed in `data/labels/GEE_screenshots/` with naming format:
 `{survey}_{internal_id}_{MM-DD-YY}.png`
+
+### Sensor Configuration
+
+Both sensors share a unified configuration in `SENSOR_CONFIG`:
+
+```python
+SENSOR_CONFIG = {
+    'sentinel2': {
+        'n_bands': 10,
+        'band_indices': {'blue': 0, 'green': 1, 'red': 2, 'nir': 6, ...},
+        'default_version': '20260107_180813',
+        'data_dir': 'features',
+        'normalization': 3000.0,
+    },
+    'planetscope': {
+        'n_bands': 4,
+        'band_indices': {'blue': 0, 'green': 1, 'red': 2, 'nir': 3},
+        'default_version': '20260127_161535_SR',
+        'data_dir': 'features_planet',
+        'normalization': 3000.0,
+    }
+}
+```
+
+### Visualization Notebook
+
+See `src/features/visualization/feature_visualization.ipynb` for interactive examples of all visualization functions.
