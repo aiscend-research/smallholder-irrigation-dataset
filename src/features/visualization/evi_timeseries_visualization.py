@@ -248,6 +248,59 @@ def smooth_timeseries(ts, window=3):
         return np.array([smooth_timeseries(row, window) for row in ts])
 
 
+def _get_timestep_dates(stack_path, n_timesteps, sensor='sentinel2'):
+    """
+    Get actual dates for each timestep from metadata or compute from filename.
+
+    Parameters:
+        stack_path: Path to the stack file
+        n_timesteps: Number of timesteps in the stack
+        sensor: Sensor type
+
+    Returns:
+        tuple: (list of datetime objects for each timestep center, labeled_date, labeled_timestep)
+    """
+    import json
+    from datetime import datetime, timedelta
+
+    stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
+    parts = stack_name.split('_')
+    date_str = parts[2]  # e.g., '2021.09.16'
+    labeled_date = datetime.strptime(date_str, '%Y.%m.%d')
+
+    # Try to load metadata
+    features_dir = os.path.dirname(stack_path)
+    meta_path = os.path.join(features_dir, f'{stack_name}_metadata.json')
+
+    timestep_dates = []
+    labeled_timestep = 21  # Default fallback
+
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            meta = json.load(f)
+
+        windows = meta.get('windows', [])
+        for i, window in enumerate(windows):
+            start = datetime.strptime(window['date_range'][0], '%Y-%m-%d')
+            end = datetime.strptime(window['date_range'][1], '%Y-%m-%d')
+            # Use center of window as the date
+            center = start + (end - start) / 2
+            timestep_dates.append(center)
+
+            # Check if this window contains the labeled date
+            if start <= labeled_date < end:
+                labeled_timestep = i
+    else:
+        # Fallback: compute dates assuming 10-day windows centered on labeled date
+        timestep_days = 10
+        labeled_timestep = 21
+        for t in range(n_timesteps):
+            days_offset = (t - labeled_timestep) * timestep_days
+            timestep_dates.append(labeled_date + timedelta(days=days_offset))
+
+    return timestep_dates, labeled_date, labeled_timestep
+
+
 def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
                         n_samples=30, smooth_window=3, show_individual=True,
                         title=None, start_day_of_year=None, sensor='sentinel2'):
@@ -259,34 +312,40 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         label_path: Path to the label file. If None, shows all pixels.
         ax: Matplotlib axes to plot on
         figsize: Figure size if creating new figure
-        n_samples: Number of pixels to sample per class
-        smooth_window: Window size for time series smoothing
+        n_samples: Maximum number of pixels to sample per class. If fewer pixels
+            are available for a class, all available pixels are used.
+        smooth_window: Window size for time series smoothing (moving average).
+            Uses scipy.ndimage.uniform_filter1d. Any positive integer works.
+            A value of 1 means no smoothing. Missing values (NaN) are linearly
+            interpolated before smoothing is applied.
         show_individual: Whether to show individual pixel traces
         title: Plot title
-        start_day_of_year: Starting day of year for x-axis (inferred from filename if None)
+        start_day_of_year: (Deprecated) No longer used - dates are from metadata
         sensor (str): Sensor type ('sentinel2' or 'planetscope')
 
     Returns:
         matplotlib.axes.Axes: The axes with the plot
     """
+    import matplotlib.dates as mdates
+    from datetime import datetime
+
     config = SENSOR_CONFIG[sensor]
-    timestep_days = 10  # Both sensors use 10-day windows
 
     # Extract EVI time series
     evi_array, valid_mask = extract_evi_timeseries(stack_path, sensor)
     n_timesteps = evi_array.shape[0]
 
+    # Get actual dates for timesteps
+    timestep_dates, labeled_date, labeled_timestep = _get_timestep_dates(
+        stack_path, n_timesteps, sensor
+    )
+
     # Create figure if needed
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
 
-    # Create x-axis (days relative to labeled date)
-    # The labeled date corresponds to a specific timestep, not necessarily the middle
-    labeled_timestep = get_labeled_timestep(stack_path, sensor)
-    days = (np.arange(n_timesteps) - labeled_timestep) * timestep_days
-
     # Colors
-    irr_color = '#2ca02c'  # Green for irrigated
+    irr_color = "#2c70a0"  # Blue for irrigated
     non_irr_color = '#d62728'  # Red for non-irrigated
 
     if label_path is not None:
@@ -302,40 +361,45 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         if show_individual:
             if len(irr_ts) > 0:
                 for ts in smooth_timeseries(irr_ts, smooth_window):
-                    ax.plot(days, ts, color=irr_color, alpha=0.15, linewidth=0.5)
+                    ax.plot(timestep_dates, ts, color=irr_color, alpha=0.15, linewidth=0.5)
             if len(non_irr_ts) > 0:
                 for ts in smooth_timeseries(non_irr_ts, smooth_window):
-                    ax.plot(days, ts, color=non_irr_color, alpha=0.15, linewidth=0.5)
+                    ax.plot(timestep_dates, ts, color=non_irr_color, alpha=0.15, linewidth=0.5)
 
         # Plot mean time series (bold)
         if len(irr_ts) > 0:
             irr_mean = np.nanmean(smooth_timeseries(irr_ts, smooth_window), axis=0)
-            ax.plot(days, irr_mean, color=irr_color, linewidth=2.5, label='Irrigated')
+            ax.plot(timestep_dates, irr_mean, color=irr_color, linewidth=2.5, label='Irrigated')
 
         if len(non_irr_ts) > 0:
             non_irr_mean = np.nanmean(smooth_timeseries(non_irr_ts, smooth_window), axis=0)
-            ax.plot(days, non_irr_mean, color=non_irr_color, linewidth=2.5, label='Non-irrigated')
-
-        ax.legend(loc='upper right')
+            ax.plot(timestep_dates, non_irr_mean, color=non_irr_color, linewidth=2.5, label='Non-irrigated')
     else:
         # No labels - show all pixels
         all_ts = sample_pixel_timeseries(evi_array, np.ones_like(evi_array[0], dtype=bool), n_samples)
 
         if show_individual and len(all_ts) > 0:
             for ts in smooth_timeseries(all_ts, smooth_window):
-                ax.plot(days, ts, color='gray', alpha=0.2, linewidth=0.5)
+                ax.plot(timestep_dates, ts, color='gray', alpha=0.2, linewidth=0.5)
 
         if len(all_ts) > 0:
             all_mean = np.nanmean(smooth_timeseries(all_ts, smooth_window), axis=0)
-            ax.plot(days, all_mean, color='black', linewidth=2.5, label='All pixels')
+            ax.plot(timestep_dates, all_mean, color='black', linewidth=2.5, label='All pixels')
 
-        ax.legend(loc='upper right')
+    # Add vertical line at labeled date (add to legend)
+    ax.axvline(x=labeled_date, color='gray', linestyle='--', alpha=0.7,
+               linewidth=1.5, label='Label date')
 
-    # Add vertical line at center (labeled date)
-    ax.axvline(x=0, color='gray', linestyle='--', alpha=0.5, label='Labeled date')
+    # Legend
+    ax.legend(loc='upper right')
+
+    # Format x-axis as dates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
     # Labels
-    ax.set_xlabel('Days from labeled date')
+    ax.set_xlabel('Date')
     ax.set_ylabel('EVI')
     ax.set_ylim(-0.1, 0.7)
 
@@ -380,22 +444,22 @@ def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12,
     Returns:
         matplotlib.axes.Axes: The axes with the plot
     """
+    import matplotlib.dates as mdates
     from sklearn.cluster import KMeans
-
-    timestep_days = 10  # Both sensors use 10-day windows
 
     # Extract EVI time series
     evi_array, valid_mask = extract_evi_timeseries(stack_path, sensor)
     n_timesteps = evi_array.shape[0]
     height, width = evi_array.shape[1], evi_array.shape[2]
 
+    # Get actual dates for timesteps
+    timestep_dates, labeled_date, labeled_timestep = _get_timestep_dates(
+        stack_path, n_timesteps, sensor
+    )
+
     # Create figure if needed
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
-
-    # Create x-axis (days relative to labeled date)
-    labeled_timestep = get_labeled_timestep(stack_path, sensor)
-    days = (np.arange(n_timesteps) - labeled_timestep) * timestep_days
 
     # Flatten pixels and filter valid ones
     pixel_ts = evi_array.reshape(n_timesteps, -1).T  # (n_pixels, n_timesteps)
@@ -457,13 +521,19 @@ def plot_clustered_timeseries(stack_path, label_path=None, ax=None, figsize=(12,
             frac_irr = cluster_info[c]['frac_irrigated']
             label_str += f' [{frac_irr:.0%} irrigated]'
 
-        ax.plot(days, cluster_mean, color=colors[c], linewidth=2.5, label=label_str)
+        ax.plot(timestep_dates, cluster_mean, color=colors[c], linewidth=2.5, label=label_str)
 
-    # Add vertical line at center
-    ax.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+    # Add vertical line at labeled date
+    ax.axvline(x=labeled_date, color='gray', linestyle='--', alpha=0.7,
+               linewidth=1.5, label='Label date')
+
+    # Format x-axis as dates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
     # Labels
-    ax.set_xlabel('Days from labeled date')
+    ax.set_xlabel('Date')
     ax.set_ylabel('EVI')
     ax.set_ylim(-0.1, 0.7)
     ax.legend(loc='upper right', fontsize=8)
