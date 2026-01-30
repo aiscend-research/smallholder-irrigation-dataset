@@ -22,6 +22,33 @@ from src.utils.utils import save_data, get_data_root
 from src.utils.geometries import bounding_box, survey_polygon
 
 
+def remove_duplicate_labels(df):
+    """
+    Remove duplicate labels where the same operator labeled the same image twice.
+
+    Some images were accidentally included twice in surveys, resulting in duplicate
+    labels from the same operator. This keeps the first entry (lower image_number).
+    """
+    df = df.copy()
+    # Create image_id from site_id + date
+    df['_image_id'] = (df['site_id'] + '_' +
+                       df['year'].astype(str) + '-' +
+                       df['month'].astype(str).str.zfill(2) + '-' +
+                       df['day'].astype(str).str.zfill(2))
+
+    n_before = len(df)
+    df = df.sort_values('image_number').drop_duplicates(
+        subset=['_image_id', 'operator_initials'], keep='first'
+    )
+    df = df.drop(columns=['_image_id'])
+    n_removed = n_before - len(df)
+
+    if n_removed > 0:
+        print(f"  Removed {n_removed} duplicate labels (same operator, same image)")
+
+    return df
+
+
 def adjust_ps_dates(df, operator_col='operator_initials'):
     """
     Adjust PS (Peter Siame) annotation dates back by one day.
@@ -109,9 +136,9 @@ def generate_latest_irrigation_data(group_name="random_sample"):
 
     # Manually mark certain surveys as the most recent
     # (these don't follow the logic above but we still want them since they are the most recent for these labelers)
-    # - AB_JL_101-125, PS_101-125: QC surveys that overlap with other labelers
+    # - AB_JL_v2_101-125, PS_101-125: QC surveys that overlap with other labelers
     # - PS_1025-1049: PS survey that overlaps with KL_v2_1025-1049 (different labelers, both should be included)
-    df.loc[df['source_file'].isin(['AB_JL_101-125', 'PS_101-125', 'PS_1025-1049']), 'most_recent'] = 1
+    df.loc[df['source_file'].isin(['AB_JL_v2_101-125', 'PS_101-125', 'PS_1025-1049']), 'most_recent'] = 1
 
     # Filter the DataFrame to keep only the most recent surveys
     df = df[df['most_recent'] == 1]
@@ -165,6 +192,9 @@ def pool_latest_labels_and_save(group_name="random_sample"):
     # Ensure it's a DataFrame
     if not isinstance(latest_irrigation_data, pd.DataFrame):
         latest_irrigation_data = pd.DataFrame(latest_irrigation_data)
+
+    # Remove duplicate labels (same operator labeled same image twice)
+    latest_irrigation_data = remove_duplicate_labels(latest_irrigation_data)
 
     # Adjust PS dates back by one day (timezone correction)
     latest_irrigation_data = adjust_ps_dates(latest_irrigation_data)
