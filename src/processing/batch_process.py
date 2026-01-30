@@ -2,6 +2,7 @@ import os
 import sys
 import pandas as pd
 import re
+from datetime import datetime, timedelta
 from survey_to_csv import process_xml_zip
 import geopandas as gpd
 from shapely.geometry import box
@@ -19,6 +20,40 @@ if project_root not in sys.path:
 
 from src.utils.utils import save_data, get_data_root
 from src.utils.geometries import bounding_box, survey_polygon
+
+
+def adjust_ps_dates(df, operator_col='operator_initials'):
+    """
+    Adjust PS (Peter Siame) annotation dates back by one day.
+
+    Peter's annotations were recorded with dates one day later than the actual
+    image dates due to timezone differences during labeling (Zambia UTC+2 vs
+    California UTC-7/8, meaning when Peter labeled an image late at night in
+    Zambia, the date had already rolled over to the next day).
+
+    Args:
+        df: DataFrame with year, month, day, and operator columns
+        operator_col: Name of the column containing operator initials
+
+    Returns:
+        DataFrame with adjusted dates for PS rows
+    """
+    df = df.copy()
+    ps_mask = df[operator_col] == 'PS'
+    n_adjusted = ps_mask.sum()
+
+    if n_adjusted == 0:
+        return df
+
+    for idx in df[ps_mask].index:
+        date = datetime(int(df.loc[idx, 'year']), int(df.loc[idx, 'month']), int(df.loc[idx, 'day']))
+        new_date = date - timedelta(days=1)
+        df.loc[idx, 'year'] = new_date.year
+        df.loc[idx, 'month'] = new_date.month
+        df.loc[idx, 'day'] = new_date.day
+
+    print(f"  Adjusted {n_adjusted} PS rows back by one day")
+    return df
 
 
 def generate_latest_irrigation_data(group_name="random_sample"):
@@ -72,9 +107,11 @@ def generate_latest_irrigation_data(group_name="random_sample"):
         axis=1
     )
 
-    # Manually mark 'AB_JL_101-125' and 'PS_101-125' as the most recent survey
+    # Manually mark certain surveys as the most recent
     # (these don't follow the logic above but we still want them since they are the most recent for these labelers)
-    df.loc[df['source_file'].isin(['AB_JL_101-125', 'PS_101-125']), 'most_recent'] = 1
+    # - AB_JL_101-125, PS_101-125: QC surveys that overlap with other labelers
+    # - PS_1025-1049: PS survey that overlaps with KL_v2_1025-1049 (different labelers, both should be included)
+    df.loc[df['source_file'].isin(['AB_JL_101-125', 'PS_101-125', 'PS_1025-1049']), 'most_recent'] = 1
 
     # Filter the DataFrame to keep only the most recent surveys
     df = df[df['most_recent'] == 1]
@@ -124,11 +161,14 @@ def pool_latest_labels_and_save(group_name="random_sample"):
     Pools the latest labeled irrigation data for the specified group, saves as CSV and GeoJSON with bounding boxes.
     """
     latest_irrigation_data = generate_latest_irrigation_data(group_name)
-    
+
     # Ensure it's a DataFrame
     if not isinstance(latest_irrigation_data, pd.DataFrame):
         latest_irrigation_data = pd.DataFrame(latest_irrigation_data)
-    
+
+    # Adjust PS dates back by one day (timezone correction)
+    latest_irrigation_data = adjust_ps_dates(latest_irrigation_data)
+
     # Add a unique_id as the first column
     latest_irrigation_data.insert(0, 'unique_id', pd.Series(range(1, len(latest_irrigation_data) + 1), index=latest_irrigation_data.index))
     
@@ -172,7 +212,10 @@ def pool_latest_polygons_and_save(group_name="random_sample"):
     # 4. Filter to only polygons from the most recent surveys (by source_file)
     filtered_polygons = all_polygons[all_polygons['source_file'].isin(list(latest_source_files))]
 
-    # 5. Save as CSV and GeoJSON using save_data
+    # 5. Adjust PS dates back by one day (timezone correction)
+    filtered_polygons = gpd.GeoDataFrame(adjust_ps_dates(filtered_polygons), crs="EPSG:4326")
+
+    # 6. Save as CSV and GeoJSON using save_data
     csv_path = f"labels/labeled_surveys/{group_name}/latest_polygons_table.csv"
     geojson_path = f"labels/labeled_surveys/{group_name}/latest_polygons.geojson"
     description_csv = "The latest labeled irrigation polygons (CSV) for the most recent surveys."
