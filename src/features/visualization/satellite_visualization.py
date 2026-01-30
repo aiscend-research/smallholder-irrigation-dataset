@@ -426,8 +426,9 @@ def plot_satellite_with_mask(stack_path, label_path=None, operator=None,
                 title += f" (Labeler: {operator})"
 
     ax.set_title(title)
-    ax.set_xlabel('Pixel X')
-    ax.set_ylabel('Pixel Y')
+
+    # Remove axes for cleaner visualization
+    ax.axis('off')
 
     return ax
 

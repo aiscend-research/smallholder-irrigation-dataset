@@ -328,8 +328,8 @@ def plot_screenshot_with_polygons(screenshot_path=None, survey=None, internal_id
                          for lab in sorted(labelers_plotted)]
         ax.legend(handles=legend_elements, loc='upper right', title='Labeler')
 
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
+    # Remove axes for cleaner visualization
+    ax.axis('off')
 
     return ax
 
