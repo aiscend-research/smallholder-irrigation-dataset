@@ -652,7 +652,7 @@ def dataset_download(csv, download_dir,
     Download and stack images for each site represented by a row in a CSV.
     
     Args:
-        csv: Path to csv with columns: x, y, unique_id, site_id, year, month, day
+        csv: Path to csv with columns: x, y, site_id, year, month, day
         download_dir: Output directory for all files
         collection: 'L1C' or 'L2A'
         start_month: Month to start time series (1=January, excluding buffer)
@@ -688,18 +688,17 @@ def dataset_download(csv, download_dir,
 
     rows = list(data.iterrows())
     for _, row in rows:
-    
+
         # Extract row data
         lat, lon = row['y'], row['x']
-        uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))
-        
-        # Create file naming
+
+        # Create file naming: site_id + date (no UID prefix)
         date_str = f"{date.year}.{date.month:02d}.{date.day:02d}"
         sid_raw = str(row['site_id'])
         sid_for_name = sid_raw.replace('id_', '')
-        file_id = f"{uid}_{sid_for_name}_{date_str}"
-        
+        file_id = f"{sid_for_name}_{date_str}"
+
         logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
 
         # Download and stack - pass all parameters through
@@ -716,18 +715,7 @@ def dataset_download(csv, download_dir,
             window_buffer=window_buffer,
             target_size=target_size
         )
-        
-        # Add unique_id to metadata (for matching back to CSV)
-        metadata_file = os.path.join(out_dir, f"{file_id}_metadata.json")
-        with open(metadata_file, 'r') as f:
-            metadata = json.load(f)
-        
-        metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
-        metadata['original_site_id'] = sid_raw
-        
-        with open(metadata_file, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
+
         logging.info(f"Completed {file_id}")
 
     get_stats(out_dir)
