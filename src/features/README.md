@@ -173,7 +173,7 @@ The downloaded time series data can be visualized using the built-in visualizati
 ```python
 from src.features.download_sentinel2 import visualize_time_series_stack
 
-visualize_time_series_stack(out_dir='path/to/features/version', file_id='10_5130509_2016.09.09')
+visualize_time_series_stack(out_dir='path/to/features/version', file_id='5130509_2016.09.09')
 ```
 
 This displays RGB composites (B4=Red, B3=Green, B2=Blue) for both unmasked and masked stacks across the first 15 timesteps.
@@ -192,9 +192,9 @@ The per-window GeoTIFFs are downloaded to a temporary directory, then stacked in
 
 **Files Stored**: For each labeled image, we save three files:
 
-- `{uid}_{site}_{YYYY.MM.DD}_stack.tif` – Unmasked stack (all pixels)
-- `{uid}_{site}_{YYYY.MM.DD}_stack_masked.tif` – Masked stack (cloud pixels = 0)
-- `{uid}_{site}_{YYYY.MM.DD}_metadata.json` – Per-window metadata (date ranges, file_exists, masked_fraction)
+- `{site_id}_{YYYY.MM.DD}_stack.tif` – Unmasked stack (all pixels)
+- `{site_id}_{YYYY.MM.DD}_stack_masked.tif` – Masked stack (cloud pixels = 0)
+- `{site_id}_{YYYY.MM.DD}_metadata.json` – Per-window metadata (date ranges, file_exists, masked_fraction)
 
 **Reading the stacks**:
 ```python
@@ -239,20 +239,27 @@ python src/features/download_sentinel2.py
 Downloads are saved to a timestamped version folder (e.g., `data/features/sentinel2/20260107_180813/`).
 
 ### Dataset Location
-The dataset is located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/`. There are three versions: 
 
-|Folder Name|Date Downloaded|
-|-----------|-----------|
-|features|August 5th, 2025|
-|features_v2|October 12, 2025|
-|features_v3|November 9, 2025|
+The datasets are organized by sensor type under `data/features/`:
 
-A note on the differences between versions:
-- `features` downloaded everything locally and also to the Google Cloud Bucket, which made the download speed exponentially slower (took around a week to download all sites)
-- `features_v2` downloads everything locally (bypassing Google Cloud Bucket), which makes downloading a lot easier. It takes a little less than a 1 minute to download each row of `latest_irrigation_table.csv`, whereas it took approximately 15 minutes in the previous download.
-  - Modifications were made to `latest_irrigation_table.csv` between downloads, so the IDs in `features` do not match with those in `features_v2`
-- `features` has some issues with the cloud masking in which a lot of images were mostly blank, save a few small patches of colored pixels. Some updates to improve the cloud masking in `features_v2`. Also, images more than 80% blank are dropped in `features_v2`, whereas they were kept in `features`
-- `features_v3` uses the same download logic as `features_v2`, except all time windows begin on January 1st.
+```
+data/features/
+├── sentinel2/
+│   └── 20260107_180813/     # 2,350 stacks (37 GB)
+└── planetscope/
+    └── 20260127_161535_SR/  # 2,350 stacks (164 GB)
+```
+
+**Current versions:**
+
+| Sensor | Version | Date | Stacks | Size |
+|--------|---------|------|--------|------|
+| Sentinel-2 | `20260107_180813` | Jan 7, 2026 | 2,350 | ~37 GB |
+| PlanetScope | `20260127_161535_SR` | Jan 27, 2026 | 2,350 | ~164 GB |
+
+**Cluster location:** `/home/waves/data/smallholder-irrigation-dataset/data/features/`
+
+Each stack contains 42 time windows (36 core + 3 buffer on each end) starting January 1st of the labeled year.
 
 ---
 
@@ -444,10 +451,10 @@ For each labeled site, the following files are created in the version folder:
 
 ```
 data/features/planetscope/20260127_161535_SR/
-├── 1_5130509_2016.09.09_stack.tif        # Unmasked stack (168 bands)
-├── 1_5130509_2016.09.09_stack_masked.tif # Cloud-masked stack (bad pixels = 0)
-├── 1_5130509_2016.09.09_metadata.json    # Per-window metadata
-├── 2_5130509_2017.07.15_stack.tif
+├── 5130509_2016.09.09_stack.tif          # Unmasked stack (168 bands)
+├── 5130509_2016.09.09_stack_masked.tif   # Cloud-masked stack (bad pixels = 0)
+├── 5130509_2016.09.09_metadata.json      # Per-window metadata
+├── 5130509_2017.07.15_stack.tif
 ├── ...
 ├── download_results.json                  # Summary of all download results
 └── metadata_20260127_161535_SR.json       # Run configuration
@@ -477,7 +484,7 @@ data = data.reshape(num_bands, num_windows, 334, 334).transpose(1, 0, 2, 3)
 **Metadata JSON structure**:
 ```json
 {
-  "file_id": "1_5130509_2016.09.09",
+  "file_id": "5130509_2016.09.09",
   "lat": -15.4567,
   "lon": 28.1234,
   "product_type": "SR",
@@ -586,17 +593,15 @@ This allows downstream analysis to:
 
 For each stack file and each labeler who annotated that site-date, the script creates:
 ```
-{unique_id}_{site_id}_{YYYY.MM.DD}_{operator}_labels.tif
+{site_id}_{YYYY.MM.DD}_{operator}_labels.tif
 ```
 
 For example, if site `5133803` on `2018-10-03` was labeled by KL, AB, and JL:
 ```
-100_5133803_2018.10.03_KL_labels.tif
-100_5133803_2018.10.03_AB_labels.tif
-100_5133803_2018.10.03_JL_labels.tif
+5133803_2018.10.03_KL_labels.tif
+5133803_2018.10.03_AB_labels.tif
+5133803_2018.10.03_JL_labels.tif
 ```
-
-**BUG:** The unique ID in the main dataset file do not necessarily correspond to the features and their labels and should therefore be ignored!
 
 **Important:** Images labeled as "no irrigation" (no polygons) also get label files with all zeros, ensuring complete coverage for model training.
 
@@ -644,19 +649,20 @@ The visualization module (`src/features/visualization/`) provides publication-qu
 ```python
 from src.features.visualization.satellite_visualization import (
     SENSOR_CONFIG,           # Sensor configuration dictionary
+    LABELER_COLORS,          # Color for each labeler
     get_features_dir,        # Get data directory
     find_stack_for_site,     # Find stack for site/date
     find_labels_for_stack,   # Find label files
     load_rgb_from_stack,     # Load RGB image
     load_label_mask,         # Load label band
-    plot_satellite_with_mask # Plot RGB with mask overlay
+    plot_satellite_with_mask # Plot RGB with all labelers' masks overlaid
 )
 
-# Plot Sentinel-2 with irrigation mask
-plot_satellite_with_mask(stack_path, label_path, sensor='sentinel2')
+# Plot Sentinel-2 with all labelers' irrigation masks
+plot_satellite_with_mask(stack_path, sensor='sentinel2')
 
-# Plot PlanetScope with irrigation mask
-plot_satellite_with_mask(stack_path, label_path, sensor='planetscope')
+# Plot PlanetScope with all labelers' irrigation masks
+plot_satellite_with_mask(stack_path, sensor='planetscope')
 
 # Get data directory for each sensor
 s2_dir = get_features_dir(sensor='sentinel2')   # data/features/sentinel2/20260107_180813

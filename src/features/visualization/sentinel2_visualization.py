@@ -11,6 +11,8 @@ from .satellite_visualization import (
     SENSOR_CONFIG,
     IRRIGATION_COLORS,
     IRRIGATION_LABELS,
+    LABELER_COLORS,
+    LABELER_COLORS_HEX,
 
     # Path functions
     get_features_dir,
@@ -28,7 +30,6 @@ from .satellite_visualization import (
 
     # Visualization functions
     plot_satellite_with_mask,
-    plot_sentinel2_with_mask,  # backward-compatible alias
 
     # Utility functions
     trace_pixel_boundaries,

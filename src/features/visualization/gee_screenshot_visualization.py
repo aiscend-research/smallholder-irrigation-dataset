@@ -22,6 +22,7 @@ from shapely.geometry import box
 from pyproj import Transformer
 
 from ...utils.utils import find_project_root
+from .satellite_visualization import LABELER_COLORS_HEX
 
 
 def _get_project_root():
@@ -40,17 +41,6 @@ def get_polygons_path():
 
 def get_irrigation_table_path():
     return os.path.join(_get_project_root(), 'data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv')
-
-
-# Labeler colors for visualization
-LABELER_COLORS = {
-    'KL': '#e41a1c',   # red
-    'AB': '#377eb8',   # blue
-    'DSB': '#4daf4a',  # green
-    'JL': '#984ea3',   # purple
-    'MV': '#ff7f00',   # orange
-    'PS': '#a65628',   # brown
-}
 
 
 def parse_screenshot_filename(filename):
@@ -296,7 +286,7 @@ def plot_screenshot_with_polygons(screenshot_path=None, survey=None, internal_id
 
     for labeler in polygons_gdf['operator_initials'].unique():
         labeler_polys = polygons_gdf[polygons_gdf['operator_initials'] == labeler]
-        color = LABELER_COLORS.get(labeler, '#333333')
+        color = LABELER_COLORS_HEX.get(labeler, '#333333')
 
         for _, row in labeler_polys.iterrows():
             geom = row.geometry
@@ -323,7 +313,7 @@ def plot_screenshot_with_polygons(screenshot_path=None, survey=None, internal_id
 
     # Add legend
     if show_legend and len(labelers_plotted) > 0:
-        legend_elements = [Line2D([0], [0], color=LABELER_COLORS.get(lab, '#333333'),
+        legend_elements = [Line2D([0], [0], color=LABELER_COLORS_HEX.get(lab, '#333333'),
                                   linewidth=polygon_linewidth, label=lab)
                          for lab in sorted(labelers_plotted)]
         ax.legend(handles=legend_elements, loc='upper right', title='Labeler')

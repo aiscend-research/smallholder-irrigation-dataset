@@ -177,6 +177,9 @@ data/sampling/samples/*
 !data/targeting/
 data/targeting/features/
 data/modeling
+# !data/features
+# data/features/*
+#!data/features/20260107_180813/
 
 *.sh
 

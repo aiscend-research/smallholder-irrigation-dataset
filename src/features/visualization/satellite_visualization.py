@@ -76,6 +76,26 @@ IRRIGATION_LABELS = {
     5: 'Covered',
 }
 
+# Labeler colors for multi-labeler comparison (RGB tuples for matplotlib)
+LABELER_COLORS = {
+    'AB': (0.8, 0.2, 0.2),    # Red
+    'DSB': (0.2, 0.6, 0.8),   # Cyan
+    'JL': (0.2, 0.8, 0.2),    # Green
+    'KL': (0.8, 0.6, 0.2),    # Orange
+    'MV': (0.6, 0.2, 0.8),    # Purple
+    'PS': (0.8, 0.8, 0.2),    # Yellow
+}
+
+# Hex color versions (for APIs that prefer hex strings)
+LABELER_COLORS_HEX = {
+    'AB': '#cc3333',   # Red
+    'DSB': '#33a0cc',  # Cyan
+    'JL': '#33cc33',   # Green
+    'KL': '#cc9933',   # Orange
+    'MV': '#9933cc',   # Purple
+    'PS': '#cccc33',   # Yellow
+}
+
 
 def _get_project_root():
     """Get the project root directory."""
@@ -127,7 +147,7 @@ def find_stack_for_site(site_id, year, month, day, version=None, sensor='sentine
 
     # Build the expected filename pattern
     date_str = f"{year}.{month:02d}.{day:02d}"
-    pattern = f"*_{site_numeric}_{date_str}_stack.tif"
+    pattern = f"{site_numeric}_{date_str}_stack.tif"
 
     matches = glob(os.path.join(features_dir, pattern))
 
@@ -140,7 +160,7 @@ def get_labeled_timestep(stack_path, sensor='sentinel2'):
     """
     Find the timestep index that corresponds to the labeled date.
 
-    The labeled date is encoded in the stack filename (e.g., '1245_5119273_2021.09.16_stack.tif').
+    The labeled date is encoded in the stack filename (e.g., '5119273_2021.09.16_stack.tif').
     This function reads the metadata JSON to find which timestep contains that date.
 
     Parameters:
@@ -153,7 +173,7 @@ def get_labeled_timestep(stack_path, sensor='sentinel2'):
     # Parse labeled date from filename
     stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
     parts = stack_name.split('_')
-    date_str = parts[2]  # e.g., '2021.09.16'
+    date_str = parts[1]  # e.g., '2021.09.16'
     labeled_date = datetime.strptime(date_str, '%Y.%m.%d')
 
     # Try to load metadata
@@ -332,23 +352,23 @@ def load_label_mask(label_path, band='binary'):
     return data
 
 
-def plot_satellite_with_mask(stack_path, label_path=None, operator=None,
-                              timestep=None, ax=None, figsize=(10, 10),
+def plot_satellite_with_mask(stack_path, timestep=None, ax=None, figsize=(10, 10),
                               title=None, show_legend=True, linewidth=1.5,
                               sensor='sentinel2'):
     """
-    Plot satellite RGB with irrigation mask outlines (pixel-edge boundaries).
+    Plot satellite RGB with ALL labelers' irrigation masks overlaid.
+
+    Each labeler's mask is shown in a distinct color, allowing comparison
+    of how different labelers annotated the same image.
 
     Parameters:
         stack_path (str): Path to the stack file
-        label_path (str, optional): Path to the label file. If None, will search.
-        operator (str, optional): Operator initials for label file
         timestep (int, optional): Which timestep to use for RGB.
             If None, uses the timestep corresponding to the labeled date.
         ax (matplotlib.axes.Axes, optional): Axes to plot on
         figsize (tuple): Figure size if creating new figure
         title (str, optional): Plot title
-        show_legend (bool): Whether to show irrigation type legend
+        show_legend (bool): Whether to show labeler legend
         linewidth (float): Width of outline lines
         sensor (str): Sensor type ('sentinel2' or 'planetscope')
 
@@ -358,17 +378,11 @@ def plot_satellite_with_mask(stack_path, label_path=None, operator=None,
     # Load RGB at the correct timestep (labeled date)
     rgb, _, _ = load_rgb_from_stack(stack_path, timestep, sensor)
 
-    # Find label file if not provided
-    if label_path is None:
-        label_paths = find_labels_for_stack(stack_path, operator)
-        if len(label_paths) == 0:
-            print(f"Warning: No label file found for {stack_path}")
-            label_path = None
-        else:
-            label_path = label_paths[0]
-            if operator is None:
-                # Extract operator from filename
-                operator = os.path.basename(label_path).split('_')[-2]
+    # Find all label files for this stack
+    label_paths = find_labels_for_stack(stack_path, operator=None)
+
+    if len(label_paths) == 0:
+        print(f"Warning: No label files found for {stack_path}")
 
     # Create figure if needed
     if ax is None:
@@ -377,71 +391,51 @@ def plot_satellite_with_mask(stack_path, label_path=None, operator=None,
     # Plot RGB
     ax.imshow(rgb)
 
-    # Draw outlines if label available
-    if label_path is not None and os.path.exists(label_path):
-        categorical = load_label_mask(label_path, 'categorical')
+    # Draw outlines for each labeler
+    legend_elements = []
+    for label_path in sorted(label_paths):
+        # Extract operator from filename: {site}_{date}_{operator}_labels.tif
+        operator = os.path.basename(label_path).split('_')[-2]
 
-        # Draw pixel boundaries for each irrigation type
-        legend_elements = []
-        for irr_type in sorted(IRRIGATION_COLORS.keys()):
-            if irr_type == 0:
-                continue  # Skip "no irrigation"
+        # Get color for this labeler
+        color = LABELER_COLORS.get(operator, (0.5, 0.5, 0.5))  # Gray default
 
-            mask = (categorical == irr_type).astype(np.uint8)
-            if not mask.any():
-                continue
+        # Load binary mask (any irrigation)
+        binary_mask = load_label_mask(label_path, 'binary')
 
-            color = IRRIGATION_COLORS[irr_type][:3]
+        if not binary_mask.any():
+            continue  # No irrigation marked by this labeler
 
-            # Get pixel boundary segments
-            segments = trace_pixel_boundaries(mask)
+        # Get pixel boundary segments
+        segments = trace_pixel_boundaries(binary_mask)
 
-            if segments:
-                # Use LineCollection for efficient rendering
-                lc = LineCollection(segments, colors=[color], linewidths=linewidth)
-                ax.add_collection(lc)
+        if segments:
+            lc = LineCollection(segments, colors=[color], linewidths=linewidth)
+            ax.add_collection(lc)
 
             # Add to legend
-            if show_legend:
-                from matplotlib.lines import Line2D
-                legend_elements.append(
-                    Line2D([0], [0], color=color, linewidth=linewidth,
-                           label=IRRIGATION_LABELS[irr_type])
-                )
+            from matplotlib.lines import Line2D
+            legend_elements.append(
+                Line2D([0], [0], color=color, linewidth=linewidth, label=operator)
+            )
 
-        if show_legend and legend_elements:
-            ax.legend(handles=legend_elements, loc='upper right',
-                     title='Irrigation Type')
+    if show_legend and legend_elements:
+        ax.legend(handles=legend_elements, loc='upper right', title='Labeler')
 
     # Set title
     if title is None:
         stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
         parts = stack_name.split('_')
         sensor_name = 'PlanetScope' if sensor == 'planetscope' else 'Sentinel-2'
-        if len(parts) >= 3:
-            site = parts[1]
-            date = parts[2]
-            title = f"{sensor_name} - Site {site}, {date}"
-            if operator:
-                title += f" (Labeler: {operator})"
+        if len(parts) >= 2:
+            site = parts[0]
+            date = parts[1]
+            title = f"{sensor_name} - Site {site}, {date} (All Labelers)"
 
     ax.set_title(title)
-
-    # Remove axes for cleaner visualization
     ax.axis('off')
 
     return ax
-
-
-# Backward compatibility alias
-def plot_sentinel2_with_mask(stack_path, label_path=None, operator=None,
-                              timestep=None, ax=None, figsize=(10, 10),
-                              title=None, show_legend=True, linewidth=1.5):
-    """Backward-compatible alias for plot_satellite_with_mask with sensor='sentinel2'."""
-    return plot_satellite_with_mask(
-        stack_path, label_path, operator, timestep, ax, figsize,
-        title, show_legend, linewidth, sensor='sentinel2'
-    )
 
 
 def find_matching_stack_for_screenshot(survey, internal_id, month, day, year,

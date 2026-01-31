@@ -29,12 +29,12 @@ def _get_project_root():
     return find_project_root(os.path.dirname(__file__))
 
 
-def get_survey_info(unique_id):
+def get_survey_info(site):
     """
-    Look up survey and internal_id for a given unique_id.
+    Look up survey and internal_id for a given site.
 
     Parameters:
-        unique_id (int or str): The unique_id from the stack filename
+        site (int or str): The site from the stack filename
 
     Returns:
         tuple: (survey, internal_id) or (None, None) if not found
@@ -42,9 +42,9 @@ def get_survey_info(unique_id):
     import re
 
     irrigation_df = pd.read_csv(get_irrigation_table_path())
-    unique_id = int(unique_id)
+    site = int(site)
 
-    matches = irrigation_df[irrigation_df['unique_id'] == unique_id]
+    matches = irrigation_df[irrigation_df['site_id'] == site]
     if len(matches) == 0:
         return None, None
 
@@ -265,7 +265,7 @@ def _get_timestep_dates(stack_path, n_timesteps, sensor='sentinel2'):
 
     stack_name = os.path.basename(stack_path).replace('_stack.tif', '')
     parts = stack_name.split('_')
-    date_str = parts[2]  # e.g., '2021.09.16'
+    date_str = parts[1]  # e.g., '2021.09.16'
     labeled_date = datetime.strptime(date_str, '%Y.%m.%d')
 
     # Try to load metadata
@@ -409,11 +409,10 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         parts = stack_name.split('_')
         sensor_name = 'PlanetScope' if sensor == 'planetscope' else 'Sentinel-2'
         if len(parts) >= 3:
-            unique_id = parts[0]
-            site = parts[1]
-            date = parts[2]
+            site = parts[0]
+            date = parts[1]
             # Look up survey and internal_id
-            survey, internal_id = get_survey_info(unique_id)
+            survey, internal_id = get_survey_info(site)
             if survey and internal_id:
                 title = f'{sensor_name} EVI - Survey {survey}, ID {internal_id} (Site {site}, {date})'
             else:

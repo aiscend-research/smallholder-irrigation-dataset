@@ -17,11 +17,11 @@ import sys
 
 
 # Refer to src/features/README.md for dataset version info
-FEATURES_VERSION = "features_v2"
+SENTINEL2_VERSION = "20260107_180813"
 
 # Directories to search for labels & satellite images
-LABEL_DIR = get_data_root() + f"dataset/labels/"
-SAT_DIR = get_data_root() + f"{FEATURES_VERSION}/_tmp_tif/"
+LABEL_DIR = get_data_root() + "labels/"
+SAT_DIR = get_data_root() + f"features/sentinel2/{SENTINEL2_VERSION}/"
 LABEL_CSV = "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv"
 
 '''

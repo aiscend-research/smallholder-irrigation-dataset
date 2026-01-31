@@ -19,7 +19,7 @@ import pandas as pd
 from ...utils.utils import get_data_root
 from .satellite_visualization import (
     SENSOR_CONFIG, get_features_dir, find_stack_for_site,
-    find_labels_for_stack, plot_satellite_with_mask, get_irrigation_table_path
+    find_labels_for_stack, plot_satellite_with_all_masks, get_irrigation_table_path
 )
 from .evi_timeseries_visualization import plot_evi_timeseries
 from .gee_screenshot_visualization import (
@@ -194,8 +194,8 @@ def plot_combined_comparison(site_id, year, month, day,
         ax_s2 = fig.add_subplot(gs[0, col_idx])
         label_path = sources['sentinel_labels'][0] if sources['sentinel_labels'] else None
         try:
-            plot_satellite_with_mask(
-                sources['sentinel_stack'], label_path=label_path,
+            plot_satellite_with_all_masks(
+                sources['sentinel_stack'], 
                 operator=operator, ax=ax_s2, sensor='sentinel2',
                 show_legend=True
             )
@@ -210,8 +210,8 @@ def plot_combined_comparison(site_id, year, month, day,
         ax_ps = fig.add_subplot(gs[0, col_idx])
         label_path = sources['planet_labels'][0] if sources['planet_labels'] else None
         try:
-            plot_satellite_with_mask(
-                sources['planet_stack'], label_path=label_path,
+            plot_satellite_with_all_masks(
+                sources['planet_stack'],
                 operator=operator, ax=ax_ps, sensor='planetscope',
                 show_legend=True
             )
@@ -283,8 +283,8 @@ def plot_sensor_comparison(site_id, year, month, day,
     # Sentinel-2
     if sources['sentinel_stack']:
         label_path = sources['sentinel_labels'][0] if sources['sentinel_labels'] else None
-        plot_satellite_with_mask(
-            sources['sentinel_stack'], label_path=label_path,
+        plot_satellite_with_all_masks(
+            sources['sentinel_stack'], 
             operator=operator, ax=axes[0], sensor='sentinel2'
         )
     else:
@@ -295,8 +295,8 @@ def plot_sensor_comparison(site_id, year, month, day,
     # PlanetScope
     if sources['planet_stack']:
         label_path = sources['planet_labels'][0] if sources['planet_labels'] else None
-        plot_satellite_with_mask(
-            sources['planet_stack'], label_path=label_path,
+        plot_satellite_with_all_masks(
+            sources['planet_stack'], 
             operator=operator, ax=axes[1], sensor='planetscope'
         )
     else:
@@ -331,6 +331,7 @@ def find_sites_with_both_sensors(sentinel_version=None, planet_version=None, lim
     ps_dir = get_features_dir(planet_version, 'planetscope')
 
     if not os.path.exists(s2_dir) or not os.path.exists(ps_dir):
+
         return []
 
     # Parse filenames to get site-date combinations
@@ -340,9 +341,9 @@ def find_sites_with_both_sensors(sentinel_version=None, planet_version=None, lim
         for f in files:
             name = os.path.basename(f).replace('_stack.tif', '')
             parts = name.split('_')
-            if len(parts) >= 3:
-                site = parts[1]
-                date = parts[2]
+            if len(parts) >= 2:
+                site = parts[0]
+                date = parts[1]
                 parsed.add((site, date))
         return parsed
 
@@ -394,9 +395,9 @@ if __name__ == "__main__":
             if stacks:
                 name = os.path.basename(stacks[0]).replace('_stack.tif', '')
                 parts = name.split('_')
-                if len(parts) >= 3:
-                    site_id = f'id_{parts[1]}'
-                    date_parts = parts[2].split('.')
+                if len(parts) >= 2:
+                    site_id = f'id_{parts[0]}'
+                    date_parts = parts[1].split('.')
                     fig = plot_combined_comparison(
                         site_id, int(date_parts[0]), int(date_parts[1]), int(date_parts[2]),
                         show_evi=True
