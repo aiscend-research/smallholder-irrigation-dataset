@@ -1670,12 +1670,14 @@ if __name__ == '__main__':
     dataset_download_parallel(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        max_concurrent_orders=50,
+        resume_dir='20260127_161535_SR',   # Set to None to start a new download
+        max_concurrent_orders=100, # Planet allows this many
         product_type='SR',
         start_month=1,
         num_windows=36,
         timestep=10,
         window_buffer=3,
+        concurrent_scene_searches=9, # You hit a lot of rate limits at 10
         max_cloud_cover=1.0  # Don't filter by scene-level clouds; rely on AOI effective_coverage
     )
 
