@@ -105,12 +105,11 @@ def create_labels(download_dir=None, version_name=None, sensor='sentinel2'):
         file_id = stack_file.replace('_stack.tif', '')
         stack_path = os.path.join(version_dir, stack_file)
 
-        # Parse from filename: "{unique_id}_{site_numeric}_{YYYY.MM.DD}_stack.tif"
-        # NOTE: unique_id in filename may not match irrigation table, so we use site + date
+        # Parse from filename: "{site_numeric}_{YYYY.MM.DD}_stack.tif"
         try:
             parts = file_id.split('_')
-            site_numeric = parts[1]  # e.g., "5119273"
-            date_str = parts[2]      # e.g., "2021.09.16"
+            site_numeric = parts[0]  # e.g., "5119273"
+            date_str = parts[1]      # e.g., "2021.09.16"
             date_parts = date_str.split('.')
             year, month, day = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
             site_id = f"id_{site_numeric}"
