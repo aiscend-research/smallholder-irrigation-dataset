@@ -640,17 +640,20 @@ def visualize_time_series_stack(out_dir, file_id):
     plt.tight_layout()
     plt.show()
 
-def dataset_download(csv, download_dir, 
+def dataset_download(csv, download_dir,
                 collection='L1C',
                 start_month=1,
                 num_windows=36,
                 timestep=10,
                 window_buffer=3,
-                target_size=100, 
-                subset=False):
+                target_size=100,
+                subset=False,
+                resume_dir=None):
     """
     Download and stack images for each site represented by a row in a CSV.
-    
+
+    Output files are named {site_id}_{YYYY.MM.DD}_stack.tif (site_id + date).
+
     Args:
         csv: Path to csv with columns: x, y, site_id, year, month, day
         download_dir: Output directory for all files
@@ -660,23 +663,31 @@ def dataset_download(csv, download_dir,
         timestep: Days per timestep
         window_buffer: Extra timesteps before/after for augmentation
         target_size: Size in pixels for all images (default 100x100)
-    
+        resume_dir: If provided, resume downloading into this existing directory
+                    (e.g., '20260107_180813'). Skips sites with existing stacks.
+
     Returns:
         str: Success message
     """
 
     initialize_earthengine()
 
-    # Create a version folder for this download based on datetime and save a metadata file within with all the arguments used
-    version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(download_dir, version_name)
-    os.makedirs(out_dir, exist_ok=False)
+    # Create or resume into version folder
+    if resume_dir:
+        out_dir = os.path.join(download_dir, resume_dir)
+        if not os.path.exists(out_dir):
+            raise ValueError(f"Resume directory does not exist: {out_dir}")
+        logging.info(f"Resuming download into existing directory: {out_dir}")
+    else:
+        version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = os.path.join(download_dir, version_name)
+        os.makedirs(out_dir, exist_ok=False)
 
-    # Save metadata for this run
-    args_dict = locals().copy()
-    metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
-    with open(metadata_path, "w") as f:
-        json.dump(args_dict, f, indent=2)
+        # Save metadata for this run (only for new downloads)
+        args_dict = locals().copy()
+        metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
+        with open(metadata_path, "w") as f:
+            json.dump(args_dict, f, indent=2)
     
     # Read in the each observation to download data for
     data = pd.read_csv(csv)
@@ -684,9 +695,12 @@ def dataset_download(csv, download_dir,
     if subset == True:
         data = data.head(10)
 
-    logging.info(f"Starting to process {len(data)} rows from {LABEL_CSV}")
+    logging.info(f"Starting to process {len(data)} rows from {csv}")
 
     rows = list(data.iterrows())
+    skipped = 0
+    processed = 0
+
     for _, row in rows:
 
         # Extract row data
@@ -698,6 +712,13 @@ def dataset_download(csv, download_dir,
         sid_raw = str(row['site_id'])
         sid_for_name = sid_raw.replace('id_', '')
         file_id = f"{sid_for_name}_{date_str}"
+
+        # Skip if stack already exists (resume capability)
+        stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
+        if os.path.exists(stack_path):
+            logging.info(f"{file_id}: Stack already exists, skipping")
+            skipped += 1
+            continue
 
         logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
 
@@ -717,10 +738,12 @@ def dataset_download(csv, download_dir,
         )
 
         logging.info(f"Completed {file_id}")
+        processed += 1
 
     get_stats(out_dir)
 
-    return f"Processed {file_id} successfully"
+    logging.info(f"Download complete: {processed} processed, {skipped} skipped (already exist)")
+    return f"Processed {processed} sites, skipped {skipped} existing"
 
 def get_stats(out_dir):
     """
