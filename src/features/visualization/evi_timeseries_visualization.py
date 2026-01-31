@@ -303,7 +303,7 @@ def _get_timestep_dates(stack_path, n_timesteps, sensor='sentinel2'):
 
 def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
                         n_samples=30, smooth_window=3, show_individual=True,
-                        title=None, start_day_of_year=None, sensor='sentinel2'):
+                        title=None, start_day_of_year=None, sensor='sentinel2', x_axis=True):
     """
     Plot EVI time series for irrigated vs non-irrigated pixels.
 
@@ -322,7 +322,7 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
         title: Plot title
         start_day_of_year: (Deprecated) No longer used - dates are from metadata
         sensor (str): Sensor type ('sentinel2' or 'planetscope')
-
+        x_axis (bool): Whether to display the x-axis
     Returns:
         matplotlib.axes.Axes: The axes with the plot
     """
@@ -393,13 +393,17 @@ def plot_evi_timeseries(stack_path, label_path=None, ax=None, figsize=(12, 6),
     # Legend
     ax.legend(loc='upper right')
 
-    # Format x-axis as dates
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
-
     # Labels
-    ax.set_xlabel('Date')
+    if x_axis:
+        ax.set_xlabel('Date')
+        
+        # Format x-axis as dates
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    else:
+        ax.set_xlabel('')
+        ax.set_xticks([])
     ax.set_ylabel('EVI')
     ax.set_ylim(-0.1, 0.7)
 
