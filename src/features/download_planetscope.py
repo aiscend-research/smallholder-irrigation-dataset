@@ -17,7 +17,7 @@ Usage:
 
     dataset_download(
         csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-        download_dir='data/features_planet',
+        download_dir='data/features/planetscope',
         start_month=1,
         num_windows=36,
         timestep=10,
@@ -1658,7 +1658,7 @@ if __name__ == '__main__':
     )
 
     data_root = get_data_root()
-    DOWNLOAD_DIR = os.path.join(data_root, "features_planet")
+    DOWNLOAD_DIR = os.path.join(data_root, "features/planetscope")
 
     # Use parallel downloading for efficiency
     # With 20 concurrent orders and ~30 min processing each:

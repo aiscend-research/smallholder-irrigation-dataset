@@ -833,7 +833,7 @@ if __name__ == '__main__':
     LABEL_CSV    = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 
     data_root = get_data_root()
-    DOWNLOAD_DIR = os.path.join(data_root, "features")
+    DOWNLOAD_DIR = os.path.join(data_root, "features/sentinel2")
 
     dataset_download(
         csv=LABEL_CSV,

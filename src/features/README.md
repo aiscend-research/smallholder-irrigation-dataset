@@ -236,7 +236,7 @@ Or run directly:
 python src/features/download_sentinel2.py
 ```
 
-Downloads are saved to a timestamped version folder (e.g., `data/features/20260107_180813/`).
+Downloads are saved to a timestamped version folder (e.g., `data/features/sentinel2/20260107_180813/`).
 
 ### Dataset Location
 The dataset is located on the cluster at `/home/waves/data/smallholder-irrigation-dataset/data/`. There are three versions: 
@@ -367,7 +367,7 @@ from src.features.download_planetscope import dataset_download_parallel
 
 results = dataset_download_parallel(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     max_concurrent_orders=100,      # Orders pending at Planet at once
     concurrent_scene_searches=10,   # Sites to search in parallel
     product_type='SR',              # 'SR' (Surface Reflectance) or 'TOA'
@@ -387,7 +387,7 @@ from src.features.download_planetscope import dataset_download_parallel
 
 results = dataset_download_parallel(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     max_concurrent_orders=100,
     concurrent_scene_searches=10,
     product_type='SR',
@@ -402,7 +402,7 @@ print(f'Completed: {sum(1 for v in results.values() if v == \"success\")} succes
 ```python
 results = dataset_download_parallel(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     resume_dir='20260127_161535_SR',  # Existing folder to resume into
     max_concurrent_orders=100,
     concurrent_scene_searches=10,
@@ -418,7 +418,7 @@ from src.features.download_planetscope import dataset_download
 
 dataset_download(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     product_type='SR',
     max_cloud_cover=0.5,
     subset=True  # Only process first 10 rows for testing
@@ -443,7 +443,7 @@ dataset_download(
 For each labeled site, the following files are created in the version folder:
 
 ```
-data/features_planet/20260127_161535_SR/
+data/features/planetscope/20260127_161535_SR/
 ├── 1_5130509_2016.09.09_stack.tif        # Unmasked stack (168 bands)
 ├── 1_5130509_2016.09.09_stack_masked.tif # Cloud-masked stack (bad pixels = 0)
 ├── 1_5130509_2016.09.09_metadata.json    # Per-window metadata
@@ -499,15 +499,15 @@ data = data.reshape(num_bands, num_windows, 334, 334).transpose(1, 0, 2, 3)
 
 **Watch the log in real-time**:
 ```bash
-tail -f data/features_planet/download_*.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
+tail -f data/features/planetscope/download_*.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
 ```
 
 **Check progress summary**:
 ```bash
 # Count orders and completions
-echo "Orders submitted:" && grep -c "Submitted order" data/features_planet/*.log
-echo "Orders completed:" && grep -c "Order complete" data/features_planet/*.log
-echo "Total stacks:" && ls data/features_planet/*_SR/*_stack.tif 2>/dev/null | wc -l
+echo "Orders submitted:" && grep -c "Submitted order" data/features/planetscope/*.log
+echo "Orders completed:" && grep -c "Order complete" data/features/planetscope/*.log
+echo "Total stacks:" && ls data/features/planetscope/*_SR/*_stack.tif 2>/dev/null | wc -l
 ```
 
 **Progress messages to look for**:
@@ -621,7 +621,7 @@ from src.features.create_label_band import create_labels
 create_labels('data/features', '20260107_180813', sensor='sentinel2')
 
 # PlanetScope
-create_labels('data/features_planet', '20260127_161535_SR', sensor='planetscope')
+create_labels('data/features/planetscope', '20260127_161535_SR', sensor='planetscope')
 ```
 
 ### Current Dataset
@@ -659,8 +659,8 @@ plot_satellite_with_mask(stack_path, label_path, sensor='sentinel2')
 plot_satellite_with_mask(stack_path, label_path, sensor='planetscope')
 
 # Get data directory for each sensor
-s2_dir = get_features_dir(sensor='sentinel2')   # data/features/20260107_180813
-ps_dir = get_features_dir(sensor='planetscope') # data/features_planet/20260127_161535_SR
+s2_dir = get_features_dir(sensor='sentinel2')   # data/features/sentinel2/20260107_180813
+ps_dir = get_features_dir(sensor='planetscope') # data/features/planetscope/20260127_161535_SR
 ```
 
 ### EVI Time Series Visualization
@@ -758,7 +758,7 @@ SENSOR_CONFIG = {
         'n_bands': 4,
         'band_indices': {'blue': 0, 'green': 1, 'red': 2, 'nir': 3},
         'default_version': '20260127_161535_SR',
-        'data_dir': 'features_planet',
+        'data_dir': 'features/planetscope',
         'normalization': 3000.0,
     }
 }

@@ -162,7 +162,7 @@ from src.features.download_planetscope import dataset_download_parallel
 
 results = dataset_download_parallel(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     max_concurrent_orders=100,      # Orders pending at Planet at once
     concurrent_scene_searches=10,   # Sites to search in parallel
     product_type='SR',              # 'SR' (Surface Reflectance) or 'TOA'
@@ -178,7 +178,7 @@ caffeinate -i -s python -c "
 from src.features.download_planetscope import dataset_download_parallel
 dataset_download_parallel(
     csv='data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv',
-    download_dir='data/features_planet',
+    download_dir='data/features/planetscope',
     max_concurrent_orders=100,
     concurrent_scene_searches=10,
     product_type='SR',
@@ -224,12 +224,12 @@ dataset_download_parallel(
 **Monitoring Progress**:
 ```bash
 # Watch the log in real-time
-tail -f data/features_planet/download_YYYYMMDD_quickpoll.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
+tail -f data/features/planetscope/download_YYYYMMDD_quickpoll.log | grep -E "(Submitted|Order complete|Quick poll|downloaded)"
 
 # Count progress
-echo "Orders submitted:" && grep -c "Submitted order" data/features_planet/*.log
-echo "Orders completed:" && grep -c "Order complete" data/features_planet/*.log
-echo "Total stacks:" && ls data/features_planet/*/\*_stack.tif | wc -l
+echo "Orders submitted:" && grep -c "Submitted order" data/features/planetscope/*.log
+echo "Orders completed:" && grep -c "Order complete" data/features/planetscope/*.log
+echo "Total stacks:" && ls data/features/planetscope/*/\*_stack.tif | wc -l
 ```
 
 ### 3. Label Quality Control (Inter-Rater Comparison)

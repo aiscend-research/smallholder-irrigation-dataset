@@ -7,8 +7,8 @@ Output:
     A label .tif with 9 bands at the same resolution as the original image.
 
 Supports both Sentinel-2 and PlanetScope via the 'sensor' parameter:
-    - sentinel2: Uses data/features/ directory
-    - planetscope: Uses data/features_planet/ directory
+    - sentinel2: Uses data/features/sentinel2/ directory
+    - planetscope: Uses data/features/planetscope/ directory
 '''
 
 import os
@@ -36,11 +36,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 SENSOR_CONFIG = {
     'sentinel2': {
         'default_version': '20260107_180813',
-        'data_dir': 'features',
+        'data_dir': 'features/sentinel2',
     },
     'planetscope': {
         'default_version': '20260127_161535_SR',
-        'data_dir': 'features_planet',
+        'data_dir': 'features/planetscope',
     }
 }
 

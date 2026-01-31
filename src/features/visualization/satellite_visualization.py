@@ -38,7 +38,7 @@ SENSOR_CONFIG = {
             'B7': 5, 'B8': 6, 'B8A': 7, 'B11': 8, 'B12': 9,
         },
         'default_version': '20260107_180813',
-        'data_dir': 'features',
+        'data_dir': 'features/sentinel2',
         'normalization': 3000.0,
     },
     'planetscope': {
@@ -52,7 +52,7 @@ SENSOR_CONFIG = {
             'nir': 3,
         },
         'default_version': '20260127_161535_SR',
-        'data_dir': 'features_planet',
+        'data_dir': 'features/planetscope',
         'normalization': 3000.0,
     }
 }
