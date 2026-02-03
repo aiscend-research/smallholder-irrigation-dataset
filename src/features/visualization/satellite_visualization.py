@@ -441,7 +441,7 @@ def plot_satellite_with_mask(stack_path, timestep=None, ax=None, figsize=(10, 10
 def find_matching_stack_for_screenshot(survey, internal_id, month, day, year,
                                         version=None, sensor='sentinel2'):
     """
-    Find the satellite stack file that matches a GEE screenshot.
+    Find the satellite stack file that matches a GEP screenshot.
 
     Parameters:
         survey (str): Survey ID (e.g., '201-225')

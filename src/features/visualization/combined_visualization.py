@@ -2,7 +2,7 @@
 Combined visualization module for multi-source satellite comparisons.
 
 This module orchestrates comparisons between:
-- GEE screenshots (with polygon overlays)
+- GEP screenshots (Google Earth Pro, with polygon overlays)
 - Sentinel-2 RGB imagery (with pixel-level masks)
 - PlanetScope RGB imagery (with pixel-level masks)
 - EVI time series from both sensors
@@ -22,7 +22,7 @@ from .satellite_visualization import (
     find_labels_for_stack, plot_satellite_with_mask, get_irrigation_table_path
 )
 from .evi_timeseries_visualization import plot_evi_timeseries
-from .gee_screenshot_visualization import (
+from .gep_screenshot_visualization import (
     plot_screenshot_with_polygons, list_available_screenshots, get_screenshot_dir
 )
 
@@ -39,11 +39,11 @@ def find_all_available_sources(site_id, year, month, day,
         planet_version (str, optional): PlanetScope version folder
 
     Returns:
-        dict: Dictionary with keys 'gee_screenshot', 'sentinel_stack', 'planet_stack',
+        dict: Dictionary with keys 'gep_screenshot', 'sentinel_stack', 'planet_stack',
               each containing the path or None if not available
     """
     sources = {
-        'gee_screenshot': None,
+        'gep_screenshot': None,
         'sentinel_stack': None,
         'planet_stack': None,
         'sentinel_labels': [],
@@ -62,7 +62,7 @@ def find_all_available_sources(site_id, year, month, day,
         sources['planet_stack'] = planet_stack
         sources['planet_labels'] = find_labels_for_stack(planet_stack)
 
-    # Look for GEE screenshot - need to match via irrigation table
+    # Look for GEP screenshot - need to match via irrigation table
     try:
         irrigation_df = pd.read_csv(get_irrigation_table_path())
 
@@ -98,11 +98,11 @@ def find_all_available_sources(site_id, year, month, day,
                                 ss['year'] == year and
                                 ss['month'] == month and
                                 ss['day'] == day):
-                                sources['gee_screenshot'] = ss['path']
-                                sources['gee_info'] = ss
+                                sources['gep_screenshot'] = ss['path']
+                                sources['gep_info'] = ss
                                 break
     except Exception as e:
-        print(f"Warning: Could not search for GEE screenshot: {e}")
+        print(f"Warning: Could not search for GEP screenshot: {e}")
 
     return sources
 
@@ -114,7 +114,7 @@ def plot_combined_comparison(site_id, year, month, day,
     Create a combined comparison figure showing all available data sources.
 
     Layout adapts based on available data:
-    - Row 1: [GEE Screenshot] [Sentinel-2 RGB] [PlanetScope RGB]
+    - Row 1: [GEP Screenshot] [Sentinel-2 RGB] [PlanetScope RGB]
     - Row 2: [Sentinel-2 EVI time series - full width] (if show_evi)
     - Row 3: [PlanetScope EVI time series - full width] (if show_evi)
 
@@ -138,7 +138,7 @@ def plot_combined_comparison(site_id, year, month, day,
 
     # Count how many image sources we have
     n_images = sum([
-        sources['gee_screenshot'] is not None,
+        sources['gep_screenshot'] is not None,
         sources['sentinel_stack'] is not None,
         sources['planet_stack'] is not None,
     ])
@@ -170,23 +170,23 @@ def plot_combined_comparison(site_id, year, month, day,
     col_idx = 0
 
     # Row 1: Image panels
-    # GEE Screenshot
-    if sources['gee_screenshot'] is not None:
-        ax_gee = fig.add_subplot(gs[0, col_idx])
+    # GEP Screenshot
+    if sources['gep_screenshot'] is not None:
+        ax_gep = fig.add_subplot(gs[0, col_idx])
         try:
-            info = sources.get('gee_info', {})
+            info = sources.get('gep_info', {})
             plot_screenshot_with_polygons(
-                screenshot_path=sources['gee_screenshot'],
+                screenshot_path=sources['gep_screenshot'],
                 survey=info.get('survey'),
                 internal_id=info.get('internal_id'),
                 month=month, day=day, year=year,
-                ax=ax_gee, show_legend=True
+                ax=ax_gep, show_legend=True
             )
-            ax_gee.set_title('GEE Screenshot')
+            ax_gep.set_title('GEP Screenshot')
         except Exception as e:
-            ax_gee.text(0.5, 0.5, f'Error loading GEE screenshot:\n{e}',
-                       ha='center', va='center', transform=ax_gee.transAxes)
-            ax_gee.set_title('GEE Screenshot (Error)')
+            ax_gep.text(0.5, 0.5, f'Error loading GEP screenshot:\n{e}',
+                       ha='center', va='center', transform=ax_gep.transAxes)
+            ax_gep.set_title('GEP Screenshot (Error)')
         col_idx += 1
 
     # Sentinel-2 RGB
@@ -369,7 +369,7 @@ def plot_single_sensor_figure(site_id, year, month, day, sensor='sentinel2',
     Create a publication-quality 3-panel figure for a single sensor.
 
     Layout:
-    - Top-left: GEE screenshot (if available) or RGB
+    - Top-left: GEP screenshot (if available) or RGB
     - Top-right: RGB with irrigation mask overlay
     - Bottom: EVI time series (full width)
 
@@ -403,8 +403,8 @@ def plot_single_sensor_figure(site_id, year, month, day, sensor='sentinel2',
     if not labels:
         raise ValueError(f"No labels found for {sensor} stack at {stack_path}")
 
-    # Check for GEE screenshot
-    has_gee = sources.get('gee_screenshot') is not None
+    # Check for GEP screenshot
+    has_gep = sources.get('gep_screenshot') is not None
 
     # Create figure with GridSpec
     fig = plt.figure(figsize=figsize)
@@ -414,13 +414,13 @@ def plot_single_sensor_figure(site_id, year, month, day, sensor='sentinel2',
     panel_idx = 0
     panel_labels = ['(a)', '(b)', '(c)']
 
-    # Top-left: GEE screenshot if available, otherwise duplicate RGB
+    # Top-left: GEP screenshot if available, otherwise duplicate RGB
     ax1 = fig.add_subplot(gs[0, 0])
-    if has_gee:
+    if has_gep:
         try:
-            info = sources.get('gee_info', {})
+            info = sources.get('gep_info', {})
             plot_screenshot_with_polygons(
-                screenshot_path=sources['gee_screenshot'],
+                screenshot_path=sources['gep_screenshot'],
                 survey=info.get('survey'),
                 internal_id=info.get('internal_id'),
                 month=month, day=day, year=year,
@@ -428,11 +428,11 @@ def plot_single_sensor_figure(site_id, year, month, day, sensor='sentinel2',
             )
             ax1.set_title(f'{panel_labels[panel_idx]} Google Earth Pro', fontsize=12)
         except Exception as e:
-            ax1.text(0.5, 0.5, f'Error loading GEE:\n{e}',
+            ax1.text(0.5, 0.5, f'Error loading GEP:\n{e}',
                     ha='center', va='center', transform=ax1.transAxes)
-            ax1.set_title(f'{panel_labels[panel_idx]} GEE Screenshot (Error)', fontsize=12)
+            ax1.set_title(f'{panel_labels[panel_idx]} GEP Screenshot (Error)', fontsize=12)
     else:
-        # Show RGB without mask as alternative to GEE
+        # Show RGB without mask as alternative to GEP
         from .satellite_visualization import load_rgb_from_stack, get_labeled_timestep
         try:
             timestep = get_labeled_timestep(stack_path, sensor)
