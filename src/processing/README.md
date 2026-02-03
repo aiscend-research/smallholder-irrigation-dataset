@@ -211,6 +211,30 @@ These habits will help keep the project organized, make collaboration easier, an
 
 ---
 
+### 📅 PS Date Adjustment
+
+Peter Siame (PS) is the only labeler who performed annotations in Zambia, while all other labelers worked from California. Due to the timezone difference (Zambia is UTC+2, California is UTC-7/8), when PS labeled an image on a given date in Zambia, the recorded date was one day later than the dates recorded by California-based labelers viewing the same imagery. The script `adjust_ps_dates.py` corrects this by subtracting one day from all PS annotation dates in the master dataset files to align them with the other labelers.
+
+**What it does:**
+- Adjusts dates in `latest_irrigation_table.csv`
+- Adjusts dates in `latest_polygons_table.csv`
+- Adjusts dates in `latest_irrigation_data.geojson`
+- Adjusts dates in `latest_polygons.geojson`
+
+**How to use:**
+```bash
+python src/processing/adjust_ps_dates.py
+```
+
+Or specify a different data directory:
+```bash
+python src/processing/adjust_ps_dates.py --data-dir data/labels/labeled_surveys/random_sample
+```
+
+**Note:** This script modifies files in place. It should be run once after regenerating the master files with `batch_process.py`. The adjustment is idempotent only if you regenerate the master files first - running it multiple times without regenerating will keep subtracting days.
+
+---
+
 ## Running Tests
 
 ```bash

@@ -177,6 +177,9 @@ data/sampling/samples/*
 !data/targeting/
 data/targeting/features/
 data/modeling
+# !data/features
+# data/features/*
+#!data/features/20260107_180813/
 
 *.sh
 
@@ -210,3 +213,11 @@ data/labels/labeled_surveys/random_sample/images_districts_ag.csv
 
 .idea/*
 */.idea/*
+
+notebooks/find_vis_images.py
+src/features/visualize_tif.py
+data/labels/GEE_screenshots/*
+secrets/*
+
+src/features/tests/planet_download_visualizations/test_planet_downloads/*
+src/features/tests/planet_download_visualizations/test_planet_stack/*

@@ -20,10 +20,10 @@ This folder contains a **machine learning pipeline for running experiments on mu
 Example layout:
 ```
 data/modeling/
-├── 1_5168346_2023.09.06_image.tif
-├── 1_5168346_2023.09.06_label.tif
-├── 1_5168346_2023.09.06_image.json
-└── 1_5168346_2023.09.06_label.json
+├── 5168346_2023.09.06_image.tif
+├── 5168346_2023.09.06_label.tif
+├── 5168346_2023.09.06_image.json
+└── 5168346_2023.09.06_label.json
 ```
 
 ---

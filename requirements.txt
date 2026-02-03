@@ -12,3 +12,6 @@ tqdm~=4.67.1
 scikit-learn~=1.7.1
 joblib~=1.5.1
 rapidfuzz>=3.13.0
+planet>=3.4.0
+earthengine-api>=1.7.10
+aiohttp>=3.13.3

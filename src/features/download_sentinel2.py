@@ -640,19 +640,22 @@ def visualize_time_series_stack(out_dir, file_id):
     plt.tight_layout()
     plt.show()
 
-def dataset_download(csv, download_dir, 
+def dataset_download(csv, download_dir,
                 collection='L1C',
                 start_month=1,
                 num_windows=36,
                 timestep=10,
                 window_buffer=3,
-                target_size=100, 
-                subset=False):
+                target_size=100,
+                subset=False,
+                resume_dir=None):
     """
     Download and stack images for each site represented by a row in a CSV.
-    
+
+    Output files are named {site_id}_{YYYY.MM.DD}_stack.tif (site_id + date).
+
     Args:
-        csv: Path to csv with columns: x, y, unique_id, site_id, year, month, day
+        csv: Path to csv with columns: x, y, site_id, year, month, day
         download_dir: Output directory for all files
         collection: 'L1C' or 'L2A'
         start_month: Month to start time series (1=January, excluding buffer)
@@ -660,23 +663,31 @@ def dataset_download(csv, download_dir,
         timestep: Days per timestep
         window_buffer: Extra timesteps before/after for augmentation
         target_size: Size in pixels for all images (default 100x100)
-    
+        resume_dir: If provided, resume downloading into this existing directory
+                    (e.g., '20260107_180813'). Skips sites with existing stacks.
+
     Returns:
         str: Success message
     """
 
     initialize_earthengine()
 
-    # Create a version folder for this download based on datetime and save a metadata file within with all the arguments used
-    version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(download_dir, version_name)
-    os.makedirs(out_dir, exist_ok=False)
+    # Create or resume into version folder
+    if resume_dir:
+        out_dir = os.path.join(download_dir, resume_dir)
+        if not os.path.exists(out_dir):
+            raise ValueError(f"Resume directory does not exist: {out_dir}")
+        logging.info(f"Resuming download into existing directory: {out_dir}")
+    else:
+        version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = os.path.join(download_dir, version_name)
+        os.makedirs(out_dir, exist_ok=False)
 
-    # Save metadata for this run
-    args_dict = locals().copy()
-    metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
-    with open(metadata_path, "w") as f:
-        json.dump(args_dict, f, indent=2)
+        # Save metadata for this run (only for new downloads)
+        args_dict = locals().copy()
+        metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
+        with open(metadata_path, "w") as f:
+            json.dump(args_dict, f, indent=2)
     
     # Read in the each observation to download data for
     data = pd.read_csv(csv)
@@ -684,22 +695,31 @@ def dataset_download(csv, download_dir,
     if subset == True:
         data = data.head(10)
 
-    logging.info(f"Starting to process {len(data)} rows from {LABEL_CSV}")
+    logging.info(f"Starting to process {len(data)} rows from {csv}")
 
     rows = list(data.iterrows())
+    skipped = 0
+    processed = 0
+
     for _, row in rows:
-    
+
         # Extract row data
         lat, lon = row['y'], row['x']
-        uid = row['unique_id']
         date = datetime(int(row['year']), int(row['month']), int(row['day']))
-        
-        # Create file naming
+
+        # Create file naming: site_id + date (no UID prefix)
         date_str = f"{date.year}.{date.month:02d}.{date.day:02d}"
         sid_raw = str(row['site_id'])
         sid_for_name = sid_raw.replace('id_', '')
-        file_id = f"{uid}_{sid_for_name}_{date_str}"
-        
+        file_id = f"{sid_for_name}_{date_str}"
+
+        # Skip if stack already exists (resume capability)
+        stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
+        if os.path.exists(stack_path):
+            logging.info(f"{file_id}: Stack already exists, skipping")
+            skipped += 1
+            continue
+
         logging.info(f"Processing {file_id} at ({lat:.4f}, {lon:.4f})")
 
         # Download and stack - pass all parameters through
@@ -716,23 +736,14 @@ def dataset_download(csv, download_dir,
             window_buffer=window_buffer,
             target_size=target_size
         )
-        
-        # Add unique_id to metadata (for matching back to CSV)
-        metadata_file = os.path.join(out_dir, f"{file_id}_metadata.json")
-        with open(metadata_file, 'r') as f:
-            metadata = json.load(f)
-        
-        metadata['unique_id'] = int(uid) if str(uid).isdigit() else uid
-        metadata['original_site_id'] = sid_raw
-        
-        with open(metadata_file, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
+
         logging.info(f"Completed {file_id}")
+        processed += 1
 
     get_stats(out_dir)
 
-    return f"Processed {file_id} successfully"
+    logging.info(f"Download complete: {processed} processed, {skipped} skipped (already exist)")
+    return f"Processed {processed} sites, skipped {skipped} existing"
 
 def get_stats(out_dir):
     """
@@ -822,7 +833,7 @@ if __name__ == '__main__':
     LABEL_CSV    = os.path.join(project_root, "data/labels/labeled_surveys/random_sample/latest_irrigation_table.csv")
 
     data_root = get_data_root()
-    DOWNLOAD_DIR = os.path.join(data_root, "features")
+    DOWNLOAD_DIR = os.path.join(data_root, "features/sentinel2")
 
     dataset_download(
         csv=LABEL_CSV,
@@ -833,5 +844,5 @@ if __name__ == '__main__':
         timestep=10,
         window_buffer=3,
         target_size=100,
-        subset=True  # Set to True to test with just 10 rows
+        subset=False  # Set to True to test with just 10 rows
     )

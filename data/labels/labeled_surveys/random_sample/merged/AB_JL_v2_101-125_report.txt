@@ -1,0 +1,1 @@
+Row 13 (internal_id 12, 1/9/2016): survey marked irrigation 5 (definitely irrgation) but no polygon with certainty 5 found.

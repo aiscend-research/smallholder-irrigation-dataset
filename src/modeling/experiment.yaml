@@ -23,9 +23,9 @@ data:
   # Output root
   data_dir: "data/modeling"
 
-  # GRIT cloud paths
-  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features_v2"
-  grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/dataset/labels"
+  # GRIT cluster paths
+  grit_images_dir: "/home/waves/data/smallholder-irrigation-dataset/data/features/sentinel2/20260107_180813"
+  grit_masks_dir:  "/home/waves/data/smallholder-irrigation-dataset/data/labels"
 
   # Label/Image bands used downstream
   label_bands: [2]                  # Band 2 for binary irrigation mask
