@@ -1,5 +1,5 @@
 # Smallholder Dry Season Irrigation Dataset
-
+This is a test
 ## Overview
 This repository defines and executes the sampling protocol for the smallholder dry season irrigation dataset in arid/semi-arid regions of Sub-Saharan Africa with a single rainy season. The goal is to ensure consistent, reproducible, and well-documented sampling that aligns with data download, labeling processes, and final dataset creation.
 
