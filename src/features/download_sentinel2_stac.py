@@ -387,8 +387,9 @@ if __name__ == "__main__":
     dataset_download_parallel(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        max_concurrent_sites=6,
-        subset=False,          # Full ~2,350-site run
+        max_concurrent_sites=3,         # Lowered from 6 — MPC throttling made 6 net-slower
+        resume_dir="20260526_010312",   # Resume into existing folder (keeps the ~26 sites already done)
+        subset=False,
         start_month=1,
         num_windows=36,
         timestep=10,
