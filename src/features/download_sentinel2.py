@@ -310,17 +310,18 @@ def custom_l1c_cloud_mask(img: ee.Image,
 #################################
 
 def retrieve_time_series_stack(
-    file_id: str, 
-    lat: float, 
-    lon: float, 
-    date: datetime, 
-    out_dir: str, 
+    file_id: str,
+    lat: float,
+    lon: float,
+    date: datetime,
+    out_dir: str,
     collection: str="L1C",
-    start_month: int=1, 
-    num_windows: int=36, 
-    timestep: int=10, 
+    start_month: int=1,
+    num_windows: int=36,
+    timestep: int=10,
     window_buffer: int=3,
-    target_size: int=100):
+    target_size: int=100,
+    scene_exporter=None):
     """
     Download and stack Sentinel-2 images over a time series.
     
@@ -370,18 +371,21 @@ def retrieve_time_series_stack(
         base_path = os.path.join(temp_dir, file_name)
         return base_path + ".tif", base_path + "_masked.tif", start_str, end_str
 
+    # Per-scene exporter: GEE by default, pluggable for STAC/etc.
+    exporter = scene_exporter if scene_exporter is not None else s2_image_exporter
+
     # Download images in parallel
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = []
-        
+
         for start, end in time_windows:
             unmasked_path, masked_path, start_str, end_str = get_file_paths(start, end)
-            
+
             # Check if either file is missing
             if not (os.path.exists(unmasked_path) and os.path.exists(masked_path)):
                 file_name_base = f"s2_{lat:.2f}_{lon:.2f}_{start_str}_{end_str}"
                 futures.append(executor.submit(
-                    s2_image_exporter, lat, lon, start_str, end_str, 
+                    exporter, lat, lon, start_str, end_str,
                     file_name_base, temp_dir, collection
                 ))
         
@@ -648,7 +652,8 @@ def dataset_download(csv, download_dir,
                 window_buffer=3,
                 target_size=100,
                 subset=False,
-                resume_dir=None):
+                resume_dir=None,
+                scene_exporter=None):
     """
     Download and stack images for each site represented by a row in a CSV.
 
@@ -670,7 +675,9 @@ def dataset_download(csv, download_dir,
         str: Success message
     """
 
-    initialize_earthengine()
+    # Only initialize Earth Engine if we're actually using the GEE exporter
+    if scene_exporter is None:
+        initialize_earthengine()
 
     # Create or resume into version folder
     if resume_dir:
@@ -683,8 +690,13 @@ def dataset_download(csv, download_dir,
         out_dir = os.path.join(download_dir, version_name)
         os.makedirs(out_dir, exist_ok=False)
 
-        # Save metadata for this run (only for new downloads)
-        args_dict = locals().copy()
+        # Save metadata for this run (only for new downloads).
+        # Drop non-serializable entries (e.g. the optional scene_exporter callable);
+        # record the exporter by name instead so the run is still reproducible.
+        args_dict = {k: v for k, v in locals().items()
+                     if isinstance(v, (str, int, float, bool, type(None)))}
+        if scene_exporter is not None:
+            args_dict["scene_exporter"] = getattr(scene_exporter, "__name__", repr(scene_exporter))
         metadata_path = os.path.join(out_dir, f"metadata_{version_name}.json")
         with open(metadata_path, "w") as f:
             json.dump(args_dict, f, indent=2)
@@ -734,7 +746,8 @@ def dataset_download(csv, download_dir,
             num_windows=num_windows,
             timestep=timestep,
             window_buffer=window_buffer,
-            target_size=target_size
+            target_size=target_size,
+            scene_exporter=scene_exporter,
         )
 
         logging.info(f"Completed {file_id}")
