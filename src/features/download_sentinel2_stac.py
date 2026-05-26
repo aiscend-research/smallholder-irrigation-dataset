@@ -33,14 +33,17 @@ Usage
     python src/features/download_sentinel2_stac.py
 """
 
+import json
 import logging
 import math
 import os
 import sys
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import pystac_client
 import planetary_computer
 import rasterio
@@ -56,6 +59,8 @@ if project_root not in sys.path:
 from src.features.download_sentinel2 import (
     S2_BANDS,
     dataset_download,
+    get_stats,
+    retrieve_time_series_stack,
 )
 from src.utils.utils import get_data_root
 
@@ -262,6 +267,108 @@ def s2_image_exporter_stac(
 
 
 # ---------------------------------------------------------------------------
+# Site-level parallel runner
+# ---------------------------------------------------------------------------
+def dataset_download_parallel(
+    csv: str,
+    download_dir: str,
+    max_concurrent_sites: int = 6,
+    subset: bool = False,
+    resume_dir: str = None,
+    start_month: int = 1,
+    num_windows: int = 36,
+    timestep: int = 10,
+    window_buffer: int = 3,
+    target_size: int = 100,
+):
+    """Like dataset_download() but processes N sites in parallel.
+
+    Each site already uses 10 internal threads for per-window fetches; with
+    max_concurrent_sites=6 we'll keep up to ~60 HTTPS connections open at once,
+    which MPC tolerates comfortably. Resume capability (skip-if-stack-exists)
+    is preserved.
+    """
+    # Version / resume folder
+    if resume_dir:
+        out_dir = os.path.join(download_dir, resume_dir)
+        if not os.path.exists(out_dir):
+            raise ValueError(f"Resume directory does not exist: {out_dir}")
+        logging.info(f"Resuming into existing directory: {out_dir}")
+    else:
+        version_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = os.path.join(download_dir, version_name)
+        os.makedirs(out_dir, exist_ok=False)
+        run_meta = {
+            "csv": csv,
+            "collection": "L2A",
+            "start_month": start_month,
+            "num_windows": num_windows,
+            "timestep": timestep,
+            "window_buffer": window_buffer,
+            "target_size": target_size,
+            "subset": subset,
+            "max_concurrent_sites": max_concurrent_sites,
+            "scene_exporter": "s2_image_exporter_stac",
+            "out_dir": out_dir,
+            "version_name": version_name,
+        }
+        with open(os.path.join(out_dir, f"metadata_{version_name}.json"), "w") as f:
+            json.dump(run_meta, f, indent=2)
+
+    data = pd.read_csv(csv)
+    if subset:
+        data = data.head(10)
+
+    rows = [r for _, r in data.iterrows()]
+    total = len(rows)
+    logging.info(f"Parallel run: {total} sites, {max_concurrent_sites} concurrent")
+
+    def process_one(row):
+        lat, lon = row["y"], row["x"]
+        date = datetime(int(row["year"]), int(row["month"]), int(row["day"]))
+        date_str = f"{date.year}.{date.month:02d}.{date.day:02d}"
+        sid = str(row["site_id"]).replace("id_", "")
+        file_id = f"{sid}_{date_str}"
+
+        stack_path = os.path.join(out_dir, f"{file_id}_stack.tif")
+        if os.path.exists(stack_path):
+            return ("skip", file_id, None)
+
+        try:
+            retrieve_time_series_stack(
+                file_id=file_id, lat=lat, lon=lon, date=date,
+                out_dir=out_dir, collection="L2A",
+                start_month=start_month, num_windows=num_windows,
+                timestep=timestep, window_buffer=window_buffer,
+                target_size=target_size,
+                scene_exporter=s2_image_exporter_stac,
+            )
+            return ("done", file_id, None)
+        except Exception as e:
+            return ("fail", file_id, str(e))
+
+    done = skipped = failed = 0
+    with ThreadPoolExecutor(max_workers=max_concurrent_sites) as ex:
+        futures = {ex.submit(process_one, r): r for r in rows}
+        for fut in as_completed(futures):
+            status, file_id, err = fut.result()
+            finished = done + skipped + failed + 1
+            if status == "done":
+                done += 1
+                logging.info(f"[{finished}/{total}] Completed {file_id}")
+            elif status == "skip":
+                skipped += 1
+                logging.info(f"[{finished}/{total}] Skipped (exists) {file_id}")
+            else:
+                failed += 1
+                logging.error(f"[{finished}/{total}] FAILED {file_id}: {err}")
+
+    get_stats(out_dir)
+    logging.info(f"Done: {done} completed, {skipped} skipped, {failed} failed")
+    return out_dir
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -277,15 +384,14 @@ if __name__ == "__main__":
     data_root = get_data_root()
     DOWNLOAD_DIR = os.path.join(data_root, "features/sentinel2")
 
-    dataset_download(
+    dataset_download_parallel(
         csv=LABEL_CSV,
         download_dir=DOWNLOAD_DIR,
-        collection="L2A",
+        max_concurrent_sites=6,
+        subset=False,          # Full ~2,350-site run
         start_month=1,
         num_windows=36,
         timestep=10,
         window_buffer=3,
         target_size=100,
-        subset=True,           # Flip to False for the full ~2,350-site run
-        scene_exporter=s2_image_exporter_stac,
     )
